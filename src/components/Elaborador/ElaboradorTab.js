@@ -235,20 +235,20 @@ const ElaboradorTab = ({ db, setDb, showAlert, setActiveTab, callIA, aiConfig })
                 <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
                     {/* Painel de Controle Bento */}
                     <div className="lg:col-span-8 space-y-4 md:space-y-8">
-                        <div className="bg-white dark:bg-zinc-900 p-6 md:p-12 rounded-[32px] md:rounded-[48px] shadow-2xl border border-zinc-200 dark:border-zinc-800 relative overflow-hidden group">
-                            <div className="absolute top-0 right-0 w-64 h-64 bg-amber-500/5 rounded-full -mr-32 -mt-32 blur-3xl group-hover:bg-amber-500/10 transition-all"></div>
+                        <div className="bg-white dark:bg-zinc-900 p-6 md:p-12 rounded-3xl md:rounded-[2rem] shadow-2xl border border-zinc-200 dark:border-zinc-800 relative overflow-hidden group">
+                            <div className="absolute top-0 right-0 w-64 h-64 bg-amber-500/10 rounded-full -mr-32 -mt-32 blur-3xl group-hover:bg-amber-500/10 transition-all"></div>
                             <h2 className="text-2xl md:text-4xl font-black text-zinc-800 dark:text-zinc-100 mb-6 md:mb-8 flex items-center gap-3">
-                                <i className="fa-solid fa-wand-magic-sparkles text-amber-500 animate-pulse"></i> Elaborador <span className="text-[10px] bg-amber-500/20 text-amber-600 px-3 py-1 rounded-full uppercase tracking-widest ml-2">PRO</span>
+                                <i className="fa-solid fa-wand-magic-sparkles text-amber-500 animate-pulse"></i> Elaborador <span className="text-xs bg-amber-500/10 text-amber-600 px-3 py-1 rounded-full uppercase tracking-widest ml-2">PRO</span>
                             </h2>
                             
                             <div className="space-y-6 md:space-y-8">
                                 <div>
-                                    <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-3 md:mb-4">Assunto ou Link de Material</label>
+                                    <label className="block text-xs font-black text-zinc-400 uppercase tracking-widest mb-3 md:mb-4">Assunto ou Link de Material</label>
                                     <div className="flex flex-col md:flex-row gap-3 md:gap-4">
-                                        <input type="text" value={config.subject} onChange={e => setConfig({...config, subject: e.target.value})} placeholder="Ex: Emergências Hipertensivas..." className="flex-1 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl md:rounded-[32px] p-5 md:p-6 font-black text-lg md:text-xl outline-none focus:ring-4 focus:ring-amber-500/10 transition-all shadow-inner" />
+                                        <input type="text" value={config.subject} onChange={e => setConfig({...config, subject: e.target.value})} placeholder="Ex: Emergências Hipertensivas..." className="flex-1 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl md:rounded-3xl p-5 md:p-6 font-black text-lg md:text-xl outline-none focus:ring-4 focus:ring-amber-500/20 transition-all shadow-inner" />
                                         <div className="relative shrink-0 w-full md:w-auto">
                                             <input type="file" accept=".pdf,.png,.jpg,.jpeg,.txt" onChange={handleFileUpload} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" />
-                                            <button className="w-full h-full py-4 px-8 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-amber-600 rounded-2xl md:rounded-[32px] font-black flex items-center justify-center gap-2 transition-all border border-zinc-200 dark:border-zinc-800">
+                                            <button className="w-full h-full py-4 px-8 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-amber-600 rounded-2xl md:rounded-3xl font-black flex items-center justify-center gap-2 transition-all border border-zinc-200 dark:border-zinc-800">
                                                 <i className="fa-solid fa-file-import text-xl"></i>
                                                 <span>Alimentar</span>
                                             </button>
@@ -267,19 +267,19 @@ const ElaboradorTab = ({ db, setDb, showAlert, setActiveTab, callIA, aiConfig })
 
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                     <div className="bg-zinc-50 dark:bg-zinc-950 p-6 rounded-[32px] border border-zinc-200 dark:border-zinc-800">
-                                        <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-4">Quantidade de Questões</label>
+                                        <label className="block text-xs font-black text-zinc-400 uppercase tracking-widest mb-4">Quantidade de Questões</label>
                                         <input type="range" min="5" max="50" step="5" value={config.num} onChange={e => setConfig({...config, num: parseInt(e.target.value)})} className="w-full h-3 bg-zinc-200 dark:bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-amber-500" />
                                         <div className="flex justify-between mt-4">
                                             <span className="text-2xl font-black text-amber-600">{config.num}</span>
-                                            <span className="text-[10px] font-black text-zinc-400 uppercase">Itens</span>
+                                            <span className="text-xs font-black text-zinc-400 uppercase">Itens</span>
                                         </div>
                                     </div>
 
                                     <div className="bg-zinc-50 dark:bg-zinc-950 p-6 rounded-[32px] border border-zinc-200 dark:border-zinc-800">
-                                        <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-4">Dificuldade</label>
+                                        <label className="block text-xs font-black text-zinc-400 uppercase tracking-widest mb-4">Dificuldade</label>
                                         <div className="flex gap-2">
                                             {['fácil', 'mediana', 'difícil', 'impossivel'].map(d => (
-                                                <button key={d} onClick={() => setConfig({...config, difficulty: d})} className={`flex-1 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all ${config.difficulty === d ? 'bg-amber-500 text-white shadow-lg' : 'bg-white dark:bg-zinc-900 text-zinc-400 border border-zinc-200 dark:border-zinc-800 hover:border-amber-500/50'}`}>
+                                                <button key={d} onClick={() => setConfig({...config, difficulty: d})} className={`flex-1 py-3 rounded-2xl text-xs font-black uppercase tracking-widest transition-all ${config.difficulty === d ? 'bg-amber-500 text-white shadow-lg' : 'bg-white dark:bg-zinc-900 text-zinc-400 border border-zinc-200 dark:border-zinc-800 hover:border-amber-500/50'}`}>
                                                     {d === 'impossivel' ? '🔥 Brutal' : d}
                                                 </button>
                                             ))}
@@ -293,14 +293,14 @@ const ElaboradorTab = ({ db, setDb, showAlert, setActiveTab, callIA, aiConfig })
                                         { id: 'ce', label: 'Certo/Errado', icon: 'fa-check-double' },
                                         { id: 'open', label: 'Discursiva', icon: 'fa-pen-to-square' }
                                     ].map(m => (
-                                        <div key={m.id} onClick={() => setConfig({...config, modality: m.id})} className={`p-5 md:p-6 rounded-2xl md:rounded-[32px] border-2 cursor-pointer transition-all flex flex-row md:flex-col items-center justify-center md:justify-start gap-4 md:gap-3 ${config.modality === m.id ? 'border-amber-500 bg-amber-50 dark:bg-amber-950/20 shadow-xl' : 'border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:scale-[1.02]'}`}>
+                                        <div key={m.id} onClick={() => setConfig({...config, modality: m.id})} className={`p-5 md:p-6 rounded-2xl md:rounded-3xl border-2 cursor-pointer transition-all flex flex-row md:flex-col items-center justify-center md:justify-start gap-4 md:gap-3 ${config.modality === m.id ? 'border-amber-500 bg-amber-50 dark:bg-amber-950/20 shadow-xl' : 'border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:scale-[1.02]'}`}>
                                             <div className={`w-10 h-10 md:w-12 md:h-12 rounded-xl md:rounded-2xl flex items-center justify-center text-lg md:text-xl ${config.modality === m.id ? 'bg-amber-500 text-white' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400'}`}><i className={`fa-solid ${m.icon}`}></i></div>
-                                            <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">{m.label}</span>
+                                            <span className="text-xs font-black uppercase tracking-widest text-zinc-500">{m.label}</span>
                                         </div>
                                     ))}
                                 </div>
 
-                                <button disabled={examState.isGenerating} onClick={generateExam} className="w-full py-6 md:py-8 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded-2xl md:rounded-[32px] font-black text-xl md:text-2xl shadow-2xl hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-4 mt-4 md:mt-8 disabled:opacity-50">
+                                <button disabled={examState.isGenerating} onClick={generateExam} className="w-full py-6 md:py-8 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded-2xl md:rounded-3xl font-black text-xl md:text-2xl shadow-2xl hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-4 mt-4 md:mt-8 disabled:opacity-50">
                                     {examState.isGenerating ? <i className="fa-solid fa-dna fa-spin"></i> : <i className="fa-solid fa-brain"></i>}
                                     {examState.isGenerating ? 'Processando...' : 'Gerar Simulado'}
                                 </button>
@@ -310,7 +310,7 @@ const ElaboradorTab = ({ db, setDb, showAlert, setActiveTab, callIA, aiConfig })
 
                     {/* Sidebar de Analytics e Histórico */}
                     <div className="lg:col-span-4 space-y-6">
-                        <div className="bg-gradient-to-br from-indigo-600 to-violet-700 p-8 rounded-[40px] text-white shadow-xl">
+                        <div className="bg-gradient-to-br from-indigo-600 to-violet-700 p-8 rounded-[2rem] text-white shadow-xl">
                             <h3 className="text-xl font-black mb-4">Seu Progresso</h3>
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="bg-white/10 backdrop-blur-md p-4 rounded-2xl">
@@ -324,7 +324,7 @@ const ElaboradorTab = ({ db, setDb, showAlert, setActiveTab, callIA, aiConfig })
                             </div>
                         </div>
 
-                        <div className="bg-white dark:bg-zinc-900 p-8 rounded-[40px] border border-zinc-200 dark:border-zinc-800 shadow-lg">
+                        <div className="bg-white dark:bg-zinc-900 p-8 rounded-[2rem] border border-zinc-200 dark:border-zinc-800 shadow-lg">
                             <h3 className="font-black text-sm uppercase tracking-widest text-zinc-400 mb-6 flex items-center gap-2"><i className="fa-solid fa-clock-rotate-left"></i> Histórico Recente</h3>
                             <div className="space-y-4">
                                 <div className="flex items-center gap-4 p-4 bg-zinc-50 dark:bg-zinc-950 rounded-2xl border border-zinc-100 dark:border-zinc-800">
@@ -356,11 +356,11 @@ const ElaboradorTab = ({ db, setDb, showAlert, setActiveTab, callIA, aiConfig })
                 <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8">
                     {/* Painel Central da Questão */}
                     <div className="lg:col-span-8">
-                        <div className="bg-white dark:bg-zinc-900 p-6 md:p-16 rounded-[32px] md:rounded-[48px] shadow-2xl border border-zinc-200 dark:border-zinc-800 min-h-[500px] flex flex-col relative">
+                        <div className="bg-white dark:bg-zinc-900 p-6 md:p-16 rounded-3xl md:rounded-[2rem] shadow-2xl border border-zinc-200 dark:border-zinc-800 min-h-[500px] flex flex-col relative">
                             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-10">
                                 <div className="flex items-center gap-2">
-                                    <span className="px-3 py-1.5 bg-zinc-100 dark:bg-zinc-800 text-[9px] md:text-[10px] font-black text-zinc-500 rounded-full uppercase tracking-widest">Questão {examState.currentIdx + 1} / {examState.questions.length}</span>
-                                    {config.modality === 'open' && <span className="px-3 py-1.5 bg-indigo-100 dark:bg-indigo-900/30 text-[9px] md:text-[10px] font-black text-indigo-500 rounded-full uppercase tracking-widest">Discursiva</span>}
+                                    <span className="px-3 py-1.5 bg-zinc-100 dark:bg-zinc-800 text-[9px] md:text-xs font-black text-zinc-500 rounded-full uppercase tracking-widest">Questão {examState.currentIdx + 1} / {examState.questions.length}</span>
+                                    {config.modality === 'open' && <span className="px-3 py-1.5 bg-indigo-100 dark:bg-indigo-900/30 text-[9px] md:text-xs font-black text-indigo-500 rounded-full uppercase tracking-widest">Discursiva</span>}
                                 </div>
                                 <div className="text-lg md:text-xl font-black text-zinc-800 dark:text-zinc-100 font-mono bg-zinc-100 dark:bg-zinc-800 px-4 md:px-6 py-2 rounded-xl md:rounded-2xl flex items-center gap-2 w-fit">
                                     <i className="fa-solid fa-clock text-amber-500 animate-pulse"></i> {formatTime(timer)}
@@ -372,7 +372,7 @@ const ElaboradorTab = ({ db, setDb, showAlert, setActiveTab, callIA, aiConfig })
                                 
                                 <div className="space-y-3 md:space-y-4">
                                     {config.modality === 'open' ? (
-                                        <textarea value={examState.answers[q.id] || ''} onChange={e => setExamState(p => ({ ...p, answers: { ...p.answers, [q.id]: e.target.value } }))} placeholder="Sua resposta clínica fundamentada..." className="w-full h-48 md:h-64 bg-zinc-50 dark:bg-zinc-950 border-2 border-zinc-200 dark:border-zinc-800 rounded-2xl md:rounded-[32px] p-6 md:p-8 text-base md:text-lg font-bold outline-none focus:border-amber-500 transition-all resize-none shadow-inner" />
+                                        <textarea value={examState.answers[q.id] || ''} onChange={e => setExamState(p => ({ ...p, answers: { ...p.answers, [q.id]: e.target.value } }))} placeholder="Sua resposta clínica fundamentada..." className="w-full h-48 md:h-64 bg-zinc-50 dark:bg-zinc-950 border-2 border-zinc-200 dark:border-zinc-800 rounded-2xl md:rounded-3xl p-6 md:p-8 text-base md:text-lg font-bold outline-none focus:border-amber-500 transition-all resize-none shadow-inner" />
                                     ) : (
                                         q.options.map((opt, idx) => (
                                             <button key={idx} onClick={() => setExamState(p => ({ ...p, answers: { ...p.answers, [q.id]: idx } }))} className={`w-full p-5 md:p-6 rounded-2xl md:rounded-[28px] border-2 text-left font-bold transition-all flex items-center gap-3 md:gap-4 group ${examState.answers[q.id] === idx ? 'border-amber-500 bg-amber-50 dark:bg-amber-950/20 shadow-lg' : 'border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 hover:bg-white dark:hover:bg-zinc-900 hover:border-zinc-300'}`}>
@@ -404,7 +404,7 @@ const ElaboradorTab = ({ db, setDb, showAlert, setActiveTab, callIA, aiConfig })
 
                     {/* Sidebar de Progresso da Prova */}
                     <div className="lg:col-span-4 space-y-6 hidden lg:block">
-                        <div className="bg-white dark:bg-zinc-900 p-8 rounded-[40px] border border-zinc-200 dark:border-zinc-800 shadow-xl sticky top-10">
+                        <div className="bg-white dark:bg-zinc-900 p-8 rounded-[2rem] border border-zinc-200 dark:border-zinc-800 shadow-xl sticky top-10">
                             <h3 className="font-black text-sm uppercase tracking-widest text-zinc-400 mb-8 flex items-center justify-between">
                                 Mapa da Prova
                                 <span className="text-amber-500">{Math.round((Object.keys(examState.answers).length / examState.questions.length) * 100)}%</span>
@@ -448,13 +448,13 @@ const ElaboradorTab = ({ db, setDb, showAlert, setActiveTab, callIA, aiConfig })
                         const detail = r.details.find(d => d.id === q.id);
                         const isExplaining = examState.explanation?.id === q.id;
                         return (
-                            <div key={q.id} className={`bg-white dark:bg-zinc-900 p-8 md:p-12 rounded-[40px] border-2 shadow-xl ${detail.correct ? 'border-emerald-100 dark:border-emerald-900/30 shadow-emerald-500/5' : 'border-rose-100 dark:border-rose-900/30 shadow-rose-500/5'}`}>
+                            <div key={q.id} className={`bg-white dark:bg-zinc-900 p-8 md:p-12 rounded-[2rem] border-2 shadow-xl ${detail.correct ? 'border-emerald-100 dark:border-emerald-900/30 shadow-emerald-500/5' : 'border-rose-100 dark:border-rose-900/30 shadow-rose-500/5'}`}>
                                 <div className="flex justify-between items-start mb-6">
                                     <div className="flex items-center gap-3">
-                                        <span className={`px-4 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${detail.correct ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'}`}>
+                                        <span className={`px-4 py-1 rounded-full text-xs font-black uppercase tracking-widest ${detail.correct ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'}`}>
                                             {detail.correct ? 'Acerto' : 'Erro'}
                                         </span>
-                                        <span className="text-zinc-400 font-black text-[10px] uppercase">Questão {idx + 1}</span>
+                                        <span className="text-zinc-400 font-black text-xs uppercase">Questão {idx + 1}</span>
                                     </div>
                                     <button onClick={() => handleExplainQuestion(q.id)} className="text-xs font-black text-amber-600 hover:text-amber-700 flex items-center gap-1.5 transition-all">
                                         <i className="fa-solid fa-brain"></i> Professor IA
@@ -465,7 +465,7 @@ const ElaboradorTab = ({ db, setDb, showAlert, setActiveTab, callIA, aiConfig })
                                 
                                 <div className="space-y-4">
                                     <div className="bg-zinc-50 dark:bg-zinc-950 p-6 rounded-2xl border border-zinc-100 dark:border-zinc-800">
-                                        <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Sua Resposta:</p>
+                                        <p className="text-xs font-black text-zinc-400 uppercase tracking-widest mb-2">Sua Resposta:</p>
                                         <p className={`font-bold ${detail.correct ? 'text-emerald-600' : 'text-rose-600'}`}>
                                             {config.modality === 'open' ? examState.answers[q.id] : (q.options ? q.options[examState.answers[q.id]] : 'Sem resposta')}
                                         </p>
@@ -473,7 +473,7 @@ const ElaboradorTab = ({ db, setDb, showAlert, setActiveTab, callIA, aiConfig })
 
                                     {!detail.correct && (
                                         <div className="bg-emerald-50/50 dark:bg-emerald-950/20 p-6 rounded-2xl border border-emerald-100 dark:border-emerald-900/40">
-                                            <p className="text-[10px] font-black text-emerald-600 uppercase tracking-widest mb-2">Gabarito:</p>
+                                            <p className="text-xs font-black text-emerald-600 uppercase tracking-widest mb-2">Gabarito:</p>
                                             <p className="font-bold text-emerald-800 dark:text-emerald-200">{config.modality === 'open' ? q.standardAnswer : q.options[q.correct]}</p>
                                         </div>
                                     )}
@@ -492,7 +492,7 @@ const ElaboradorTab = ({ db, setDb, showAlert, setActiveTab, callIA, aiConfig })
                                     
                                     {!isExplaining && (
                                         <div className="bg-zinc-50 dark:bg-zinc-950 p-6 rounded-2xl border border-zinc-100 dark:border-zinc-800">
-                                            <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-2">Comentário Rápido:</p>
+                                            <p className="text-xs font-black text-zinc-400 uppercase tracking-widest mb-2">Comentário Rápido:</p>
                                             <p className="text-sm font-bold text-zinc-600 dark:text-zinc-400">{detail.feedback}</p>
                                         </div>
                                     )}
