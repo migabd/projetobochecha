@@ -1,3 +1,6 @@
-"node_modules/" 
-"dist/" 
-".env" 
+node_modules/
+dist/
+.env
+calc_xor.py
+src/components/Fluxogramas/FluxogramasTab.js
+src/components/Elaborador/ElaboradorTab.js

@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { usePersistence } from './hooks/usePersistence';
 import { useAI } from './hooks/useAI';
-import FluxogramasTab from './components/Fluxogramas/FluxogramasTab';
-import ElaboradorTab from './components/Elaborador/ElaboradorTab';
-import { xorDecrypt } from './utils/crypto';
+import FluxogramasTab from './components/Fluxogramas/FluxogramasTab.jsx';
+import ElaboradorTab from './components/Elaborador/ElaboradorTab.jsx';
+import ChecklistsTab from './components/Checklists/ChecklistsTab.jsx';
+import GamesTab from './components/Games/GamesTab.jsx';
+import ResumosHtmlTab from './components/ResumosHtml/ResumosHtmlTab.jsx';
 
 const DEFAULT_SUBJECTS = [
     { id: 'cli', name: 'Clínica Médica', color: 'emerald' },
@@ -51,18 +53,7 @@ function App() {
     }, [aiConfig]);
 
     const handleLogin = () => {
-        // Chaves cifradas (geradas via calc_xor.py com chave "Gabriel")
-        const ENC_GIST_TOKEN = "LwwXBhYRBV5RXF0PBRkXFBYRVR4eExVfXlZfBh8=";
-        const ENC_GIST_ID = "BAkNDxkNDAkJDxkODAgPDA0ICAgIDA4ICA8NDA==";
-        const ENC_GEMINI = "AgscCRUfAxkaAxcDGRUPCBgWGR8fCB8PHwgfCBU=";
-
         if (keyword === 'Gabriel') {
-            const token = xorDecrypt(ENC_GIST_TOKEN, keyword);
-            const id = xorDecrypt(ENC_GIST_ID, keyword);
-            const key = xorDecrypt(ENC_GEMINI, keyword);
-
-            setGistConfig(p => ({ ...p, token, id }));
-            setAiConfig(p => ({ ...p, key }));
             setIsLoggedIn(true);
         } else {
             alert("Palavra-chave incorreta.");
@@ -106,20 +97,41 @@ function App() {
                 return <FluxogramasTab db={db} setDb={setDb} showAlert={alert} callIA={callIA} setLightbox={setLightbox} fluxogramaPlay={fluxogramaPlay} setFluxogramaPlay={setFluxogramaPlay} />;
             case 'elaborador':
                 return <ElaboradorTab db={db} setDb={setDb} showAlert={alert} setActiveTab={setActiveTab} callIA={callIA} aiConfig={aiConfig} />;
+            case 'checklists':
+                return <ChecklistsTab db={db} setDb={setDb} showAlert={alert} />;
+            case 'games':
+                return <GamesTab db={db} setDb={setDb} showAlert={alert} setLightbox={setLightbox} callIA={callIA} />;
+            case 'resumos':
+                return <ResumosHtmlTab db={db} setDb={setDb} showAlert={alert} callIA={callIA} />;
             default:
                 return (
                     <div className="p-10">
                         <h2 className="text-3xl font-black mb-6">Dashboard</h2>
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                            <button onClick={() => setActiveTab('fluxogramas')} className="p-8 bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-lg text-left">
+                            <button onClick={() => setActiveTab('fluxogramas')} className="p-8 bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-lg text-left hover:scale-[1.02] transition-all">
                                 <i className="fa-solid fa-diagram-project text-3xl text-blue-500 mb-4"></i>
                                 <h3 className="text-xl font-black">Fluxogramas</h3>
                                 <p className="text-zinc-500 text-sm">Treino ativo de condutas médicas.</p>
                             </button>
-                            <button onClick={() => setActiveTab('elaborador')} className="p-8 bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-lg text-left">
+                            <button onClick={() => setActiveTab('elaborador')} className="p-8 bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-lg text-left hover:scale-[1.02] transition-all">
                                 <i className="fa-solid fa-wand-magic-sparkles text-3xl text-amber-500 mb-4"></i>
                                 <h3 className="text-xl font-black">Elaborador</h3>
                                 <p className="text-zinc-500 text-sm">Geração de simulados por IA.</p>
+                            </button>
+                            <button onClick={() => setActiveTab('checklists')} className="p-8 bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-lg text-left hover:scale-[1.02] transition-all">
+                                <i className="fa-solid fa-list-check text-3xl text-emerald-500 mb-4"></i>
+                                <h3 className="text-xl font-black">Checklists</h3>
+                                <p className="text-zinc-500 text-sm">Protocolos clínicos passo-a-passo.</p>
+                            </button>
+                            <button onClick={() => setActiveTab('games')} className="p-8 bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-lg text-left hover:scale-[1.02] transition-all">
+                                <i className="fa-solid fa-gamepad text-3xl text-indigo-500 mb-4"></i>
+                                <h3 className="text-xl font-black">Memory Games</h3>
+                                <p className="text-zinc-500 text-sm">Memorização ativa por associação.</p>
+                            </button>
+                            <button onClick={() => setActiveTab('resumos')} className="p-8 bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-lg text-left hover:scale-[1.02] transition-all">
+                                <i className="fa-solid fa-file-code text-3xl text-rose-500 mb-4"></i>
+                                <h3 className="text-xl font-black">Resumos HTML</h3>
+                                <p className="text-zinc-500 text-sm">Material denso e formatado por IA.</p>
                             </button>
                         </div>
                     </div>
