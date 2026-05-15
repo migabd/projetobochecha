@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 
-const MentorIATab = ({ db, setDb, showAlert, callIA, aiLoading }) => {
+const MentorIATab = ({ db, setDb, showAlert, callIA, aiLoading, aiConfig, getPersonaInstruction }) => {
     const [chatInput, setChatInput] = useState('');
     const [messages, setMessages] = useState(db.chatMessages || []);
     const chatEndRef = useRef(null);
@@ -26,8 +26,9 @@ const MentorIATab = ({ db, setDb, showAlert, callIA, aiLoading }) => {
         setChatInput('');
 
         try {
-            // Build context from platform data (briefly)
-            const context = `[INSTRUÇÃO: Você é o Mentor IA PRO, um tutor médico de altíssimo nível. Responda de forma estratégica, clara e profunda. Se o usuário for sarcástico, responda à altura. Se ele pedir mnemônicos, crie os melhores. Suas respostas devem ser ricas em conteúdo médico.]\n\n`;
+            // Build context using persona
+            const personaInstruction = getPersonaInstruction(aiConfig.persona, 'chat');
+            const context = `[INSTRUÇÃO DE PERSONA: ${personaInstruction}]\n\n`;
             
             // Format history for callIA
             const history = newMessages.map(m => ({

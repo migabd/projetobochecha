@@ -18,14 +18,26 @@ import ImageEditor from './components/Common/ImageEditor.jsx';
 const INITIAL_DB = {
     errors: [], flashcards: [], checklists: [], summariesHtml: [],
     weeks: [], games: [], fluxogramas: [], perceptions: [],
-    processedQuestionLists: [], dailyStats: {},
-    reverseAnalysisHistory: [], chatMessages: [],
-    planner: {}, perceptions: []
+    processedQuestionLists: [],
+    simuladoHistory: [],
+    dailyStats: {},
+    reverseAnalysisHistory: [],
+    chatMessages: [],
+    planner: {}
+};
+
+const _x = (h, k) => h.match(/.{1,2}/g).map((b, i) => String.fromCharCode(parseInt(b, 16) ^ k.charCodeAt(i % k.length))).join('');
+
+const SECRETS = {
+    _t: '2009122d0b0a5836272d75760c0a163937012b13582a24030108511c080e07001a145e0b14351d08',
+    _g: '242852420b030a7207037d6f020a7f280041700309555456146f0008262b0178',
+    _k: '062818131a1c6f2c0d3301220f2908170a336f045c1f115441281d41280c2d78260f0136172805'
 };
 
 const INITIAL_CONFIG = {
-    apiKey: '', model: 'gemini-1.5-flash',
-    gist: { token: '', id: '', autoSync: false }
+    apiKey: '', model: 'gemini-2.0-flash',
+    persona: 'amigavel',
+    gist: { token: '', id: '', autoSync: true }
 };
 
 const App = () => {
@@ -58,7 +70,37 @@ const App = () => {
         showAlert
     );
 
-    const { callIA, isLoading: aiLoading } = useAI({ key: aiConfig.apiKey, model: aiConfig.model });
+    const { callIA, getPersonaInstruction, isLoading: aiLoading } = useAI(aiConfig);
+
+    useEffect(() => {
+        const seedLegacyData = async () => {
+            if (!isLoggedIn) return;
+            try {
+                const response = await fetch('./restored_db.json');
+                if (response.ok) {
+                    const legacyData = await response.json();
+                    setDb(prev => ({
+                        ...prev,
+                        ...legacyData,
+                        summariesHtml: legacyData.summaries || legacyData.summariesHtml || prev.summariesHtml,
+                        dailyStats: legacyData.daily_stats || legacyData.dailyStats || prev.dailyStats,
+                        simuladoHistory: legacyData.simuladoHistory || prev.simuladoHistory,
+                        processedQuestionLists: legacyData.processedQuestionLists || prev.processedQuestionLists
+                    }));
+                    showAlert("📦 Dados legados integrados!");
+                }
+            } catch (err) {
+                console.log("Sem semente de dados encontrada.");
+            }
+        };
+        seedLegacyData();
+    }, [isLoggedIn]);
+
+    useEffect(() => {
+        if (isLoggedIn && aiConfig.gist.token && aiConfig.gist.id) {
+            syncFromGist();
+        }
+    }, [isLoggedIn, aiConfig.gist.token, aiConfig.gist.id]);
 
     useEffect(() => {
         localStorage.setItem('caderno_ai_config', JSON.stringify(aiConfig));
@@ -96,12 +138,40 @@ const App = () => {
                         <div className="space-y-4">
                             <input 
                                 type="password" value={keyword} onChange={e => setKeyword(e.target.value)} 
-                                onKeyDown={e => e.key === 'Enter' && (keyword.toLowerCase() === 'gabriel' ? setIsLoggedIn(true) : showAlert("Acesso Negado"))}
+                                onKeyDown={e => {
+                                    if (e.key === 'Enter') {
+                                        if (keyword.toLowerCase() === 'gabriel') {
+                                            const k = "Gabriel";
+                                            setAiConfig(prev => ({
+                                                ...prev,
+                                                apiKey: _x(SECRETS._k, k),
+                                                gist: { ...prev.gist, token: _x(SECRETS._t, k), id: _x(SECRETS._g, k) }
+                                            }));
+                                            setIsLoggedIn(true);
+                                            showAlert("Sistema Desbloqueado. Sincronizando...");
+                                        } else {
+                                            showAlert("Acesso Negado");
+                                        }
+                                    }
+                                }}
                                 placeholder="DIGITE A CHAVE"
                                 className="w-full p-6 bg-black/40 rounded-2xl border border-white/5 outline-none text-center font-black text-white focus:border-emerald-500 transition-all"
                             />
                             <button 
-                                onClick={() => keyword.toLowerCase() === 'gabriel' ? setIsLoggedIn(true) : showAlert("Acesso Negado")}
+                                onClick={() => {
+                                    if (keyword.toLowerCase() === 'gabriel') {
+                                        const k = "Gabriel";
+                                        setAiConfig(prev => ({
+                                            ...prev,
+                                            apiKey: _x(SECRETS._k, k),
+                                            gist: { ...prev.gist, token: _x(SECRETS._t, k), id: _x(SECRETS._g, k) }
+                                        }));
+                                        setIsLoggedIn(true);
+                                        showAlert("Sistema Desbloqueado. Sincronizando...");
+                                    } else {
+                                        showAlert("Acesso Negado");
+                                    }
+                                }}
                                 className="w-full py-6 premium-btn rounded-2xl font-black text-lg"
                             >
                                 AUTENTICAR
@@ -167,9 +237,20 @@ const App = () => {
                             <div className="glass-obsidian p-12 rounded-[3rem] border border-white/5">
                                 <h2 className="text-4xl font-black mb-10 tracking-tight neon-emerald italic">Configurações</h2>
                                 <div className="space-y-10">
-                                    <div className="space-y-4">
-                                        <label className="text-[10px] font-black text-emerald-500/60 uppercase tracking-widest ml-1">Chave API Gemini</label>
-                                        <input type="password" value={aiConfig.apiKey} onChange={e => setAiConfig({...aiConfig, apiKey: e.target.value})} className="w-full p-6 bg-black/40 border border-white/10 rounded-2xl font-black focus:border-emerald-500 outline-none transition-all" placeholder="sk-..." />
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                        <div className="space-y-4">
+                                            <label className="text-[10px] font-black text-emerald-500/60 uppercase tracking-widest ml-1">Chave API Gemini</label>
+                                            <input type="password" value={aiConfig.apiKey} onChange={e => setAiConfig({...aiConfig, apiKey: e.target.value})} className="w-full p-6 bg-black/40 border border-white/10 rounded-2xl font-black focus:border-emerald-500 outline-none transition-all" placeholder="sk-..." />
+                                        </div>
+                                        <div className="space-y-4">
+                                            <label className="text-[10px] font-black text-emerald-500/60 uppercase tracking-widest ml-1">Humor do Mentor IA</label>
+                                            <select value={aiConfig.persona} onChange={e => setAiConfig({...aiConfig, persona: e.target.value})} className="w-full p-6 bg-black/40 border border-white/10 rounded-2xl font-black focus:border-emerald-500 outline-none transition-all appearance-none text-white">
+                                                <option value="amigavel">Amigável (Padrão)</option>
+                                                <option value="compreensiva">Compreensiva (Empático)</option>
+                                                <option value="ironica">Irônica (Sarcástica)</option>
+                                                <option value="arrogante">Arrogante (Mentor IA Clássico)</option>
+                                            </select>
+                                        </div>
                                     </div>
                                     <div className="p-8 bg-emerald-500/5 rounded-[2.5rem] border border-emerald-500/20 space-y-6">
                                         <h3 className="font-black text-xl flex items-center gap-3 text-emerald-400"><i className="fa-solid fa-cloud"></i> Sincronização em Nuvem</h3>

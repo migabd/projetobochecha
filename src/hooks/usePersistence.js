@@ -43,6 +43,9 @@ export const usePersistence = (initialDb, gistConfig, setGistConfig, showAlert) 
             games: mergeAdditive(prev.games, remote.games),
             perceptions: mergeAdditive(prev.perceptions, remote.perceptions),
             processedQuestionLists: mergeAdditive(prev.processedQuestionLists, remote.processedQuestionLists),
+            reverseAnalysisHistory: mergeAdditive(prev.reverseAnalysisHistory, remote.reverseAnalysisHistory),
+            chatMessages: mergeAdditive(prev.chatMessages, remote.chatMessages),
+            planner: { ...(prev.planner || {}), ...(remote.planner || {}) },
             dailyStats: { ...(prev.dailyStats || {}), ...(remote.dailyStats || {}) }
         }));
         setSyncStatus('synced');

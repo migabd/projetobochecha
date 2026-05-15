@@ -4,5 +4,8 @@ import react from '@vitejs/plugin-react'
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
-  base: './', // Ensures assets are linked relatively for easy hosting (GitHub Pages, etc.)
+  base: './', // Ensures assets are linked relatively for GitHub Pages
+  server: {
+    port: 3000,
+  }
 })
