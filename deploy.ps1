@@ -33,6 +33,11 @@ Write-Host "Git: Removendo calc_xor.py do rastreamento (por seguranca)..."
 git rm --cached calc_xor.py --ignore-unmatch
 
 Write-Host "Git: Adicionando mudancas..."
+# Garante que arquivos sensíveis não entrem no Git
+git rm --cached scratch/calc.py -f 2>$null
+git rm --cached calc_xor.py -f 2>$null
+git rm --cached restored_db.json -f 2>$null
+
 git add .
 
 $commitMsg = "Deploy: Atualizacao modular do sistema e Fluxogramas (" + (Get-Date -Format "yyyy-MM-dd HH:mm") + ")"

@@ -89,5 +89,27 @@ export const useAI = (config) => {
         }
     }, [config.apiKey, config.model]);
 
-    return { callIA, getPersonaInstruction, isLoading };
+    const fetchModels = useCallback(async () => {
+        const apiKey = config.apiKey || "";
+        if (!apiKey) return [];
+        try {
+            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+            const data = await response.json();
+            if (response.ok) {
+                // Filtra apenas modelos que suportam geração de conteúdo
+                return data.models
+                    .filter(m => m.supportedGenerationMethods.includes('generateContent'))
+                    .map(m => ({
+                        id: m.name.split('/').pop(),
+                        name: m.displayName
+                    }));
+            }
+            return [];
+        } catch (e) {
+            console.error("Erro ao buscar modelos:", e);
+            return [];
+        }
+    }, [config.apiKey]);
+
+    return { callIA, getPersonaInstruction, fetchModels, isLoading };
 };

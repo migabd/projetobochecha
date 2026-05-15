@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const filePath = path.join(__dirname, 'index.html');
+const filePath = path.join(__dirname, 'index_legacy.html');
 const outputPath = path.join(__dirname, 'restored_db.json');
 
 console.log('Lendo arquivo: ' + filePath);

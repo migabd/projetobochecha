@@ -10,3 +10,8 @@ src/components/Fluxogramas/FluxogramasTab.js
 src/components/Elaborador/ElaboradorTab.js
 index_legacy.html
 index - Copia.html
+# Sensitive / Temporary
+scratch/
+calc_xor.py
+calc.py
+restored_db.json
