@@ -37,6 +37,7 @@ function App() {
     const [keyword, setKeyword] = useState('');
     const [isLoggedIn, setIsLoggedIn] = useState(false);
     const [lightbox, setLightbox] = useState(null);
+    const [fluxogramaPlay, setFluxogramaPlay] = useState(null);
 
     const { db, setDb, syncStatus, syncFromGist } = usePersistence(INITIAL_DB, gistConfig, setGistConfig, (msg) => console.log(msg));
     const { callIA } = useAI(aiConfig);
@@ -102,7 +103,7 @@ function App() {
     const renderTab = () => {
         switch (activeTab) {
             case 'fluxogramas':
-                return <FluxogramasTab db={db} setDb={setDb} showAlert={alert} callIA={callIA} setLightbox={setLightbox} />;
+                return <FluxogramasTab db={db} setDb={setDb} showAlert={alert} callIA={callIA} setLightbox={setLightbox} fluxogramaPlay={fluxogramaPlay} setFluxogramaPlay={setFluxogramaPlay} />;
             case 'elaborador':
                 return <ElaboradorTab db={db} setDb={setDb} showAlert={alert} setActiveTab={setActiveTab} callIA={callIA} aiConfig={aiConfig} />;
             default:
