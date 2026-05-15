@@ -116,8 +116,8 @@ const FluxogramasTab = ({ db, setDb, showAlert, callIA, setLightbox, fluxogramaP
             <div className="fixed inset-0 z-[6000] bg-zinc-950 flex flex-col animate-in fade-in duration-300 overflow-hidden">
                 <header className="p-4 md:p-6 bg-zinc-900 border-b border-zinc-800 flex justify-between items-center shrink-0">
                     <div>
-                        <h2 className="text-lg md:text-xl font-black text-white truncate max-w-[200px] md:max-w-md">{flowchart.title}</h2>
-                        <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Reconstrução Visual Ativa</p>
+                        <h2 className="text-lg md:text-xl font-black text-white truncate max-w-xs md:max-w-md">{flowchart.title}</h2>
+                        <p className="text-xs font-black text-zinc-500 uppercase tracking-widest">Reconstrução Visual Ativa</p>
                     </div>
                     <div className="flex gap-2 md:gap-4">
                         {!results ? (
@@ -207,11 +207,11 @@ const FluxogramasTab = ({ db, setDb, showAlert, callIA, setLightbox, fluxogramaP
         return (
             <div className="p-6 md:p-12 max-w-4xl mx-auto animate-in zoom-in-95">
                 <div className="bg-white dark:bg-zinc-900 p-8 md:p-12 rounded-[48px] shadow-2xl border border-zinc-200 dark:border-zinc-800">
-                    <button onClick={() => setView('gallery')} className="text-zinc-400 hover:text-zinc-600 mb-8 flex items-center gap-2 font-black uppercase text-[10px] tracking-widest"><i className="fa-solid fa-arrow-left"></i> Voltar</button>
+                    <button onClick={() => setView('gallery')} className="text-zinc-400 hover:text-zinc-600 mb-8 flex items-center gap-2 font-black uppercase text-xs tracking-widest"><i className="fa-solid fa-arrow-left"></i> Voltar</button>
                     <h2 className="text-3xl font-black mb-8">Novo Fluxograma</h2>
                     <div className="space-y-8">
                         <div>
-                            <label className="block text-[10px] font-black text-zinc-400 uppercase mb-4">Título do Estudo</label>
+                            <label className="block text-xs font-black text-zinc-400 uppercase mb-4">Título do Estudo</label>
                             <input type="text" value={editingFlux.title} onChange={e => setEditingFlux({...editingFlux, title: e.target.value})} placeholder="Ex: Protocolo de ACLS, Manejo de Sepse..." className="w-full p-6 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-3xl font-black text-xl outline-none" />
                         </div>
                         <div className="relative border-4 border-dashed border-zinc-100 dark:border-zinc-800 rounded-[40px] p-12 text-center group hover:border-emerald-500 transition-all cursor-pointer">
@@ -221,7 +221,7 @@ const FluxogramasTab = ({ db, setDb, showAlert, callIA, setLightbox, fluxogramaP
                             ) : (
                                 <div className="space-y-4">
                                     <i className="fa-solid fa-cloud-arrow-up text-5xl text-zinc-300 group-hover:text-emerald-500 transition-colors"></i>
-                                    <p className="font-black text-zinc-400 uppercase text-[10px] tracking-widest">Arraste a diretriz aqui</p>
+                                    <p className="font-black text-zinc-400 uppercase text-xs tracking-widest">Arraste a diretriz aqui</p>
                                 </div>
                             )}
                         </div>
@@ -236,10 +236,10 @@ const FluxogramasTab = ({ db, setDb, showAlert, callIA, setLightbox, fluxogramaP
 
     return (
         <div className="p-6 md:p-12 max-w-7xl mx-auto animate-in fade-in duration-500">
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-12">
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-12">
                 <div>
                     <h2 className="text-4xl font-black tracking-tighter">Fluxogramas <span className="text-blue-500">PRO</span></h2>
-                    <p className="text-zinc-500 font-bold uppercase text-[10px] tracking-widest mt-1">Treino Ativo e Repetição Espaçada</p>
+                    <p className="text-zinc-500 font-bold uppercase text-xs tracking-widest mt-1">Treino Ativo e Repetição Espaçada</p>
                 </div>
                 <button onClick={() => setView('upload')} className="w-full md:w-auto px-8 py-4 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded-2xl font-black shadow-xl hover:scale-105 transition-all flex items-center justify-center gap-2">
                     <i className="fa-solid fa-plus"></i> Novo Fluxo
