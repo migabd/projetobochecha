@@ -10,8 +10,21 @@ export const usePersistence = (initialDb, gistConfig, setGistConfig, showAlert) 
             if (saved) {
                 const parsed = JSON.parse(saved);
                 if (parsed && typeof parsed === 'object') {
-                    // Merge with initialDb to ensure new keys (like fluxogramas) exist
                     return { ...initialDb, ...parsed };
+                }
+            }
+
+            // MIGRATION: Se não encontrar o novo banco, tenta buscar no legado (v45, master, pro)
+            const legacyKeys = ['caderno_db_master', 'caderno_med_v45_final', 'caderno_med_pro_final'];
+            for (const key of legacyKeys) {
+                const legacyData = localStorage.getItem(key);
+                if (legacyData) {
+                    try {
+                        const parsed = JSON.parse(legacyData);
+                        console.log(`Migrando dados de: ${key}`);
+                        // Retorna os dados legados mesclados com o novo esqueleto
+                        return { ...initialDb, ...parsed };
+                    } catch (e) {}
                 }
             }
         } catch (e) {
@@ -157,7 +170,7 @@ export const usePersistence = (initialDb, gistConfig, setGistConfig, showAlert) 
         }
 
         // Cloud Save (Gist)
-        if (isFirstRenderDb.current || !gistConfig.id || !gistConfig.token || !gistConfig.autoSync) {
+        if (isFirstRenderDb.current || !gistConfig.id || !gistConfig.token || !gistConfig.autoSync || !navigator.onLine) {
             if (isFirstRenderDb.current) isFirstRenderDb.current = false;
             return;
         }
@@ -167,6 +180,18 @@ export const usePersistence = (initialDb, gistConfig, setGistConfig, showAlert) 
         }, 3000);
         return () => clearTimeout(timer);
     }, [db, gistConfig, syncToGist]);
+
+    // Offline -> Online Auto-Sync
+    useEffect(() => {
+        const handleOnline = () => {
+            if (gistConfig.token && gistConfig.id) {
+                syncToGist(db);
+                syncFromGist();
+            }
+        };
+        window.addEventListener('online', handleOnline);
+        return () => window.removeEventListener('online', handleOnline);
+    }, [db, gistConfig, syncToGist, syncFromGist]);
 
     return {
         db,
