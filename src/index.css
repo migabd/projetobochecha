@@ -1,0 +1,37 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 min-h-screen flex flex-col font-sans transition-colors duration-300;
+  }
+}
+
+/* Custom Utilities from the original monolith */
+.text-justify-custom {
+  text-align: justify;
+  text-justify: inter-word;
+}
+
+.planner-scroll::-webkit-scrollbar {
+  height: 8px;
+}
+
+.planner-scroll::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+
+.planner-scroll::-webkit-scrollbar-thumb {
+  @apply bg-zinc-200 dark:bg-zinc-800 rounded-full;
+}
+
+/* Animations */
+@keyframes pulse-subtle {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+.animate-pulse-subtle {
+  animation: pulse-subtle 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
