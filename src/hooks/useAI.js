@@ -43,7 +43,7 @@ export const useAI = (config) => {
     }, []);
 
     const callIA = useCallback(async (msgs, forceModel = null) => {
-        const apiKey = config.key || "";
+        const apiKey = config.apiKey || "";
         let model = forceModel || config.model || "gemini-2.0-flash";
         let retries = 5;
         let delay = 1000;
@@ -87,7 +87,7 @@ export const useAI = (config) => {
         } finally {
             setIsLoading(false);
         }
-    }, [config.key, config.model]);
+    }, [config.apiKey, config.model]);
 
     return { callIA, getPersonaInstruction, isLoading };
 };

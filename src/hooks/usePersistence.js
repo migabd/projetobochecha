@@ -9,8 +9,10 @@ export const usePersistence = (initialDb, gistConfig, setGistConfig, showAlert) 
             const saved = localStorage.getItem('caderno_db');
             if (saved) {
                 const parsed = JSON.parse(saved);
-                // Basic validation to ensure we're not loading empty or corrupt state
-                if (parsed && typeof parsed === 'object') return parsed;
+                if (parsed && typeof parsed === 'object') {
+                    // Merge with initialDb to ensure new keys (like fluxogramas) exist
+                    return { ...initialDb, ...parsed };
+                }
             }
         } catch (e) {
             console.error("Erro ao carregar DB local:", e);

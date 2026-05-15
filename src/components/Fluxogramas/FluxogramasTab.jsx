@@ -285,7 +285,7 @@ const FluxogramasTab = ({ db, setDb, showAlert, callIA, setLightbox, fluxogramaP
                             <i className="fa-solid fa-layer-group absolute -right-6 -bottom-6 text-9xl text-emerald-500/5 group-hover:text-emerald-500/10 transition-colors"></i>
                         </div>
                     ))}
-                    {db.fluxogramas?.length === 0 && (
+                    {(!db.fluxogramas || db.fluxogramas.length === 0) && (
                         <div className="col-span-full py-32 text-center opacity-20 italic font-black text-2xl">
                             NENHUM FLUXOGRAMA CADASTRADO
                         </div>
