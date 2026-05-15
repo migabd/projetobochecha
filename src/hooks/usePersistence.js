@@ -57,6 +57,7 @@ export const usePersistence = (initialDb, gistConfig, setGistConfig, showAlert) 
             processedQuestionLists: mergeAdditive(prev.processedQuestionLists, remote.processedQuestionLists),
             reverseAnalysisHistory: mergeAdditive(prev.reverseAnalysisHistory, remote.reverseAnalysisHistory),
             chatMessages: mergeAdditive(prev.chatMessages, remote.chatMessages),
+            fluxogramas: mergeAdditive(prev.fluxogramas, remote.fluxogramas),
             planner: { ...(prev.planner || {}), ...(remote.planner || {}) },
             dailyStats: { ...(prev.dailyStats || {}), ...(remote.dailyStats || {}) }
         }));
