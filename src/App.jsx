@@ -3,6 +3,7 @@ import { usePersistence } from './hooks/usePersistence';
 import { useAI } from './hooks/useAI';
 import FluxogramasTab from './components/Fluxogramas/FluxogramasTab';
 import ElaboradorTab from './components/Elaborador/ElaboradorTab';
+import { xorDecrypt } from './utils/crypto';
 
 const DEFAULT_SUBJECTS = [
     { id: 'cli', name: 'Clínica Médica', color: 'emerald' },
@@ -33,6 +34,7 @@ function App() {
     const [activeTab, setActiveTab] = useState('dashboard');
     const [gistConfig, setGistConfig] = useState(() => JSON.parse(localStorage.getItem('gist_config')) || { token: '', id: '', autoSync: false });
     const [aiConfig, setAiConfig] = useState(() => JSON.parse(localStorage.getItem('ai_config')) || { key: '', model: 'gemini-2.0-flash', persona: 'amigavel' });
+    const [keyword, setKeyword] = useState('');
     const [isLoggedIn, setIsLoggedIn] = useState(false);
     const [lightbox, setLightbox] = useState(null);
 
@@ -47,17 +49,51 @@ function App() {
         localStorage.setItem('ai_config', JSON.stringify(aiConfig));
     }, [aiConfig]);
 
+    const handleLogin = () => {
+        // Chaves cifradas (geradas via calc_xor.py com chave "Gabriel")
+        const ENC_GIST_TOKEN = "LwwXBhYRBV5RXF0PBRkXFBYRVR4eExVfXlZfBh8=";
+        const ENC_GIST_ID = "BAkNDxkNDAkJDxkODAgPDA0ICAgIDA4ICA8NDA==";
+        const ENC_GEMINI = "AgscCRUfAxkaAxcDGRUPCBgWGR8fCB8PHwgfCBU=";
+
+        if (keyword === 'Gabriel') {
+            const token = xorDecrypt(ENC_GIST_TOKEN, keyword);
+            const id = xorDecrypt(ENC_GIST_ID, keyword);
+            const key = xorDecrypt(ENC_GEMINI, keyword);
+
+            setGistConfig(p => ({ ...p, token, id }));
+            setAiConfig(p => ({ ...p, key }));
+            setIsLoggedIn(true);
+        } else {
+            alert("Palavra-chave incorreta.");
+        }
+    };
+
     if (!isLoggedIn) {
         return (
-            <div className="flex items-center justify-center min-h-screen bg-zinc-950">
-                <div className="p-8 bg-zinc-900 rounded-3xl border border-zinc-800 shadow-2xl">
-                    <h1 className="text-2xl font-black text-white mb-6">Caderno de Elite</h1>
-                    <button 
-                        onClick={() => setIsLoggedIn(true)}
-                        className="w-full py-4 bg-emerald-600 text-white font-black rounded-2xl hover:bg-emerald-500 transition-all"
-                    >
-                        Entrar
-                    </button>
+            <div className="flex items-center justify-center min-h-screen bg-zinc-950 p-6">
+                <div className="w-full max-w-md p-10 bg-zinc-900 rounded-[40px] border border-zinc-800 shadow-2xl animate-in zoom-in-95 duration-500">
+                    <div className="w-20 h-20 bg-emerald-500/10 rounded-3xl flex items-center justify-center mb-8 mx-auto border border-emerald-500/20">
+                        <i className="fa-solid fa-user-shield text-3xl text-emerald-500"></i>
+                    </div>
+                    <h1 className="text-3xl font-black text-white mb-2 text-center tracking-tighter">CADERNO <span className="text-emerald-500">IA</span></h1>
+                    <p className="text-zinc-500 text-sm font-bold text-center mb-8 uppercase tracking-widest">Acesso Restrito Preceptoria</p>
+                    
+                    <div className="space-y-4">
+                        <input 
+                            type="password" 
+                            value={keyword} 
+                            onChange={e => setKeyword(e.target.value)}
+                            onKeyDown={e => e.key === 'Enter' && handleLogin()}
+                            placeholder="Palavra-chave" 
+                            className="w-full p-5 bg-zinc-950 border border-zinc-800 rounded-2xl text-white font-bold text-center outline-none focus:ring-2 focus:ring-emerald-500 transition-all shadow-inner"
+                        />
+                        <button 
+                            onClick={handleLogin}
+                            className="w-full py-5 bg-emerald-600 text-white font-black rounded-2xl hover:bg-emerald-500 active:scale-95 transition-all shadow-lg shadow-emerald-900/20"
+                        >
+                            AUTENTICAR
+                        </button>
+                    </div>
                 </div>
             </div>
         );
