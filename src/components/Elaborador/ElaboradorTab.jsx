@@ -1,9 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { compressImage } from '../../utils/image';
 
-/**
- * Componente para o Elaborador de Questões e Simulados de Elite.
- */
 const ElaboradorTab = ({ db, setDb, showAlert, setActiveTab, callIA, aiConfig }) => {
     const [view, setView] = useState('setup'); // setup, exam, results
     const [config, setConfig] = useState({ subject: '', num: 10, difficulty: 'mediana', modality: 'multi' });
@@ -37,9 +34,7 @@ const ElaboradorTab = ({ db, setDb, showAlert, setActiveTab, callIA, aiConfig })
     };
 
     const extractTextFromPDF = async (data) => {
-        if (!window.pdfjsLib) {
-            throw new Error("Biblioteca PDF.js não carregada.");
-        }
+        if (!window.pdfjsLib) throw new Error("Biblioteca PDF.js não carregada.");
         try {
             const pdf = await window.pdfjsLib.getDocument({ data }).promise;
             let fullText = "";
@@ -61,14 +56,12 @@ const ElaboradorTab = ({ db, setDb, showAlert, setActiveTab, callIA, aiConfig })
         if (!file) return;
         const reader = new FileReader();
         const name = file.name.toLowerCase();
-        
         setExamState(p => ({ ...p, isGenerating: true }));
 
         if (name.endsWith('.pdf')) {
             reader.onload = async (ev) => {
                 try {
-                    const typedarray = new Uint8Array(ev.target.result);
-                    const text = await extractTextFromPDF(typedarray);
+                    const text = await extractTextFromPDF(new Uint8Array(ev.target.result));
                     setExamState(p => ({ ...p, materialText: text, isGenerating: false }));
                     showAlert("✅ PDF processado!");
                 } catch (err) {
@@ -82,7 +75,7 @@ const ElaboradorTab = ({ db, setDb, showAlert, setActiveTab, callIA, aiConfig })
                 try {
                     const b64 = await compressImage(ev.target.result);
                     const res = await callIA([
-                        { role: 'user', parts: [{ text: "Transcreva o texto médico desta imagem." }, { inlineData: { mimeType: 'image/jpeg', data: b64.split(',')[1] } }] }
+                        { role: 'user', parts: [{ text: "Transcreva todo o texto médico desta imagem." }, { inlineData: { mimeType: 'image/jpeg', data: b64.split(',')[1] } }] }
                     ]);
                     setExamState(p => ({ ...p, materialText: res, isGenerating: false }));
                     showAlert("✅ Imagem analisada!");
@@ -95,7 +88,7 @@ const ElaboradorTab = ({ db, setDb, showAlert, setActiveTab, callIA, aiConfig })
         } else if (name.endsWith('.txt')) {
             reader.onload = (ev) => {
                 setExamState(p => ({ ...p, materialText: ev.target.result, isGenerating: false }));
-                showAlert("✅ Arquivo carregado!");
+                showAlert("✅ Texto carregado!");
             };
             reader.readAsText(file);
         }
@@ -103,10 +96,11 @@ const ElaboradorTab = ({ db, setDb, showAlert, setActiveTab, callIA, aiConfig })
     };
 
     const generateExam = async () => {
-        if (!config.subject.trim() && !examState.materialText) return showAlert("Defina o assunto!");
+        if (!config.subject.trim() && !examState.materialText) return showAlert("Defina o assunto ou material!");
         setExamState(p => ({ ...p, isGenerating: true }));
         try {
-            const finalPrompt = `Gere simulado médico: ${config.num} questões. Modalidade: ${config.modality}. Dificuldade: ${config.difficulty}. Retorne JSON Array.`;
+            const modalityPrompt = { multi: "Múltipla Escolha", ce: "Certo ou Errado", open: "Discursivas" }[config.modality];
+            const finalPrompt = `Gere ${config.num} questões médicos. Modalidade: ${modalityPrompt}. Dificuldade: ${config.difficulty}. Tema: ${config.subject}. Material: ${examState.materialText}. Retorne APENAS um array JSON: [{ "id": 1, "text": "...", "options": ["A...", "B..."], "correct": 0, "standardAnswer": "...", "explanation": "..." }]`;
             const res = await callIA([{ role: 'user', parts: [{ text: finalPrompt }] }]);
             const match = res.match(/\[[\s\S]*\]/);
             if (match) {
@@ -122,10 +116,13 @@ const ElaboradorTab = ({ db, setDb, showAlert, setActiveTab, callIA, aiConfig })
     };
 
     const finalizeExam = async () => {
+        if (Object.keys(examState.answers).length < examState.questions.length) {
+            if (!confirm("Responder todas?")) return;
+        }
         setExamState(p => ({ ...p, endTime: Date.now(), isCorrecting: true }));
         try {
             if (config.modality === 'open') {
-                const prompt = `Corrija as questões discursivas. Retorne JSON: { "score": 0-100, "details": [...] }`;
+                const prompt = `Corrija as discursivas. Gabaritos: ${JSON.stringify(examState.questions.map(q => ({ id: q.id, expected: q.standardAnswer })))} Respostas: ${JSON.stringify(examState.answers)}. Retorne JSON: { "score": 0-100, "details": [{ "id": 1, "correct": true, "feedback": "..." }] }`;
                 const res = await callIA([{ role: 'user', parts: [{ text: prompt }] }]);
                 const match = res.match(/\{[\s\S]*\}/);
                 if (match) setExamState(p => ({ ...p, results: JSON.parse(match[0]), isCorrecting: false }));
@@ -149,50 +146,47 @@ const ElaboradorTab = ({ db, setDb, showAlert, setActiveTab, callIA, aiConfig })
         const q = examState.questions.find(x => x.id === qId);
         setExamState(p => ({ ...p, explanation: { id: qId, text: 'Carregando...' } }));
         try {
-            const res = await callIA([{ role: 'user', parts: [{ text: `Explique a questão: ${q.text}` }] }]);
+            const prompt = `Explique profundamente a questão: ${q.text}. Gabarito: ${q.correct}. Alternativas: ${JSON.stringify(q.options)}`;
+            const res = await callIA([{ role: 'user', parts: [{ text: prompt }] }]);
             setExamState(p => ({ ...p, explanation: { id: qId, text: res } }));
         } catch (e) {
-            setExamState(p => ({ ...p, explanation: { id: qId, text: 'Erro' } }));
+            setExamState(p => ({ ...p, explanation: { id: qId, text: 'Erro.' } }));
         }
-    };
-
-    const generateFlashcardsFromErrors = () => {
-        const errors = examState.results.details.filter(d => !d.correct);
-        if (errors.length === 0) return showAlert("Sem erros!");
-        const newCards = errors.map(d => {
-            const q = examState.questions.find(x => x.id === d.id);
-            return { id: Date.now() + Math.random(), deckName: `Erros: ${config.subject}`, front: q.text, back: d.feedback, date: new Date().toLocaleDateString() };
-        });
-        setDb(p => ({ ...p, flashcards: [...newCards, ...(p.flashcards || [])] }));
-        showAlert("Cards gerados!");
     };
 
     if (view === 'setup') {
         return (
-            <div className="p-6 md:p-12 max-w-6xl mx-auto">
-                <div className="bg-white dark:bg-zinc-900 p-8 rounded-3xl shadow-2xl border border-zinc-200 dark:border-zinc-800">
-                    <h2 className="text-3xl font-black mb-8 flex items-center gap-3">
-                        <i className="fa-solid fa-wand-magic-sparkles text-amber-500"></i> Elaborador <span className="text-xs bg-amber-500/10 text-amber-600 px-3 py-1 rounded-full uppercase ml-2">PRO</span>
+            <div className="p-6 md:p-12 max-w-6xl mx-auto animate-in fade-in">
+                <div className="bg-white dark:bg-zinc-900 p-6 md:p-12 rounded-3xl border shadow-2xl">
+                    <h2 className="text-2xl md:text-4xl font-black mb-8 flex items-center gap-3">
+                        <i className="fa-solid fa-wand-magic-sparkles text-amber-500"></i> Elaborador PRO
                     </h2>
-                    <div className="space-y-6">
-                        <input type="text" value={config.subject} onChange={e => setConfig({...config, subject: e.target.value})} placeholder="Assunto" className="w-full p-6 bg-zinc-50 dark:bg-zinc-950 border rounded-3xl outline-none" />
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div className="bg-zinc-50 dark:bg-zinc-950 p-6 rounded-3xl border">
-                                <label className="block text-xs font-black text-zinc-400 uppercase mb-4">Questões</label>
-                                <input type="range" min="5" max="50" step="5" value={config.num} onChange={e => setConfig({...config, num: parseInt(e.target.value)})} className="w-full accent-amber-500" />
-                                <span className="text-2xl font-black text-amber-600">{config.num}</span>
-                            </div>
-                            <div className="bg-zinc-50 dark:bg-zinc-950 p-6 rounded-3xl border">
-                                <label className="block text-xs font-black text-zinc-400 uppercase mb-4">Dificuldade</label>
-                                <div className="flex gap-2">
-                                    {['fácil', 'mediana', 'difícil', 'impossivel'].map(d => (
-                                        <button key={d} onClick={() => setConfig({...config, difficulty: d})} className={`flex-1 py-2 rounded-xl text-xs font-black uppercase ${config.difficulty === d ? 'bg-amber-500 text-white' : 'bg-white text-zinc-400 border'}`}>{d}</button>
-                                    ))}
+                    <div className="space-y-8">
+                        <div>
+                            <label className="block text-xs font-black text-zinc-400 uppercase mb-3">Assunto ou Material</label>
+                            <div className="flex flex-col md:flex-row gap-4">
+                                <input type="text" value={config.subject} onChange={e => setConfig({...config, subject: e.target.value})} placeholder="Ex: Hipertensão..." className="flex-1 bg-zinc-50 dark:bg-zinc-950 border rounded-2xl p-5 font-black outline-none focus:ring-4 focus:ring-amber-500/20" />
+                                <div className="relative h-16 w-full md:w-48">
+                                    <input type="file" onChange={handleFileUpload} className="absolute inset-0 opacity-0 cursor-pointer z-10" />
+                                    <button className="w-full h-full bg-zinc-100 dark:bg-zinc-800 text-amber-600 rounded-2xl font-black">Alimentar</button>
                                 </div>
                             </div>
                         </div>
-                        <button disabled={examState.isGenerating} onClick={generateExam} className="w-full py-6 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded-3xl font-black text-xl">
-                            {examState.isGenerating ? 'Gerando...' : 'Gerar Simulado'}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="bg-zinc-50 dark:bg-zinc-950 p-6 rounded-3xl border">
+                                <label className="block text-xs font-black text-zinc-400 uppercase mb-4">Questões: {config.num}</label>
+                                <input type="range" min="5" max="50" step="5" value={config.num} onChange={e => setConfig({...config, num: parseInt(e.target.value)})} className="w-full accent-amber-500" />
+                            </div>
+                            <div className="flex gap-2">
+                                {['fácil', 'mediana', 'difícil', 'impossivel'].map(d => (
+                                    <button key={d} onClick={() => setConfig({...config, difficulty: d})} className={`flex-1 py-3 rounded-xl text-[10px] font-black uppercase ${config.difficulty === d ? 'bg-amber-500 text-white shadow-lg' : 'bg-white dark:bg-zinc-900 text-zinc-400 border'}`}>
+                                        {d}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                        <button disabled={examState.isGenerating} onClick={generateExam} className="w-full py-6 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded-3xl font-black text-xl shadow-xl active:scale-95 transition-all">
+                            {examState.isGenerating ? 'Processando...' : 'Gerar Simulado'}
                         </button>
                     </div>
                 </div>
@@ -203,22 +197,31 @@ const ElaboradorTab = ({ db, setDb, showAlert, setActiveTab, callIA, aiConfig })
     if (view === 'exam') {
         const q = examState.questions[examState.currentIdx];
         return (
-            <div className="max-w-4xl mx-auto p-6">
-                <div className="bg-white dark:bg-zinc-900 p-8 rounded-3xl border shadow-xl">
-                    <p className="text-xl font-bold mb-8">{q.text}</p>
-                    <div className="space-y-4">
-                        {q.options?.map((opt, idx) => (
-                            <button key={idx} onClick={() => setExamState(p => ({ ...p, answers: { ...p.answers, [q.id]: idx } }))} className={`w-full p-6 rounded-2xl border-2 text-left font-bold ${examState.answers[q.id] === idx ? 'border-amber-500 bg-amber-50' : 'bg-zinc-50'}`}>
-                                {opt}
-                            </button>
-                        ))}
+            <div className="min-h-screen p-4 md:p-10 animate-in slide-in-from-right">
+                <div className="max-w-4xl mx-auto bg-white dark:bg-zinc-900 p-6 md:p-12 rounded-3xl shadow-2xl border">
+                    <div className="flex justify-between items-center mb-8">
+                        <span className="text-xs font-black text-zinc-400 uppercase tracking-widest">Q{examState.currentIdx + 1} / {examState.questions.length}</span>
+                        <div className="bg-zinc-100 dark:bg-zinc-800 px-4 py-2 rounded-xl font-black text-amber-500">{formatTime(timer)}</div>
                     </div>
-                    <div className="mt-8 flex justify-between">
-                        <button disabled={examState.currentIdx === 0} onClick={() => setExamState(p => ({ ...p, currentIdx: p.currentIdx - 1 }))} className="px-6 py-3 bg-zinc-100 rounded-xl font-bold">Anterior</button>
-                        {examState.currentIdx === examState.questions.length - 1 ? (
-                            <button onClick={finalizeExam} className="px-6 py-3 bg-amber-600 text-white rounded-xl font-bold">Finalizar</button>
+                    <p className="text-lg md:text-2xl font-bold text-zinc-800 dark:text-zinc-100 mb-10 leading-relaxed">{q.text}</p>
+                    <div className="space-y-4">
+                        {config.modality === 'open' ? (
+                            <textarea value={examState.answers[q.id] || ''} onChange={e => setExamState(p => ({ ...p, answers: { ...p.answers, [q.id]: e.target.value } }))} className="w-full h-48 bg-zinc-50 dark:bg-zinc-950 border rounded-2xl p-6 font-bold outline-none focus:border-amber-500 shadow-inner" />
                         ) : (
-                            <button onClick={() => setExamState(p => ({ ...p, currentIdx: p.currentIdx + 1 }))} className="px-6 py-3 bg-zinc-900 text-white rounded-xl font-bold">Próxima</button>
+                            q.options.map((opt, idx) => (
+                                <button key={idx} onClick={() => setExamState(p => ({ ...p, answers: { ...p.answers, [q.id]: idx } }))} className={`w-full p-5 rounded-2xl border-2 text-left font-bold transition-all flex items-center gap-4 ${examState.answers[q.id] === idx ? 'border-amber-500 bg-amber-50 dark:bg-amber-950/20' : 'border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950'}`}>
+                                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${examState.answers[q.id] === idx ? 'bg-amber-500 text-white' : 'bg-white dark:bg-zinc-800 text-zinc-400'}`}>{String.fromCharCode(65 + idx)}</div>
+                                    <span className="text-sm md:text-base">{opt}</span>
+                                </button>
+                            ))
+                        )}
+                    </div>
+                    <div className="mt-10 flex justify-between gap-4">
+                        <button disabled={examState.currentIdx === 0} onClick={() => setExamState(p => ({ ...p, currentIdx: p.currentIdx - 1 }))} className="px-8 py-4 bg-zinc-100 text-zinc-600 rounded-2xl font-black disabled:opacity-20">Anterior</button>
+                        {examState.currentIdx === examState.questions.length - 1 ? (
+                            <button onClick={finalizeExam} className="px-8 py-4 bg-amber-600 text-white rounded-2xl font-black">Finalizar</button>
+                        ) : (
+                            <button onClick={() => setExamState(p => ({ ...p, currentIdx: p.currentIdx + 1 }))} className="px-8 py-4 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded-2xl font-black">Próxima</button>
                         )}
                     </div>
                 </div>
@@ -227,14 +230,37 @@ const ElaboradorTab = ({ db, setDb, showAlert, setActiveTab, callIA, aiConfig })
     }
 
     if (view === 'results') {
+        const r = examState.results;
         return (
-            <div className="max-w-4xl mx-auto p-6 text-center">
-                <h2 className="text-5xl font-black mb-8">{examState.results.score}%</h2>
-                <button onClick={() => setView('setup')} className="px-12 py-5 bg-zinc-900 text-white rounded-2xl font-black">Novo Simulado</button>
+            <div className="p-6 md:p-12 max-w-4xl mx-auto animate-in zoom-in pb-32">
+                <div className="text-center mb-12">
+                    <div className="inline-flex items-center justify-center w-32 h-32 rounded-full border-8 border-emerald-500 text-emerald-600 mb-6">
+                        <span className="text-4xl font-black">{r.score}%</span>
+                    </div>
+                    <h2 className="text-3xl font-black">Resultado Final</h2>
+                </div>
+                <div className="space-y-6">
+                    {examState.questions.map((q, idx) => {
+                        const detail = r.details.find(d => d.id === q.id);
+                        const isExplaining = examState.explanation?.id === q.id;
+                        return (
+                            <div key={q.id} className={`bg-white dark:bg-zinc-900 p-8 rounded-3xl border-2 ${detail.correct ? 'border-emerald-100' : 'border-rose-100'}`}>
+                                <div className="flex justify-between items-center mb-4">
+                                    <span className={`px-4 py-1 rounded-full text-[10px] font-black uppercase ${detail.correct ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'}`}>{detail.correct ? 'Acerto' : 'Erro'}</span>
+                                    <button onClick={() => handleExplainQuestion(q.id)} className="text-xs font-black text-amber-600">Explicação IA</button>
+                                </div>
+                                <p className="font-bold mb-4">{q.text}</p>
+                                <p className="text-sm mb-2"><span className="font-black">Sua resposta:</span> {config.modality === 'open' ? examState.answers[q.id] : q.options[examState.answers[q.id]]}</p>
+                                <p className="text-sm mb-4"><span className="font-black">Gabarito:</span> {config.modality === 'open' ? q.standardAnswer : q.options[q.correct]}</p>
+                                {isExplaining && <div className="p-6 bg-amber-50 dark:bg-amber-950/20 rounded-2xl text-sm italic">{examState.explanation.text}</div>}
+                            </div>
+                        );
+                    })}
+                </div>
+                <button onClick={() => setView('setup')} className="w-full mt-10 py-6 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded-3xl font-black text-xl">Novo Simulado</button>
             </div>
         );
     }
-
     return null;
 };
 
