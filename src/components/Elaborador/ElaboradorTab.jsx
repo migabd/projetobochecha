@@ -1,519 +1,308 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState } from 'react';
 
-const KILL_STREAKS = ["FIRST BLOOD", "DOUBLE KILL", "TRIPLE KILL", "QUADRA KILL", "PENTA KILL", "GODLIKE", "LEGENDARY", "UNSTOPPABLE"];
+const ERROR_REASONS = ["Desatenção", "Falta de Base", "Esquecimento", "Raciocínio", "Pegadinha"];
 
-const ElaboradorTab = ({ db, setDb, showAlert, callIA, aiConfig }) => {
-    const [view, setView] = useState('menu'); // menu, sim, results
-    const [simQty, setSimQty] = useState(10);
-    const [simFilters, setSimFilters] = useState({ subj: [], tag: 'ALL', exam: 'ALL' });
-    const [cebraspeMode, setCebraspeMode] = useState(false);
-    
-    const [currentDeck, setCurrentDeck] = useState([]);
-    const [curIdx, setCurIdx] = useState(0);
-    const [selAlt, setSelAlt] = useState(null);
-    const [showAns, setShowAns] = useState(false);
-    const [streak, setStreak] = useState(0);
-    const [killAnim, setKillAnim] = useState(null);
-    const [results, setResults] = useState([]);
-    const [timeElapsed, setTimeElapsed] = useState(0);
-    const [timerActive, setTimerActive] = useState(false);
+const ElaboradorTab = ({ db, setDb, showAlert, callIA, aiConfig, setSimulado }) => {
+    const [state, setState] = useState({
+        isGenerating: false,
+        status: 'idle',
+        settings: {
+            type: 'multiple',
+            difficulty: 'difícil',
+            qty: 5,
+            focus: '',
+            customTag: ''
+        },
+        questions: [],
+        fileData: null,
+        fileName: '',
+        mimeType: '',
+        isConverting: false,
+        convertFilter: '',
+        convertTargetType: 'ce',
+        convertQty: 5,
+        originalIdsToMarkTransformed: []
+    });
 
-    // IA State
-    const [aiExplaining, setAiExplaining] = useState(false);
-    const [aiExplanation, setAiExplanation] = useState('');
-    const [isAiChatting, setIsAiChatting] = useState(false);
-    const [aiChatMessages, setAiChatMessages] = useState([]);
-    const [crossedAlts, setCrossedAlts] = useState([]);
-    const [highlightedText, setHighlightedText] = useState('');
+    const [lightbox, setLightbox] = useState(null);
 
-    // Timer Logic
-    useEffect(() => {
-        let interval;
-        if (timerActive) {
-            interval = setInterval(() => setTimeElapsed(prev => prev + 1), 1000);
-        }
-        return () => clearInterval(interval);
-    }, [timerActive]);
-
-    const formatTime = (sec) => {
-        const m = Math.floor(sec / 60);
-        const s = sec % 60;
-        return `${m}:${s < 10 ? '0' : ''}${s}`;
+    const compressImage = (base64) => {
+        return new Promise((resolve) => {
+            const img = new Image();
+            img.src = base64;
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                let width = img.width;
+                let height = img.height;
+                const max = 1200;
+                if (width > height && width > max) { height *= max / width; width = max; }
+                else if (height > max) { width *= max / height; height = max; }
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, width, height);
+                resolve(canvas.toDataURL('image/jpeg', 0.7));
+            };
+        });
     };
 
-    const generateDeck = () => {
-        let pool = [...db.errors];
-        
-        if (simFilters.tag === 'ERROS') pool = pool.filter(e => (e.history?.wrong || 0) > 0);
-        else if (simFilters.tag === 'NOVAS') pool = pool.filter(e => (e.history?.correct || 0) === 0 && (e.history?.wrong || 0) === 0);
-        
-        if (simFilters.subj.length > 0) pool = pool.filter(e => simFilters.subj.includes(e.subject));
-        if (simFilters.exam !== 'ALL') pool = pool.filter(e => e.examId === simFilters.exam);
-
-        if (pool.length === 0) {
-            showAlert("Nenhuma questão encontrada com esses filtros.");
-            return null;
-        }
-
-        return pool.sort(() => Math.random() - 0.5).slice(0, simQty);
+    const handleFile = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = async (ev) => {
+            let b64 = ev.target.result;
+            let mime = file.type || 'application/octet-stream';
+            if (mime.startsWith('image/')) b64 = await compressImage(b64);
+            setState(p => ({ ...p, fileData: b64, mimeType: mime, fileName: file.name }));
+        };
+        reader.readAsDataURL(file);
+        e.target.value = '';
     };
 
-    const startSim = () => {
-        const deck = generateDeck();
-        if (!deck) return;
-        setCurrentDeck(deck);
-        setCurIdx(0);
-        setSelAlt(null);
-        setShowAns(false);
-        setResults([]);
-        setStreak(0);
-        setTimeElapsed(0);
-        setTimerActive(true);
-        setView('sim');
+    const generateQuestions = async () => {
+        setState(p => ({ ...p, isGenerating: true, status: 'generating' }));
+        try {
+            const { type, difficulty, qty, focus } = state.settings;
+            let typeInst = "Múltipla Escolha com 5 alternativas (A a E)";
+            if (type === 'ce') typeInst = "Certo ou Errado com apenas 2 alternativas: ['A) Certo', 'B) Errado']";
+            if (type === 'discursiva') typeInst = "Discursiva com apenas 1 alternativa representando o espelho de correção: ['A) Espelho de Resposta: ...']";
+
+            const prompt = `Atue como o examinador médico mais carrasco, impiedoso e exigente do mundo, padrão de excelência extrema de nível UTI.
+Crie EXATAMENTE ${qty} questões do tipo: ${typeInst}. NÃO crie nem mais, nem menos do que o solicitado.
+Nível de dificuldade: ${difficulty.toUpperCase()} (questões de hipercomplexidade clínica, raciocínio de multi-etapas, desenhadas para derrubar até especialistas, repletas de pegadinhas cruéis e detalhes vitais escondidos no enunciado).
+Tema/Foco opcional: ${focus || 'Baseado estritamente no documento ou imagem anexado'}.
+
+${state.fileData ? 'NOTA DE VISÃO: Analise cuidadosamente a imagem ou documento fornecido. Se for uma imagem médica (RX, TC, Foto Clínica, ECG), baseie o caso clínico nos achados visuais. Se for um texto/PDF, use os dados fornecidos.' : ''}
+
+INSTRUÇÃO CRÍTICA DE VARIEDADE (Seed: ${Date.now()}): É OBRIGATÓRIO que as questões sejam COMPLETAMENTE NOVAS e INÉDITAS. Explore ângulos clínicos inusitados, rodapés de livro, complicações raras, exceções à regra e cenários diagnósticos confusos. NÃO repita o mesmo padrão, foco ou doença principal que seria gerado por padrão. Fuja do óbvio!
+
+IMPORTANTE: Retorne APENAS um objeto JSON válido, sem nenhum texto extra e sem formatação markdown.
+[
+  {
+    "title": "Tema curto da questão",
+    "question": "Enunciado clinicamente denso...",
+    "alternatives": ["A) ...", "B) ..."],
+    "alternativeExplanations": ["Exp A", "Exp B"],
+    "correctAlternative": "A",
+    "lessonLearned": "O detalhe matador desta questão."
+  }
+]`;
+            
+            const visionModel = (!aiConfig.key || aiConfig.model.includes('gemma')) ? 'gemini-1.5-flash' : null;
+            let msgs = [];
+            if (state.fileData) {
+                msgs = [{ role: 'user', parts: [{ inlineData: { data: state.fileData.split(',')[1], mimeType: state.mimeType } }, { text: prompt }] }];
+            } else {
+                msgs = [{ role: 'user', parts: [{ text: prompt }] }];
+            }
+
+            const res = await callIA(msgs, visionModel);
+            if (res && !res.startsWith('[ERRO')) {
+                const match = res.match(/\[[\s\S]*\]/);
+                if (!match) throw new Error("JSON não encontrado na resposta");
+                let generated = JSON.parse(match[0]);
+                if (Array.isArray(generated)) {
+                    generated = generated.slice(0, qty).map(q => ({
+                        ...q,
+                        tags: [...(q.tags || []), ...(state.settings.customTag ? [state.settings.customTag] : [])]
+                    }));
+                }
+                setState(p => ({ ...p, questions: generated, status: 'done', isGenerating: false }));
+                showAlert(`✅ ${generated.length} questões geradas com sucesso!`);
+            } else {
+                throw new Error(res);
+            }
+        } catch (err) {
+            console.error(err);
+            showAlert("❌ Erro na geração: " + err.message);
+            setState(p => ({ ...p, isGenerating: false, status: 'error' }));
+        }
     };
 
-    const handleAnswer = (letter) => {
-        if (showAns) return;
-        const q = currentDeck[curIdx];
-        const isCorrect = letter === q.correctAlternative;
+    const convertQuestions = async () => {
+        if (!state.convertFilter) return showAlert("Selecione um filtro válido para converter.");
+        let pool = db.errors.filter(e => e.examId === state.convertFilter || e.facId === state.convertFilter || (e.tags && e.tags.includes(state.convertFilter)));
+        if (pool.length === 0) return showAlert("Nenhuma questão encontrada.");
 
-        setSelAlt(letter);
-        setShowAns(true);
-        setTimerActive(false);
-        
-        if (isCorrect) {
-            const newStreak = streak + 1;
-            setStreak(newStreak);
-            const anim = KILL_STREAKS[Math.min(newStreak - 1, KILL_STREAKS.length - 1)];
-            setKillAnim(anim);
-            setTimeout(() => setKillAnim(null), 2000);
-        } else {
-            setStreak(0);
+        const qty = Math.min(Number(state.convertQty) || 5, pool.length);
+        const selectedPool = pool.slice(0, qty);
+        const originalIds = selectedPool.map(q => q.id);
+
+        setState(p => ({ ...p, isConverting: true, status: 'generating', originalIdsToMarkTransformed: originalIds }));
+        try {
+            const targetType = state.convertTargetType;
+            let typeInst = "Múltipla Escolha com 5 alternativas (A a E)";
+            if (targetType === 'ce') typeInst = "Certo ou Errado com apenas 2 alternativas: ['A) Certo', 'B) Errado']";
+            if (targetType === 'discursiva') typeInst = "Discursiva com apenas 1 alternativa representando o espelho de correção: ['A) Espelho de Resposta: ...']";
+
+            const questionsJSON = JSON.stringify(selectedPool.map(q => ({ title: q.title, question: q.question, alternatives: q.alternatives, correctAlternative: q.correctAlternative })));
+            const prompt = `Atue como um Professor de Medicina. Transforme estas questões para o formato: ${typeInst}.\n\nQUESTÕES:\n${questionsJSON}\n\nRetorne apenas JSON.`;
+
+            const res = await callIA([{ role: 'user', parts: [{ text: prompt }] }]);
+            if (res && !res.startsWith('[ERRO')) {
+                const match = res.match(/\[[\s\S]*\]/);
+                if (!match) throw new Error("JSON não encontrado");
+                let generated = JSON.parse(match[0]);
+                setState(p => ({ ...p, questions: generated, status: 'done', isConverting: false }));
+                showAlert(`✅ ${generated.length} questões convertidas!`);
+            } else {
+                throw new Error(res);
+            }
+        } catch (err) {
+            showAlert("❌ Erro: " + err.message);
+            setState(p => ({ ...p, isConverting: false, status: 'error' }));
         }
+    };
 
-        const resObj = { id: q.id, isCorrect, userAns: letter, timeSpent: timeElapsed };
-        setResults(prev => [...prev, resObj]);
+    const saveToPlatform = () => {
+        const name = prompt("Nome da lista:");
+        if (!name) return;
+        const newList = {
+            id: Date.now().toString(),
+            name,
+            date: new Date().toLocaleDateString('pt-PT'),
+            questions: state.questions.map((q, i) => ({ ...q, id: Date.now() + i }))
+        };
+        setDb(p => ({ ...p, processedQuestionLists: [newList, ...(p.processedQuestionLists || [])] }));
+        showAlert("✅ Lista salva!");
+    };
 
-        // Update DB History
-        setDb(prev => ({
-            ...prev,
-            errors: prev.errors.map(e => e.id === q.id ? { ...e, history: { correct: (e.history?.correct || 0) + (isCorrect ? 1 : 0), wrong: (e.history?.wrong || 0) + (isCorrect ? 0 : 1) } } : e)
+    const saveToCaderno = () => {
+        const newErrors = state.questions.map((q, i) => ({
+            id: Date.now() + i,
+            date: new Date().toLocaleDateString('pt-PT'),
+            title: q.title || 'Gerada',
+            subject: db.subjects[0]?.id || 'clinica_medica',
+            question: q.question,
+            alternatives: q.alternatives,
+            alternativeExplanations: q.alternativeExplanations,
+            correctAlternative: q.correctAlternative,
+            lessonLearned: q.lessonLearned || '',
+            reason: ERROR_REASONS[0],
+            tags: [...(q.tags || []), 'Gerada por IA', 'Elaborador']
         }));
+        setDb(p => ({ ...p, errors: [...newErrors, ...p.errors] }));
+        showAlert("✅ Salvas no Caderno Geral!");
+        setState(p => ({ ...p, questions: [], status: 'idle' }));
     };
 
-    const nextQuestion = () => {
-        if (curIdx + 1 < currentDeck.length) {
-            setCurIdx(curIdx + 1);
-            setSelAlt(null);
-            setShowAns(false);
-            setAiExplanation('');
-            setIsAiChatting(false);
-            setAiChatMessages([]);
-            setCrossedAlts([]);
-            setHighlightedText('');
-            setTimeElapsed(0);
-            setTimerActive(true);
-        } else {
-            setTimerActive(false);
-            setView('results');
-        }
+    const solveNow = () => {
+        const deck = state.questions.map((q, i) => ({
+            ...q,
+            id: 'tmp_' + Date.now() + '_' + i,
+            date: new Date().toLocaleDateString('pt-PT'),
+            subject: db.subjects[0]?.id || 'clinica_medica',
+            tags: [...(q.tags || []), 'Gerada por IA', 'Elaborador']
+        }));
+        setDirectSimulado(deck);
+        setActiveTab('simulados');
+        setState(p => ({ ...p, questions: [], status: 'idle' }));
     };
 
-    const handleAITool = async (mode) => {
-        const q = currentDeck[curIdx];
-        setAiExplaining(true);
-        setAiExplanation('');
-        
-        let prompt = "";
-        if (mode === 'explain') prompt = `Explique didaticamente por que a alternativa ${q.correctAlternative} é a correta e por que as outras estão erradas. Use bullet points.`;
-        if (mode === 'mnemonic') prompt = `Crie uma mnemônica infalível e criativa para memorizar o conceito principal desta questão.`;
-        if (mode === 'summary') prompt = `Faça um resumo flash (ponto-chave) do tema abordado nesta questão para revisão rápida.`;
-        if (mode === 'pitfalls') prompt = `Quais são as principais pegadinhas e distratores que as bancas costumam usar neste tema?`;
-
-        const fullPrompt = `${prompt}\n\nQUESTÃO: ${q.question}\nGABARITO: ${q.correctAlternative}`;
-        const r = await callIA([{ role: 'user', parts: [{ text: fullPrompt }] }]);
-        setAiExplanation(r || "Falha ao obter resposta.");
-        setAiExplaining(false);
+    const printPDF = () => {
+        const win = window.open('', '_blank');
+        let html = `<html><head><title>Lista de Questões</title><style>body{font-family:sans-serif;padding:40px;line-height:1.6;}.q{margin-bottom:40px;page-break-inside:avoid;}h1{color:#059669;}</style></head><body><h1>Desafio de Elite</h1>`;
+        state.questions.forEach((q, i) => {
+            html += `<div class="q"><h3>Q${i+1}. ${q.title}</h3><p>${q.question}</p><ul>${q.alternatives.map(a => `<li>${a}</li>`).join('')}</ul></div>`;
+        });
+        html += `<hr/><h2>Gabarito</h2>`;
+        state.questions.forEach((q, i) => { html += `<p>Q${i+1}: ${q.correctAlternative} - ${q.lessonLearned}</p>`; });
+        html += `</body></html>`;
+        win.document.write(html); win.document.close(); win.print();
     };
 
-    const handleHighlight = () => {
-        const selection = window.getSelection().toString();
-        if (!selection) return;
-        const qText = currentDeck[curIdx].question;
-        const highlighted = qText.replace(selection, `<mark class="bg-yellow-400/40 text-inherit rounded-sm px-1">${selection}</mark>`);
-        setHighlightedText(highlighted);
-    };
+    return (
+        <div className="p-6 md:p-10 space-y-8 animate-in fade-in pb-24 text-zinc-900 dark:text-zinc-100">
+            <div className="bg-gradient-to-br from-emerald-900 to-zinc-900 p-10 rounded-[40px] shadow-2xl relative overflow-hidden border border-emerald-800">
+                <div className="absolute -right-10 -top-10 text-emerald-500/10"><i className="fa-solid fa-wand-magic-sparkles text-[250px]"></i></div>
+                <div className="relative z-10">
+                    <h2 className="text-3xl lg:text-4xl font-black text-white mb-2"><i className="fa-solid fa-flask text-emerald-400 mr-3"></i> Elaborador de Elite</h2>
+                    <p className="text-emerald-100/70 font-medium">Extraia o suco do seu material. Gere questões de altíssima complexidade.</p>
+                </div>
+            </div>
 
-    if (view === 'menu') {
-        return (
-            <div className="p-10 max-w-6xl mx-auto space-y-12 animate-in fade-in duration-700">
-                <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-8">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div className="bg-white dark:bg-zinc-900 p-6 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-xl space-y-4">
+                    <h3 className="font-black text-lg mb-4 text-emerald-600 dark:text-emerald-400 border-b border-zinc-100 dark:border-zinc-800 pb-3">Parâmetros</h3>
                     <div>
-                        <h2 className="text-6xl font-black italic tracking-tighter neon-emerald uppercase">Elaborador <span className="text-white/20">DE ELITE</span></h2>
-                        <p className="text-zinc-500 font-bold mt-2 uppercase tracking-[0.2em] text-xs">Simulador de alta performance com Mentor IA integrado.</p>
+                        <label className="block text-[10px] font-black text-zinc-400 uppercase mb-1">Formato</label>
+                        <select value={state.settings.type} onChange={e => setState(p => ({ ...p, settings: { ...p.settings, type: e.target.value } }))} className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 text-sm font-bold">
+                            <option value="multiple">Múltipla Escolha</option>
+                            <option value="ce">Certo ou Errado</option>
+                            <option value="discursiva">Discursiva</option>
+                        </select>
                     </div>
-                    <div className="flex gap-4">
-                        <div className="glass-obsidian p-6 rounded-3xl border border-white/5 text-center min-w-[140px]">
-                            <span className="block text-[10px] font-black text-emerald-500 uppercase tracking-widest mb-1">Questões</span>
-                            <span className="text-3xl font-black">{db.errors.length}</span>
+                    <div>
+                        <label className="block text-[10px] font-black text-zinc-400 uppercase mb-1">Dificuldade</label>
+                        <select value={state.settings.difficulty} onChange={e => setState(p => ({ ...p, settings: { ...p.settings, difficulty: e.target.value } }))} className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 text-sm font-bold text-red-500">
+                            <option value="difícil">Difícil</option>
+                            <option value="extremo">Extremo (R4)</option>
+                            <option value="uti">UTI (Impossível)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label className="block text-[10px] font-black text-zinc-400 uppercase mb-1">Quantidade</label>
+                        <input type="number" min="1" max="20" value={state.settings.qty} onChange={e => setState(p => ({ ...p, settings: { ...p.settings, qty: e.target.value } }))} className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 text-sm font-bold" />
+                    </div>
+                </div>
+
+                <div className="lg:col-span-2">
+                    <div className={`bg-white dark:bg-zinc-900 p-8 rounded-3xl border-2 border-dashed ${state.fileData ? 'border-emerald-500' : 'border-zinc-300 dark:border-zinc-800'} flex flex-col items-center justify-center text-center h-full min-h-[300px] relative group`}>
+                        <input type="file" onChange={handleFile} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" />
+                        {!state.fileData ? (
+                            <>
+                                <i className="fa-solid fa-cloud-arrow-up text-4xl text-emerald-500 mb-4"></i>
+                                <h3 className="font-black text-xl mb-2">Anexar Material</h3>
+                                <p className="text-sm text-zinc-500">PDF, Imagens, PPT ou Docs</p>
+                            </>
+                        ) : (
+                            <div className="z-20">
+                                <i className="fa-solid fa-file-circle-check text-4xl text-emerald-500 mb-4"></i>
+                                <div className="bg-emerald-500 text-white px-6 py-2 rounded-full font-black text-xs mb-4 flex items-center gap-2">
+                                    {state.fileName}
+                                    <button onClick={() => setState(p => ({ ...p, fileData: null, fileName: '' }))} className="hover:text-red-200"><i className="fa-solid fa-xmark"></i></button>
+                                </div>
+                            </div>
+                        )}
+                        <button disabled={state.isGenerating} onClick={generateQuestions} className="mt-6 z-30 px-10 py-4 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 font-black rounded-2xl shadow-xl hover:scale-105 transition-all disabled:opacity-50">
+                            {state.isGenerating ? <i className="fa-solid fa-spinner fa-spin mr-2"></i> : <i className="fa-solid fa-wand-magic-sparkles mr-2"></i>}
+                            Gerar Questões de Elite
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            {state.questions.length > 0 && (
+                <div className="space-y-6 animate-in slide-in-from-bottom-4">
+                    <div className="flex justify-between items-center bg-emerald-50 dark:bg-emerald-900/20 p-6 rounded-3xl border border-emerald-200 dark:border-emerald-800">
+                        <h3 className="font-black text-xl text-emerald-700 dark:text-emerald-400">{state.questions.length} Questões Prontas</h3>
+                        <div className="flex gap-2">
+                            <button onClick={printPDF} className="bg-white dark:bg-zinc-800 text-emerald-600 px-4 py-2 rounded-xl font-black text-xs shadow-sm">PDF</button>
+                            <button onClick={solveNow} className="bg-indigo-600 text-white px-4 py-2 rounded-xl font-black text-xs shadow-lg">Resolver Agora</button>
+                            <button onClick={saveToCaderno} className="bg-emerald-600 text-white px-4 py-2 rounded-xl font-black text-xs shadow-lg">Salvar no Caderno</button>
                         </div>
                     </div>
-                </header>
-
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                    <div className="lg:col-span-2 bento-card p-10 rounded-[3.5rem] space-y-10">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-                            <div className="space-y-6">
-                                <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest block">Volume do Treino</label>
-                                <div className="grid grid-cols-4 gap-3">
-                                    {[5, 10, 20, 50].map(n => (
-                                        <button key={n} onClick={() => setSimQty(n)} className={`py-4 rounded-2xl font-black transition-all ${simQty === n ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-500/20' : 'bg-white/5 text-zinc-500 hover:text-white'}`}>{n}</button>
+                    <div className="space-y-6">
+                        {state.questions.map((q, i) => (
+                            <div key={i} className="bg-white dark:bg-zinc-900 p-8 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
+                                <h4 className="font-black text-lg mb-4 text-emerald-600">Q{i+1}. {q.title}</h4>
+                                <p className="text-zinc-700 dark:text-zinc-300 mb-6 font-medium whitespace-pre-wrap">{q.question}</p>
+                                <div className="grid grid-cols-1 gap-3">
+                                    {q.alternatives.map((alt, j) => (
+                                        <div key={j} className={`p-4 rounded-xl border-2 ${q.correctAlternative === String.fromCharCode(65+j) ? 'border-emerald-500 bg-emerald-50/50' : 'border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950'} text-sm font-bold flex gap-3`}>
+                                            <span className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 ${q.correctAlternative === String.fromCharCode(65+j) ? 'bg-emerald-500 text-white' : 'bg-zinc-200 text-zinc-500'}`}>{String.fromCharCode(65+j)}</span>
+                                            {alt}
+                                        </div>
                                     ))}
                                 </div>
                             </div>
-                            <div className="space-y-6">
-                                <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest block">Modo Cebraspe</label>
-                                <button 
-                                    onClick={() => setCebraspeMode(!cebraspeMode)}
-                                    className={`w-full py-4 rounded-2xl font-black flex items-center justify-center gap-3 transition-all ${cebraspeMode ? 'bg-rose-600/20 border border-rose-500/50 text-rose-500' : 'bg-white/5 text-zinc-500 border border-transparent'}`}
-                                >
-                                    <i className={`fa-solid ${cebraspeMode ? 'fa-toggle-on' : 'fa-toggle-off'} text-xl`}></i>
-                                    {cebraspeMode ? 'ATIVADO (-1 p/ erro)' : 'DESATIVADO (Padrão)'}
-                                </button>
-                            </div>
-                        </div>
-
-                        <div className="space-y-6">
-                            <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest block">Filtros de Especialidade</label>
-                            <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto p-4 bg-black/20 rounded-2xl border border-white/5 custom-scroll">
-                                {db.subjects.map(s => (
-                                    <button 
-                                        key={s.id} 
-                                        onClick={() => setSimFilters(p => ({...p, subj: p.subj.includes(s.id) ? p.subj.filter(x => x !== s.id) : [...p.subj, s.id]}))}
-                                        className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${simFilters.subj.includes(s.id) ? 'bg-emerald-500/20 text-emerald-500 border border-emerald-500/30' : 'bg-white/5 text-zinc-500'}`}
-                                    >
-                                        {s.name}
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
-
-                        <button onClick={startSim} className="w-full py-7 premium-btn rounded-[2.5rem] font-black text-2xl shadow-2xl flex items-center justify-center gap-4">
-                            <i className="fa-solid fa-play"></i> DECOLAR TREINO
-                        </button>
-                    </div>
-
-                    <div className="space-y-8">
-                        <div className="bento-card p-10 rounded-[3.5rem] bg-emerald-500/5 border border-emerald-500/10">
-                            <h3 className="text-xl font-black mb-6 flex items-center gap-3"><i className="fa-solid fa-bolt text-yellow-500"></i> Dica de Hoje</h3>
-                            <p className="text-sm text-zinc-400 leading-relaxed font-medium italic">"A repetição espaçada é o segredo da memória de longo prazo. Foque nos temas com mais erros primeiro."</p>
-                        </div>
-                        <div className="bento-card p-10 rounded-[3.5rem] border border-white/5">
-                            <h3 className="text-xl font-black mb-6 flex items-center gap-3"><i className="fa-solid fa-chart-pie text-sky-500"></i> Performance</h3>
-                            <div className="space-y-4">
-                                {db.simuladoHistory?.slice(0,3).map((h, i) => (
-                                    <div key={i} className="flex justify-between items-center text-xs font-black">
-                                        <span className="text-zinc-500">{h.date}</span>
-                                        <span className="text-emerald-500">{Math.round((h.hits/h.total)*100)}%</span>
-                                    </div>
-                                ))}
-                                {(!db.simuladoHistory || db.simuladoHistory.length === 0) && <p className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest text-center py-4">Sem histórico</p>}
-                            </div>
-                        </div>
+                        ))}
                     </div>
                 </div>
-            </div>
-        );
-    }
-
-    if (view === 'sim') {
-        const q = currentDeck[curIdx];
-        return (
-            <div className="min-h-screen p-6 md:p-12 max-w-7xl mx-auto animate-in fade-in duration-500 relative pb-40">
-                {killAnim && (
-                    <div className="fixed inset-0 z-[9999] pointer-events-none flex items-center justify-center">
-                        <span className="kill-text">{killAnim}</span>
-                    </div>
-                )}
-
-                <header className="flex justify-between items-center mb-12">
-                    <button onClick={() => setView('menu')} className="w-14 h-14 glass-obsidian rounded-2xl flex items-center justify-center hover:bg-white/10 transition-all border border-white/5">
-                        <i className="fa-solid fa-arrow-left text-zinc-400"></i>
-                    </button>
-                    
-                    <div className="flex gap-8 items-center bg-black/40 px-10 py-4 rounded-3xl border border-white/5 shadow-2xl">
-                        <div className="text-center">
-                            <span className="block text-[10px] font-black text-emerald-500 uppercase tracking-widest">Tempo</span>
-                            <span className="text-2xl font-mono font-black text-white">{formatTime(timeElapsed)}</span>
-                        </div>
-                        <div className="w-px h-10 bg-white/10"></div>
-                        <div className="text-center">
-                            <span className="block text-[10px] font-black text-sky-500 uppercase tracking-widest">Questão</span>
-                            <span className="text-2xl font-black text-white">{curIdx + 1}<span className="text-zinc-600">/{currentDeck.length}</span></span>
-                        </div>
-                        <div className="w-px h-10 bg-white/10"></div>
-                        <div className="text-center">
-                            <span className="block text-[10px] font-black text-yellow-500 uppercase tracking-widest">Streak</span>
-                            <span className="text-2xl font-black text-yellow-500">x{streak}</span>
-                        </div>
-                    </div>
-
-                    <button onClick={() => window.print()} className="w-14 h-14 glass-obsidian rounded-2xl flex items-center justify-center hover:bg-white/10 transition-all border border-white/5">
-                        <i className="fa-solid fa-print text-zinc-400"></i>
-                    </button>
-                </header>
-
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-start">
-                    <div className="lg:col-span-8 bento-card p-10 md:p-16 rounded-[4rem] relative overflow-hidden">
-                        <div className="absolute top-0 left-0 w-full h-2 bg-zinc-800">
-                            <div className="h-full bg-emerald-500 transition-all duration-500" style={{ width: `${((curIdx + 1) / currentDeck.length) * 100}%` }}></div>
-                        </div>
-
-                        <div className="space-y-12">
-                            <div className="space-y-6">
-                                <div className="flex justify-between items-center">
-                                    <h3 className="text-sm font-black text-emerald-500 uppercase tracking-[0.3em]">{q.subject}</h3>
-                                    <button onClick={handleHighlight} className="text-[10px] font-black text-zinc-500 hover:text-emerald-500 transition-colors uppercase"><i className="fa-solid fa-highlighter mr-2"></i> Grifar Texto</button>
-                                </div>
-                                <h2 className="text-3xl font-black tracking-tight leading-tight">{q.title}</h2>
-                                <p 
-                                    className="text-xl text-zinc-300 font-bold leading-relaxed text-justify-custom"
-                                    dangerouslySetInnerHTML={{ __html: highlightedText || q.question }}
-                                ></p>
-                                {q.image && <img src={q.image} className="max-h-96 rounded-3xl border border-white/5 shadow-2xl mx-auto cursor-zoom-in" alt="Material" />}
-                            </div>
-
-                            <div className="space-y-4">
-                                {q.alternatives.map((alt, i) => {
-                                    const letter = String.fromCharCode(65 + i);
-                                    const isCorrect = letter === q.correctAlternative;
-                                    const isSelected = selAlt === letter;
-                                    const isCrossed = crossedAlts.includes(letter);
-
-                                    let style = "bg-zinc-900/50 border-white/5 hover:border-white/10 hover:bg-white/5";
-                                    if (showAns) {
-                                        if (isCorrect) style = "bg-emerald-500/20 border-emerald-500/50 text-emerald-400 shadow-lg shadow-emerald-500/10";
-                                        else if (isSelected) style = "bg-red-500/20 border-red-500/50 text-red-400";
-                                        else style = "opacity-20 border-transparent grayscale";
-                                    } else if (isSelected) {
-                                        style = "bg-emerald-500/10 border-emerald-500/50 text-emerald-500";
-                                    } else if (isCrossed) {
-                                        style = "opacity-20 line-through grayscale cursor-not-allowed";
-                                    }
-
-                                    return (
-                                        <div key={i} className="flex gap-4">
-                                            {!showAns && (
-                                                <button 
-                                                    onClick={() => setCrossedAlts(p => isCrossed ? p.filter(x => x !== letter) : [...p, letter])}
-                                                    className={`w-12 rounded-2xl flex items-center justify-center transition-all ${isCrossed ? 'bg-zinc-800 text-zinc-600' : 'bg-white/5 text-zinc-700 hover:text-red-500'}`}
-                                                >
-                                                    <i className="fa-solid fa-strikethrough text-xs"></i>
-                                                </button>
-                                            )}
-                                            <button 
-                                                disabled={showAns || isCrossed}
-                                                onClick={() => handleAnswer(letter)}
-                                                className={`flex-1 p-6 rounded-[2rem] border text-left font-bold text-lg transition-all flex items-center gap-6 ${style}`}
-                                            >
-                                                <span className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 font-black ${isSelected || (showAns && isCorrect) ? 'bg-emerald-500 text-white' : 'bg-white/5 text-zinc-400'}`}>
-                                                    {letter}
-                                                </span>
-                                                {alt}
-                                            </button>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-
-                            {showAns && (
-                                <div className="pt-10 border-t border-white/5 animate-in slide-in-from-top-6 space-y-10">
-                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                        <button onClick={() => handleAITool('explain')} className="tool-btn bg-emerald-500/5 border border-emerald-500/10 p-5 rounded-3xl flex flex-col items-center gap-3 hover:bg-emerald-500/10 transition-all group">
-                                            <i className="fa-solid fa-chalkboard-user text-2xl text-emerald-500 group-hover:scale-110 transition-transform"></i>
-                                            <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Professor</span>
-                                        </button>
-                                        <button onClick={() => handleAITool('mnemonic')} className="tool-btn bg-amber-500/5 border border-amber-500/10 p-5 rounded-3xl flex flex-col items-center gap-3 hover:bg-amber-500/10 transition-all group">
-                                            <i className="fa-solid fa-lightbulb text-2xl text-amber-500 group-hover:scale-110 transition-transform"></i>
-                                            <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Mnemônica</span>
-                                        </button>
-                                        <button onClick={() => handleAITool('summary')} className="tool-btn bg-sky-500/5 border border-sky-500/10 p-5 rounded-3xl flex flex-col items-center gap-3 hover:bg-sky-500/10 transition-all group">
-                                            <i className="fa-solid fa-bolt text-2xl text-sky-500 group-hover:scale-110 transition-transform"></i>
-                                            <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Flash Resumo</span>
-                                        </button>
-                                        <button onClick={() => handleAITool('pitfalls')} className="tool-btn bg-rose-500/5 border border-rose-500/10 p-5 rounded-3xl flex flex-col items-center gap-3 hover:bg-rose-500/10 transition-all group">
-                                            <i className="fa-solid fa-triangle-exclamation text-2xl text-rose-500 group-hover:scale-110 transition-transform"></i>
-                                            <span className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Pegadinhas</span>
-                                        </button>
-                                    </div>
-
-                                    {aiExplaining && (
-                                        <div className="p-10 bg-emerald-500/5 rounded-[3rem] border border-emerald-500/10 flex items-center justify-center gap-4 text-emerald-500 font-black italic animate-pulse">
-                                            <i className="fa-solid fa-circle-notch fa-spin text-2xl"></i> Mentor IA está analisando...
-                                        </div>
-                                    )}
-
-                                    {aiExplanation && (
-                                        <div className="p-10 bg-zinc-900/50 rounded-[3rem] border border-white/5 text-zinc-300 font-medium leading-relaxed whitespace-pre-wrap relative animate-in fade-in">
-                                            <button onClick={() => setAiExplanation('')} className="absolute top-6 right-6 text-zinc-600 hover:text-white transition-colors"><i className="fa-solid fa-xmark"></i></button>
-                                            <h4 className="text-emerald-500 font-black text-xs uppercase tracking-[0.3em] mb-6 flex items-center gap-2"><i className="fa-solid fa-robot"></i> Análise do Mentor</h4>
-                                            <div dangerouslySetInnerHTML={{ __html: aiExplanation.replace(/\*\*(.*?)\*\*/g, '<b class="text-white font-black">$1</b>') }}></div>
-                                        </div>
-                                    )}
-
-                                    <button onClick={nextQuestion} className="w-full py-7 bg-white text-black rounded-[2.5rem] font-black text-2xl hover:bg-emerald-500 hover:text-white transition-all shadow-2xl shadow-white/5 flex items-center justify-center gap-4">
-                                        {curIdx + 1 === currentDeck.length ? 'VER RESULTADOS FINAIS' : 'PRÓXIMA QUESTÃO'}
-                                        <i className="fa-solid fa-arrow-right"></i>
-                                    </button>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-
-                    <div className="lg:col-span-4 space-y-8 lg:sticky lg:top-12">
-                        <div className="bento-card p-10 rounded-[3.5rem] space-y-8">
-                            <h3 className="text-xs font-black text-zinc-500 uppercase tracking-widest flex items-center gap-2">
-                                <i className="fa-solid fa-list-ol text-emerald-500"></i> MAPA DO SIMULADO
-                            </h3>
-                            <div className="grid grid-cols-5 gap-3">
-                                {currentDeck.map((_, i) => {
-                                    const res = results.find((r, idx) => idx === i);
-                                    let bg = "bg-white/5 text-zinc-600";
-                                    if (i === curIdx) bg = "bg-white text-black scale-110 shadow-xl z-10";
-                                    else if (res) bg = res.isCorrect ? "bg-emerald-500 text-white" : "bg-rose-500 text-white";
-
-                                    return (
-                                        <div key={i} className={`aspect-square rounded-xl flex items-center justify-center font-black text-[10px] transition-all ${bg}`}>
-                                            {i + 1}
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        </div>
-
-                        <div className="bento-card p-10 rounded-[3.5rem] bg-indigo-500/5 border border-indigo-500/10 space-y-6">
-                            <h3 className="text-xs font-black text-indigo-500 uppercase tracking-widest flex items-center gap-2">
-                                <i className="fa-solid fa-comments"></i> CHAT COM MENTOR
-                            </h3>
-                            <div className="h-64 overflow-y-auto pr-2 custom-scroll space-y-4 text-xs font-medium">
-                                {aiChatMessages.length === 0 && <p className="text-zinc-600 italic text-center py-10">Tire suas dúvidas técnicas aqui.</p>}
-                                {aiChatMessages.map((m, i) => (
-                                    <div key={i} className={`${m.role === 'user' ? 'text-right' : 'text-left'}`}>
-                                        <span className={`inline-block p-3 rounded-2xl ${m.role === 'user' ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-300'}`}>{m.text}</span>
-                                    </div>
-                                ))}
-                            </div>
-                            <div className="flex gap-2">
-                                <input 
-                                    placeholder="Dúvida técnica..."
-                                    onKeyDown={async (e) => {
-                                        if (e.key === 'Enter' && e.target.value.trim()) {
-                                            const val = e.target.value;
-                                            e.target.value = '';
-                                            const newMsgs = [...aiChatMessages, { role: 'user', text: val }];
-                                            setAiChatMessages(newMsgs);
-                                            const r = await callIA(newMsgs.map(m => ({ role: m.role, parts: [{ text: m.text }] })));
-                                            setAiChatMessages([...newMsgs, { role: 'model', text: r || "Erro ao responder." }]);
-                                        }
-                                    }}
-                                    className="flex-1 bg-black/40 border border-white/5 rounded-xl px-4 py-3 text-xs outline-none focus:border-indigo-500/50"
-                                />
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        );
-    }
-
-    if (view === 'results') {
-        const hits = results.filter(r => r.isCorrect).length;
-        const total = currentDeck.length;
-        const perc = Math.round((hits / total) * 100);
-        const avgTime = Math.round(results.reduce((acc, r) => acc + r.timeSpent, 0) / total);
-
-        return (
-            <div className="p-10 max-w-5xl mx-auto space-y-12 animate-in zoom-in duration-700">
-                <div className="glass-obsidian p-16 rounded-[4rem] text-center space-y-12 border border-white/5 relative overflow-hidden">
-                    <div className="absolute top-0 left-0 w-full h-2 bg-zinc-800">
-                        <div className={`h-full transition-all duration-1000 ${perc >= 70 ? 'bg-emerald-500' : 'bg-amber-500'}`} style={{ width: `${perc}%` }}></div>
-                    </div>
-
-                    <div className="space-y-4">
-                        <h2 className="text-6xl font-black italic tracking-tighter uppercase">Treino <span className="neon-emerald">Concluído</span></h2>
-                        <p className="text-zinc-500 font-black text-xs uppercase tracking-[0.4em]">Análise de Desempenho Tático</p>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        <div className="p-8 bg-black/40 rounded-[2.5rem] border border-white/5">
-                            <span className="block text-[10px] font-black text-emerald-500 uppercase tracking-widest mb-2">Aproveitamento</span>
-                            <span className="text-5xl font-black">{perc}%</span>
-                        </div>
-                        <div className="p-8 bg-black/40 rounded-[2.5rem] border border-white/5">
-                            <span className="block text-[10px] font-black text-sky-500 uppercase tracking-widest mb-2">Tempo Médio</span>
-                            <span className="text-5xl font-black font-mono">{formatTime(avgTime)}</span>
-                        </div>
-                        <div className="p-8 bg-black/40 rounded-[2.5rem] border border-white/5">
-                            <span className="block text-[10px] font-black text-yellow-500 uppercase tracking-widest mb-2">Score Líquido</span>
-                            <span className="text-5xl font-black">{cebraspeMode ? hits - (total - hits) : hits}</span>
-                        </div>
-                    </div>
-
-                    <div className="space-y-6">
-                        <h3 className="text-left text-xs font-black text-zinc-500 uppercase tracking-widest flex items-center gap-3">
-                            <i className="fa-solid fa-history text-emerald-500"></i> Gabarito Detalhado
-                        </h3>
-                        <div className="space-y-3">
-                            {results.map((r, i) => {
-                                const q = currentDeck[i];
-                                return (
-                                    <div key={i} className="flex justify-between items-center p-6 bg-black/20 rounded-2xl border border-white/5 group hover:bg-white/5 transition-all">
-                                        <div className="flex items-center gap-6">
-                                            <span className={`w-8 h-8 rounded-lg flex items-center justify-center font-black text-xs ${r.isCorrect ? 'bg-emerald-500/20 text-emerald-500' : 'bg-rose-500/20 text-rose-500'}`}>{i + 1}</span>
-                                            <span className="font-bold text-sm text-zinc-300 truncate max-w-md">{q.title}</span>
-                                        </div>
-                                        <div className="flex items-center gap-6">
-                                            <span className="text-[10px] font-mono text-zinc-600">{formatTime(r.timeSpent)}</span>
-                                            <span className={`text-[10px] font-black uppercase tracking-widest ${r.isCorrect ? 'text-emerald-500' : 'text-rose-500'}`}>
-                                                {r.isCorrect ? 'CERTO' : `ERRO (${r.userAns})`}
-                                            </span>
-                                        </div>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <button 
-                            onClick={async () => {
-                                setAiExplaining(true);
-                                const prompt = `Analise meu desempenho neste simulado de medicina. Acertei ${hits} de ${total}. Temas abordados: ${currentDeck.map(q => q.subject).join(', ')}. Quais são meus pontos cegos e onde devo focar?`;
-                                const r = await callIA([{ role: 'user', parts: [{ text: prompt }] }]);
-                                setAiExplanation(r || "Erro na análise.");
-                                setAiExplaining(false);
-                            }}
-                            className="py-6 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-3xl shadow-xl flex items-center justify-center gap-3 transition-all"
-                        >
-                            <i className="fa-solid fa-robot"></i> ANÁLISE IA PROFUNDA
-                        </button>
-                        <button onClick={() => setView('menu')} className="py-6 bg-white/5 hover:bg-white/10 text-zinc-400 font-black rounded-3xl transition-all">
-                            VOLTAR AO MENU
-                        </button>
-                    </div>
-
-                    {aiExplanation && (
-                        <div className="mt-12 p-10 bg-zinc-950/50 rounded-[3rem] border border-white/5 text-left animate-in fade-in">
-                            <h4 className="text-emerald-500 font-black text-xs uppercase tracking-[0.3em] mb-6 flex items-center gap-2"><i className="fa-solid fa-brain"></i> Feedback Estratégico</h4>
-                            <div className="text-zinc-400 text-sm font-medium leading-relaxed" dangerouslySetInnerHTML={{ __html: aiExplanation.replace(/\*\*(.*?)\*\*/g, '<b class="text-white font-black">$1</b>').replace(/\n/g, '<br/>') }}></div>
-                        </div>
-                    )}
-                </div>
-            </div>
-        );
-    }
-
-    return null;
+            )}
+        </div>
+    );
 };
 
 export default ElaboradorTab;

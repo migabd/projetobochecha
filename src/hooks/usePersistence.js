@@ -4,8 +4,20 @@ import { useState, useEffect, useCallback, useRef } from 'react';
  * Hook para gerenciar a persistência de dados via LocalStorage e GitHub Gist.
  */
 export const usePersistence = (initialDb, gistConfig, setGistConfig, showAlert) => {
-    const [db, setDb] = useState(initialDb);
-    const [syncStatus, setSyncStatus] = useState('idle'); // 'idle', 'syncing', 'connecting', 'synced', 'error'
+    const [db, setDb] = useState(() => {
+        try {
+            const saved = localStorage.getItem('caderno_db');
+            if (saved) {
+                const parsed = JSON.parse(saved);
+                // Basic validation to ensure we're not loading empty or corrupt state
+                if (parsed && typeof parsed === 'object') return parsed;
+            }
+        } catch (e) {
+            console.error("Erro ao carregar DB local:", e);
+        }
+        return initialDb;
+    });
+    const [syncStatus, setSyncStatus] = useState('idle');
     const [lastSyncTime, setLastSyncTime] = useState(null);
     const [syncErrorMsg, setSyncErrorMsg] = useState('');
     
@@ -136,6 +148,12 @@ export const usePersistence = (initialDb, gistConfig, setGistConfig, showAlert) 
 
     // Auto-Save Effect
     useEffect(() => {
+        // Local Save (Always)
+        if (!isFirstRenderDb.current) {
+            localStorage.setItem('caderno_db', JSON.stringify(db));
+        }
+
+        // Cloud Save (Gist)
         if (isFirstRenderDb.current || !gistConfig.id || !gistConfig.token || !gistConfig.autoSync) {
             if (isFirstRenderDb.current) isFirstRenderDb.current = false;
             return;

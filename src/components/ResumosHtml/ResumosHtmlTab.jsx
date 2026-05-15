@@ -20,17 +20,71 @@ const ResumosHtmlTab = ({ db, setDb, showAlert, callIA }) => {
         if (!editor.aiPrompt.trim() && !editor.materialText.trim()) return showAlert("Forneça um tema ou material.");
         setEditor(p => ({ ...p, isGenerating: true }));
         
-        const prompt = `Você é um Professor de Medicina de Elite. Crie um resumo HTML aprofundado com Tailwind CSS. 
-        Tema: ${editor.aiPrompt} 
-        Material: ${editor.materialText}
-        Retorne apenas o código HTML interno.`;
+        const prompt = `Você é um Professor de Medicina de Elite criando um resumo EXTREMAMENTE DETALHADO, LONGO E APROFUNDADO em formato HTML puro.
+        O usuário espera um conteúdo denso, com múltiplas seções, tabelas comparativas, critérios diagnósticos completos e mnemônicas de memorização.
+        
+        ESTRUTURA OBRIGATÓRIA:
+        1. Utilize Tailwind CSS (light/dark mode) para um design premium. Use cores como esmeralda, zinco, índigo.
+        2. Use <h3> para seções principais e <h4> para subseções.
+        3. SEMPRE inclua pelo menos uma tabela estilizada se houver dados comparativos.
+        4. Use blocos de destaque (bg-emerald-500/10, border border-emerald-500/20) para avisos importantes.
+        
+        Tema/Contexto: ${editor.aiPrompt} 
+        Material de Base: ${editor.materialText}
+        
+        RETORNE APENAS O CÓDIGO HTML INTERNO (sem <html> ou <body>).`;
 
         const res = await callIA([{ role: 'user', parts: [{ text: prompt }] }]);
         if (res) {
             setEditor(p => ({ ...p, content: res.replace(/```html|```/g, '').trim(), isGenerating: false }));
-            showAlert("Resumo gerado!");
+            showAlert("✅ Resumo de Elite gerado!");
         } else {
             setEditor(p => ({ ...p, isGenerating: false }));
+        }
+    };
+
+    const smartModifyWithAI = async () => {
+        if (!editor.content.trim()) return showAlert("O resumo atual está vazio.");
+        if (!editor.aiPrompt.trim()) return showAlert("Digite o que deseja alterar no campo de tema.");
+
+        setEditor(p => ({ ...p, isGenerating: true }));
+        const prompt = `Você é um Assistente de Elite. Aplique a modificação solicitada no resumo HTML preservando o estilo premium.
+        CÓDIGO ATUAL:
+        ${editor.content}
+        INSTRUÇÃO DE MUDANÇA: "${editor.aiPrompt}"
+        Retorne apenas o novo código HTML completo, sem explicações.`;
+
+        const res = await callIA([{ role: 'user', parts: [{ text: prompt }] }]);
+        if (res) {
+            setEditor(p => ({ ...p, content: res.replace(/```html|```/g, '').trim(), isGenerating: false }));
+            showAlert("✨ Resumo atualizado inteligentemente!");
+        } else {
+            setEditor(p => ({ ...p, isGenerating: false }));
+        }
+    };
+
+    const injectSnippet = (snippet) => {
+        setEditor(p => ({ ...p, content: p.content + snippet }));
+    };
+
+    const handleFileUpload = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        const name = file.name.toLowerCase();
+        
+        if (name.endsWith('.html') || name.endsWith('.htm')) {
+            reader.onload = (ev) => setEditor(p => ({ ...p, content: ev.target.result, title: p.title || file.name }));
+            reader.readAsText(file);
+        } else if (name.endsWith('.pdf')) {
+            showAlert("Processando PDF... Aguarde.");
+            // Note: In a real environment, you'd use pdfjsLib here. 
+            // For now, we'll just read as text if possible or ask user to copy-paste.
+            reader.onload = (ev) => setEditor(p => ({ ...p, materialText: ev.target.result }));
+            reader.readAsText(file);
+        } else {
+            reader.onload = (ev) => setEditor(p => ({ ...p, materialText: ev.target.result }));
+            reader.readAsText(file);
         }
     };
 
@@ -99,19 +153,54 @@ const ResumosHtmlTab = ({ db, setDb, showAlert, callIA }) => {
                             placeholder="Título do Resumo" className="w-full bg-zinc-900 border border-white/5 rounded-2xl p-6 font-black text-xl text-white outline-none"
                         />
                         <div className="bg-emerald-500/5 p-6 rounded-3xl border border-emerald-500/10 space-y-4">
+                            <label className="block text-[10px] font-black text-emerald-500 uppercase tracking-widest">Tema ou Contexto</label>
                             <textarea 
                                 value={editor.aiPrompt} onChange={e => setEditor({...editor, aiPrompt: e.target.value})}
                                 placeholder="Sobre o que vamos escrever hoje?" className="w-full bg-transparent border-none outline-none font-bold text-zinc-400 h-24 resize-none"
                             />
-                            <button 
-                                onClick={handleGenerate} disabled={editor.isGenerating}
-                                className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-2xl transition-all shadow-xl shadow-emerald-600/20"
-                            >
-                                {editor.isGenerating ? <i className="fa-solid fa-circle-notch fa-spin"></i> : 'GERAR COM IA'}
-                            </button>
+                            
+                            <div className="border-t border-white/5 pt-4">
+                                <label className="flex justify-between items-center mb-2">
+                                    <span className="text-[10px] font-black text-emerald-500 uppercase tracking-widest">Material de Base</span>
+                                    <label className="cursor-pointer text-emerald-500 hover:text-emerald-400 transition-colors">
+                                        <i className="fa-solid fa-paperclip"></i>
+                                        <input type="file" className="hidden" onChange={handleFileUpload} accept=".html,.htm,.pdf,.txt" />
+                                    </label>
+                                </label>
+                                <textarea 
+                                    value={editor.materialText} onChange={e => setEditor({...editor, materialText: e.target.value})}
+                                    placeholder="Cole aqui o texto ou anexe um arquivo..." className="w-full bg-zinc-950/30 rounded-xl p-4 border border-white/5 outline-none font-bold text-zinc-500 text-xs h-32 resize-none"
+                                />
+                            </div>
+
+                            <div className="flex gap-4">
+                                <button 
+                                    onClick={handleGenerate} disabled={editor.isGenerating}
+                                    className="flex-1 py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-2xl transition-all shadow-xl shadow-emerald-600/20"
+                                >
+                                    {editor.isGenerating ? <><i className="fa-solid fa-circle-notch fa-spin mr-2"></i> ...</> : 'GERAR'}
+                                </button>
+                                <button 
+                                    onClick={smartModifyWithAI} disabled={editor.isGenerating}
+                                    className="flex-1 py-4 bg-zinc-800 hover:bg-zinc-700 text-white font-black rounded-2xl transition-all"
+                                >
+                                    REFIDAR
+                                </button>
+                            </div>
                         </div>
                     </div>
-                    <div className="bento-card p-10 rounded-[3.5rem] flex-1">
+                    <div className="bento-card p-10 rounded-[3.5rem] flex-1 flex flex-col">
+                        <div className="flex gap-2 mb-4 overflow-x-auto pb-2 planner-scroll">
+                            {[
+                                { label: 'Título', icon: 'fa-heading', code: '\n<h3 class="text-xl font-black text-emerald-600 dark:text-emerald-400 mt-6 mb-3 border-b border-emerald-100 dark:border-emerald-900/40 pb-2 flex items-center gap-2"><i class="fa-solid fa-stethoscope"></i> Seção</h3>\n' },
+                                { label: 'Alerta', icon: 'fa-triangle-exclamation', code: '\n<div class="p-4 bg-red-500/10 border-l-4 border-red-500 rounded-r-2xl text-red-400 font-bold my-4 shadow-sm">Alerta Médica</div>\n' },
+                                { label: 'Tabela', icon: 'fa-table', code: '\n<div class="overflow-x-auto my-4"><table class="w-full border border-white/5 text-sm"><tr><th class="p-3 bg-white/5 border-b border-white/5">Item</th><th class="p-3 bg-white/5 border-b border-white/5">Valor</th></tr><tr><td class="p-3 border-b border-white/5">A</td><td class="p-3 border-b border-white/5">B</td></tr></table></div>\n' }
+                            ].map((snip, i) => (
+                                <button key={i} onClick={() => injectSnippet(snip.code)} className="px-3 py-2 glass-obsidian rounded-xl text-[10px] font-black uppercase tracking-widest whitespace-nowrap shrink-0 hover:bg-white/10 transition-all">
+                                    <i className={`fa-solid ${snip.icon} mr-2 text-emerald-500`}></i> {snip.label}
+                                </button>
+                            ))}
+                        </div>
                         <textarea 
                             value={editor.content} onChange={e => setEditor({...editor, content: e.target.value})}
                             placeholder="Código HTML/Tailwind..." className="w-full h-96 bg-zinc-950/50 p-6 rounded-3xl font-mono text-xs text-zinc-400 outline-none border border-white/5 resize-none"

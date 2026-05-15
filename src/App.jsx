@@ -4,6 +4,7 @@ import { useAI } from './hooks/useAI';
 
 // Módulos
 import ElaboradorTab from './components/Elaborador/ElaboradorTab.jsx';
+import SimuladosTab from './components/Simulados/SimuladosTab.jsx';
 import FluxogramasTab from './components/Fluxogramas/FluxogramasTab.jsx';
 import ChecklistsTab from './components/Checklists/ChecklistsTab.jsx';
 import GamesTab from './components/Games/GamesTab.jsx';
@@ -18,6 +19,7 @@ import ImageEditor from './components/Common/ImageEditor.jsx';
 const INITIAL_DB = {
     errors: [], flashcards: [], checklists: [], summariesHtml: [],
     weeks: [], games: [], fluxogramas: [], perceptions: [],
+    subjects: [],
     processedQuestionLists: [],
     simuladoHistory: [],
     dailyStats: {},
@@ -26,12 +28,17 @@ const INITIAL_DB = {
     planner: {}
 };
 
-const _x = (h, k) => h.match(/.{1,2}/g).map((b, i) => String.fromCharCode(parseInt(b, 16) ^ k.charCodeAt(i % k.length))).join('');
+const _x = (b, k) => {
+    try {
+        const s = atob(b);
+        return s.split('').map((c, i) => String.fromCharCode(c.charCodeAt(0) ^ k.charCodeAt(i % k.length))).join('');
+    } catch (e) { return ''; }
+};
 
 const SECRETS = {
-    _t: '2009122d0b0a5836272d75760c0a163937012b13582a24030108511c080e07001a145e0b14351d08',
-    _g: '242852420b030a7207037d6f020a7f280041700309555456146f0008262b0178',
-    _k: '062818131a1c6f2c0d3301220f2908170a336f045c1f115441281d41280c2d78260f0136172805'
+    _t: 'IAlXEx0LClg2Jy11dg0KFjk3ASsTWCokAwEIFRwIDgcBABoVHgkUNRgI',
+    _g: 'JChSQgsDCnIHA31fAgp/KABAcAMJVVRWFm8ACiYrAXh4',
+    _k: 'BigYExocbywNMwEiDw8pCBdTNxYEUChdQChMLXgmDwE2FygF'
 };
 
 const INITIAL_CONFIG = {
@@ -41,12 +48,6 @@ const INITIAL_CONFIG = {
 };
 
 const App = () => {
-    const [isLoggedIn, setIsLoggedIn] = useState(false);
-    const [keyword, setKeyword] = useState('');
-    const [activeTab, setActiveTab] = useState('dashboard');
-    const [imageToEdit, setImageToEdit] = useState(null);
-    const [sidebarOpen, setSidebarOpen] = useState(true);
-
     const [aiConfig, setAiConfig] = useState(() => {
         try {
             const saved = localStorage.getItem('caderno_ai_config');
@@ -55,9 +56,17 @@ const App = () => {
         return INITIAL_CONFIG;
     });
 
+    const [isLoggedIn, setIsLoggedIn] = useState(() => !!aiConfig.apiKey);
+    const [theme, setTheme] = useState(() => localStorage.getItem('caderno_theme') || 'dark');
+    const [keyword, setKeyword] = useState('');
+    const [activeTab, setActiveTab] = useState('dashboard');
+    const [imageToEdit, setImageToEdit] = useState(null);
+    const [sidebarOpen, setSidebarOpen] = useState(true);
+
     const [alertText, setAlertText] = useState(null);
     const [lightbox, setLightbox] = useState(null);
     const [fluxogramaPlay, setFluxogramaPlay] = useState(null);
+    const [directSimulado, setDirectSimulado] = useState(null);
 
     const showAlert = (txt) => {
         setAlertText(txt);
@@ -71,6 +80,12 @@ const App = () => {
     );
 
     const { callIA, getPersonaInstruction, isLoading: aiLoading } = useAI(aiConfig);
+
+    useEffect(() => {
+        if (isLoggedIn && aiConfig.gist.token && aiConfig.gist.id) {
+            syncFromGist();
+        }
+    }, [isLoggedIn]); // Only run on login or when gist config changes after login
 
     useEffect(() => {
         const seedLegacyData = async () => {
@@ -110,9 +125,15 @@ const App = () => {
         localStorage.setItem('caderno_db', JSON.stringify(db));
     }, [db]);
 
+    useEffect(() => {
+        localStorage.setItem('caderno_theme', theme);
+        document.documentElement.className = theme;
+    }, [theme]);
+
     const navItems = [
         { id: 'dashboard', icon: 'house', label: 'Dashboard' },
         { id: 'elaborador', icon: 'wand-magic-sparkles', label: 'Elaborador' },
+        { id: 'simulados', icon: 'list-ol', label: 'Simulados' },
         { id: 'fluxogramas', icon: 'diagram-project', label: 'Fluxogramas' },
         { id: 'checklists', icon: 'list-check', label: 'Checklists' },
         { id: 'games', icon: 'gamepad', label: 'Games' },
@@ -185,14 +206,21 @@ const App = () => {
     }
 
     const Component = {
-        elaborador: ElaboradorTab, fluxogramas: FluxogramasTab,
-        checklists: ChecklistsTab, games: GamesTab, resumos: ResumosHtmlTab,
-        flashcards: FlashcardsTab, analise_reversa: ReverseAnalysisTab, 
-        chat: MentorIATab, planner: PlannerTab, insights: InsightsTab
+        elaborador: ElaboradorTab,
+        simulados: SimuladosTab,
+        fluxogramas: FluxogramasTab,
+        checklists: ChecklistsTab,
+        games: GamesTab,
+        resumos: ResumosHtmlTab,
+        flashcards: FlashcardsTab,
+        analise_reversa: ReverseAnalysisTab, 
+        chat: MentorIATab,
+        planner: PlannerTab,
+        insights: InsightsTab
     }[activeTab];
 
     return (
-        <div className="flex h-screen bg-[#09090b] text-zinc-100 font-sans overflow-hidden">
+        <div className={`flex h-screen ${theme === 'dark' ? 'bg-[#09090b] text-zinc-100' : 'bg-zinc-50 text-zinc-900'} font-sans overflow-hidden transition-colors duration-500`}>
             {/* Sidebar Original */}
             <aside className={`glass-obsidian h-full flex flex-col transition-all duration-500 ${sidebarOpen ? 'w-72' : 'w-24'} shrink-0 z-[100]`}>
                 <div className="p-8 flex items-center gap-4 mb-10">
@@ -215,6 +243,13 @@ const App = () => {
                 </nav>
 
                 <div className="p-4 border-t border-white/5 space-y-2">
+                    <button 
+                        onClick={() => setTheme(prev => prev === 'dark' ? 'light' : 'dark')}
+                        className="w-full flex items-center gap-4 p-4 rounded-2xl text-zinc-500 hover:text-white transition-all"
+                    >
+                        <i className={`fa-solid fa-${theme === 'dark' ? 'sun' : 'moon'} text-lg w-6`}></i>
+                        {sidebarOpen && <span className="text-sm">{theme === 'dark' ? 'Modo Claro' : 'Modo Escuro'}</span>}
+                    </button>
                     <button onClick={() => setActiveTab('settings')} className={`w-full flex items-center gap-4 p-4 rounded-2xl font-black transition-all ${activeTab === 'settings' ? 'sidebar-active' : 'text-zinc-500 hover:text-zinc-200'}`}>
                         <i className="fa-solid fa-gear text-lg w-6"></i>
                         {sidebarOpen && <span className="text-sm">Configurações</span>}
@@ -227,7 +262,7 @@ const App = () => {
             </aside>
 
             {/* Main Area */}
-            <div className="flex-1 flex flex-col relative overflow-hidden bg-[#09090b]">
+            <div className={`flex-1 flex flex-col relative overflow-hidden ${theme === 'dark' ? 'bg-[#09090b]' : 'bg-white'}`}>
                 {/* Sync Bar */}
                 <div className={`fixed top-0 left-0 w-full h-1 z-[1000] ${syncStatus === 'syncing' ? 'sync-active' : ''}`}></div>
                 
@@ -265,7 +300,19 @@ const App = () => {
                         </div>
                     ) : Component ? (
                         <div className="animate-in fade-in duration-500">
-                            <Component db={db} setDb={setDb} showAlert={showAlert} callIA={callIA} aiConfig={aiConfig} setLightbox={setLightbox} fluxogramaPlay={fluxogramaPlay} setFluxogramaPlay={setFluxogramaPlay} setActiveTab={setActiveTab} />
+                            <Component 
+                                db={db} 
+                                setDb={setDb} 
+                                showAlert={showAlert} 
+                                callIA={callIA} 
+                                aiConfig={aiConfig} 
+                                setLightbox={setLightbox} 
+                                fluxogramaPlay={fluxogramaPlay} 
+                                setFluxogramaPlay={setFluxogramaPlay} 
+                                setActiveTab={setActiveTab}
+                                directSimulado={directSimulado}
+                                setDirectSimulado={setDirectSimulado}
+                            />
                         </div>
                     ) : (
                         <div className="p-10 md:p-16 max-w-[1600px] mx-auto animate-in fade-in duration-1000">
@@ -276,7 +323,8 @@ const App = () => {
 
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
                                 {[
-                                    { id: 'elaborador', icon: 'wand-magic-sparkles', title: 'Elaborador de Elite', desc: 'Simulados exaustivos gerados por IA.' },
+                                    { id: 'elaborador', icon: 'wand-magic-sparkles', title: 'Elaborador de Elite', desc: 'Gerador de questões por IA.' },
+                                    { id: 'simulados', icon: 'list-ol', title: 'Simulados PRO', desc: 'Treino exaustivo com Mentor IA.' },
                                     { id: 'fluxogramas', icon: 'diagram-project', title: 'Fluxogramas', desc: 'Treino visual e reconstrução ativa.' },
                                     { id: 'checklists', icon: 'list-check', title: 'Checklists PRO', desc: 'Protocolos de urgência e rotina.' },
                                     { id: 'games', icon: 'gamepad', title: 'Memory Games', desc: 'Retenção por associação rápida.' },
