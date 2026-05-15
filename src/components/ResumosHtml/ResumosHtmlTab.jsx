@@ -1,166 +1,130 @@
 import React, { useState } from 'react';
 
 const ResumosHtmlTab = ({ db, setDb, showAlert, callIA }) => {
-    const [htmlSummaryState, setHtmlSummaryState] = useState({ view: 'list', search: '', editor: { id: null, title: '', category: '', content: '', materialText: '', isGenerating: false, aiPrompt: '' } });
+    const [view, setView] = useState('list'); // list, edit
+    const [editor, setEditor] = useState({ id: null, title: '', category: 'Clínica Médica', content: '', isGenerating: false, aiPrompt: '', materialText: '' });
+    const [search, setSearch] = useState('');
 
-    const summariesList = db.summariesHtml || [];
-    const filteredList = summariesList.filter(s => {
-        if (!htmlSummaryState.search.trim()) return true;
-        const term = htmlSummaryState.search.toLowerCase();
-        return (s.title && s.title.toLowerCase().includes(term)) || 
-               (s.category && s.category.toLowerCase().includes(term));
-    });
-
-    const extractTextFromPDF = async (data) => {
-        if (!window.pdfjsLib) throw new Error("PDF.js não carregado.");
-        try {
-            const pdf = await window.pdfjsLib.getDocument({ data }).promise;
-            let fullText = "";
-            for (let i = 1; i <= pdf.numPages; i++) {
-                const page = await pdf.getPage(i);
-                const content = await page.getTextContent();
-                const strings = content.items.map(item => item.str);
-                fullText += strings.join(" ") + "\n";
-            }
-            return fullText;
-        } catch (e) {
-            console.error("Erro PDF.js:", e);
-            throw new Error("Falha ao extrair texto do PDF.");
-        }
-    };
-
-    const saveSummary = () => {
-        const { id, title, category, content } = htmlSummaryState.editor;
-        if (!title.trim()) return showAlert("Dê um título!");
-        if (!content.trim()) return showAlert("Conteúdo vazio!");
-
+    const handleSave = () => {
+        if (!editor.title.trim()) return showAlert("O resumo precisa de um título!");
         setDb(p => {
-            const existing = (p.summariesHtml || []).find(x => x.id === id);
-            let updated;
-            if (existing) {
-                updated = p.summariesHtml.map(x => x.id === id ? { ...x, title, category, content, date: new Date().toLocaleDateString() } : x);
-            } else {
-                updated = [{ id: id || Date.now(), title, category, content, date: new Date().toLocaleDateString() }, ...(p.summariesHtml || [])];
-            }
-            return { ...p, summariesHtml: updated };
+            const isNew = !p.summariesHtml?.find(x => x.id === editor.id);
+            const newList = isNew ? [{...editor, id: Date.now(), date: new Date().toLocaleDateString('pt-PT')}, ...(p.summariesHtml || [])] : p.summariesHtml.map(x => x.id === editor.id ? editor : x);
+            return { ...p, summariesHtml: newList };
         });
-
-        showAlert("✅ Resumo salvo!");
-        setHtmlSummaryState(p => ({ ...p, view: 'list' }));
+        setView('list');
+        showAlert("Resumo salvo com sucesso!");
     };
 
-    const handleFileUpload = (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-        const reader = new FileReader();
-        const name = file.name.toLowerCase();
+    const handleGenerate = async () => {
+        if (!editor.aiPrompt.trim() && !editor.materialText.trim()) return showAlert("Forneça um tema ou material.");
+        setEditor(p => ({ ...p, isGenerating: true }));
+        
+        const prompt = `Você é um Professor de Medicina de Elite. Crie um resumo HTML aprofundado com Tailwind CSS. 
+        Tema: ${editor.aiPrompt} 
+        Material: ${editor.materialText}
+        Retorne apenas o código HTML interno.`;
 
-        if (name.endsWith('.html') || name.endsWith('.htm')) {
-            reader.onload = (ev) => {
-                setHtmlSummaryState(p => ({
-                    ...p, view: 'edit',
-                    editor: { ...p.editor, id: Date.now(), title: file.name.replace(/\.html?$/i, ''), category: 'Geral', content: ev.target.result, materialText: '', isGenerating: false, aiPrompt: '' }
-                }));
-            };
-            reader.readAsText(file);
-        } else if (name.endsWith('.pdf')) {
-            setHtmlSummaryState(p => ({ ...p, editor: { ...p.editor, isGenerating: true } }));
-            reader.onload = async (ev) => {
-                try {
-                    const text = await extractTextFromPDF(new Uint8Array(ev.target.result));
-                    setHtmlSummaryState(p => ({
-                        ...p, view: 'edit',
-                        editor: { ...p.editor, id: Date.now(), title: file.name.replace(/\.pdf$/i, ''), category: 'Geral', content: '', materialText: text, isGenerating: false, aiPrompt: '' }
-                    }));
-                    showAlert("✅ PDF processado!");
-                } catch (err) {
-                    setHtmlSummaryState(p => ({ ...p, editor: { ...p.editor, isGenerating: false } }));
-                    showAlert("❌ Erro: " + err.message);
-                }
-            };
-            reader.readAsArrayBuffer(file);
-        }
-        e.target.value = '';
-    };
-
-    const injectSnippet = (snippet) => {
-        setHtmlSummaryState(p => ({ ...p, editor: { ...p.editor, content: p.editor.content + snippet } }));
-    };
-
-    const generateWithAI = async () => {
-        const { aiPrompt, materialText } = htmlSummaryState.editor;
-        setHtmlSummaryState(p => ({ ...p, editor: { ...p.editor, isGenerating: true } }));
-        try {
-            const res = await callIA([{ role: 'user', parts: [{ text: `Gere um resumo médico detalhado em HTML sobre: ${aiPrompt || materialText}` }] }]);
-            setHtmlSummaryState(p => ({
-                ...p, editor: { ...p.editor, isGenerating: false, content: res ? res.replace(/```html|```/g, '').trim() : p.editor.content }
-            }));
-            showAlert("✨ Resumo gerado!");
-        } catch (e) {
-            setHtmlSummaryState(p => ({ ...p, editor: { ...p.editor, isGenerating: false } }));
-            showAlert("❌ Erro.");
+        const res = await callIA([{ role: 'user', parts: [{ text: prompt }] }]);
+        if (res) {
+            setEditor(p => ({ ...p, content: res.replace(/```html|```/g, '').trim(), isGenerating: false }));
+            showAlert("Resumo gerado!");
+        } else {
+            setEditor(p => ({ ...p, isGenerating: false }));
         }
     };
 
-    if (htmlSummaryState.view === 'edit') {
-        const ed = htmlSummaryState.editor;
+    if (view === 'list') {
+        const filtered = (db.summariesHtml || []).filter(s => s.title.toLowerCase().includes(search.toLowerCase()));
         return (
-            <div className="p-6 space-y-6 animate-in fade-in max-w-[1600px] mx-auto w-full">
-                <div className="flex justify-between items-center bg-white dark:bg-zinc-900 p-6 rounded-3xl border shadow-sm">
-                    <button onClick={() => setHtmlSummaryState(p => ({ ...p, view: 'list' }))} className="w-10 h-10 rounded-full bg-zinc-100 flex items-center justify-center transition-all">
-                        <i className="fa-solid fa-arrow-left"></i>
-                    </button>
-                    <button onClick={saveSummary} className="bg-emerald-600 text-white px-6 py-3 rounded-xl font-black shadow-md">Salvar</button>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <input type="text" value={ed.title} onChange={e => setHtmlSummaryState(p => ({ ...p, editor: { ...p.editor, title: e.target.value } }))} placeholder="Título" className="w-full p-4 rounded-xl bg-white dark:bg-zinc-900 border font-bold" />
-                    <input type="text" value={ed.category} onChange={e => setHtmlSummaryState(p => ({ ...p, editor: { ...p.editor, category: e.target.value } }))} placeholder="Categoria" className="w-full p-4 rounded-xl bg-white dark:bg-zinc-900 border font-bold" />
-                </div>
-
-                <div className="bg-emerald-50 p-5 rounded-2xl border flex gap-3 items-center">
-                    <input type="text" value={ed.aiPrompt} onChange={e => setHtmlSummaryState(p => ({ ...p, editor: { ...p.editor, aiPrompt: e.target.value } }))} placeholder="Comando para IA..." className="flex-1 p-3 rounded-xl border" />
-                    <button onClick={generateWithAI} disabled={ed.isGenerating} className="px-5 py-3 bg-emerald-600 text-white font-black rounded-xl text-xs">
-                        {ed.isGenerating ? '...' : 'Gerar'}
-                    </button>
-                </div>
-
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 h-[600px]">
-                    <textarea value={ed.content} onChange={e => setHtmlSummaryState(p => ({ ...p, editor: { ...p.editor, content: e.target.value } }))} className="p-4 bg-zinc-50 rounded-3xl outline-none font-mono text-xs resize-none" />
-                    <div className="p-8 overflow-y-auto bg-white dark:bg-zinc-950 rounded-3xl border prose dark:prose-invert max-w-none">
-                        <div dangerouslySetInnerHTML={{ __html: ed.content }} />
+            <div className="p-10 max-w-7xl mx-auto animate-in fade-in duration-700">
+                <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-12">
+                    <div>
+                        <h2 className="text-5xl font-black italic tracking-tighter neon-emerald uppercase">Resumos <span className="text-white/20">HTML</span></h2>
+                        <p className="text-zinc-500 font-bold mt-2 uppercase tracking-widest text-xs">Aprofundamento técnico com design premium.</p>
                     </div>
+                    <div className="flex gap-4">
+                        <input 
+                            value={search} onChange={e => setSearch(e.target.value)}
+                            placeholder="Procurar resumo..."
+                            className="bg-zinc-900 border border-white/5 rounded-2xl px-6 py-4 text-sm font-bold text-white outline-none focus:border-emerald-500/50"
+                        />
+                        <button 
+                            onClick={() => { setEditor({ id: null, title: '', category: 'Geral', content: '', isGenerating: false, aiPrompt: '', materialText: '' }); setView('edit'); }}
+                            className="premium-btn px-8 py-4 rounded-2xl font-black shadow-2xl flex items-center gap-3"
+                        >
+                            <i className="fa-solid fa-plus"></i> NOVO
+                        </button>
+                    </div>
+                </header>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                    {filtered.map(s => (
+                        <div key={s.id} onClick={() => { setEditor(s); setView('edit'); }} className="bento-card p-10 rounded-[3.5rem] cursor-pointer group hover:border-emerald-500/30 transition-all">
+                            <div className="flex justify-between items-start mb-6">
+                                <span className="text-[10px] font-black text-emerald-500 bg-emerald-500/10 px-3 py-1 rounded-full uppercase tracking-widest">{s.category}</span>
+                                <span className="text-[10px] font-bold text-zinc-600">{s.date}</span>
+                            </div>
+                            <h3 className="text-2xl font-black mb-6 line-clamp-2">{s.title}</h3>
+                            <div className="flex gap-4 border-t border-white/5 pt-6">
+                                <button onClick={(e) => { e.stopPropagation(); setEditor(s); setView('edit'); }} className="text-zinc-500 hover:text-emerald-500 transition-colors"><i className="fa-solid fa-pen-nib"></i></button>
+                                <button onClick={(e) => { e.stopPropagation(); if(window.confirm("Excluir?")) setDb(p => ({...p, summariesHtml: p.summariesHtml.filter(x => x.id !== s.id)})); }} className="text-zinc-500 hover:text-red-500 transition-colors"><i className="fa-solid fa-trash"></i></button>
+                            </div>
+                        </div>
+                    ))}
                 </div>
             </div>
         );
     }
 
     return (
-        <div className="p-6 space-y-8 animate-in fade-in max-w-[1600px] mx-auto">
-            <div className="bg-white dark:bg-zinc-900 p-8 rounded-3xl shadow-xl border flex flex-col lg:flex-row justify-between items-center gap-6">
-                <div>
-                    <h2 className="text-3xl font-black text-emerald-600 dark:text-emerald-500 mb-2">Resumos HTML</h2>
-                    <p className="text-xs font-bold text-zinc-400">Estudos aprofundados com formatação rica.</p>
+        <div className="p-10 max-w-7xl mx-auto animate-in fade-in duration-500 pb-32">
+            <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-12">
+                <div className="flex items-center gap-8">
+                    <button onClick={() => setView('list')} className="w-14 h-14 glass-obsidian rounded-2xl flex items-center justify-center hover:bg-white/10 transition-all">
+                        <i className="fa-solid fa-arrow-left text-zinc-400"></i>
+                    </button>
+                    <h2 className="text-4xl font-black italic tracking-tighter neon-emerald uppercase">{editor.id ? 'Editar Resumo' : 'Novo Resumo'}</h2>
                 </div>
-                <div className="flex gap-3">
-                    <div className="relative">
-                        <input type="file" accept=".html,.htm,.pdf,.txt" onChange={handleFileUpload} className="absolute inset-0 opacity-0 cursor-pointer" />
-                        <button className="px-6 py-3 bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 font-black rounded-xl">Alimentar</button>
-                    </div>
-                    <button onClick={() => setHtmlSummaryState(p => ({ ...p, view: 'edit', editor: { id: null, title: '', category: '', content: '', isGenerating: false, aiPrompt: '', materialText: '' } }))} className="px-6 py-3 bg-emerald-600 text-white font-black rounded-xl shadow-lg">Novo Resumo</button>
-                </div>
-            </div>
+                <button onClick={handleSave} className="premium-btn px-10 py-5 rounded-2xl font-black shadow-2xl flex items-center gap-3">
+                    <i className="fa-solid fa-floppy-disk"></i> SALVAR
+                </button>
+            </header>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {filteredList.map(item => (
-                    <div key={item.id} className="bg-white dark:bg-zinc-900 rounded-3xl border p-6 shadow-md hover:shadow-xl transition-all">
-                        <h4 className="font-black text-lg mb-2">{item.title}</h4>
-                        <div className="flex justify-between mt-4 border-t pt-4">
-                            <button onClick={() => setHtmlSummaryState(p => ({ ...p, view: 'edit', editor: { id: item.id, title: item.title, category: item.category || '', content: item.content, isGenerating: false, aiPrompt: '' } }))} className="text-emerald-600 font-black text-xs">Abrir</button>
-                            <button onClick={() => setDb(p => ({ ...p, summariesHtml: (p.summariesHtml || []).filter(x => x.id !== item.id) }))} className="text-red-400"><i className="fa-solid fa-trash"></i></button>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
+                <div className="space-y-8">
+                    <div className="bento-card p-10 rounded-[3.5rem] space-y-6">
+                        <input 
+                            value={editor.title} onChange={e => setEditor({...editor, title: e.target.value})}
+                            placeholder="Título do Resumo" className="w-full bg-zinc-900 border border-white/5 rounded-2xl p-6 font-black text-xl text-white outline-none"
+                        />
+                        <div className="bg-emerald-500/5 p-6 rounded-3xl border border-emerald-500/10 space-y-4">
+                            <textarea 
+                                value={editor.aiPrompt} onChange={e => setEditor({...editor, aiPrompt: e.target.value})}
+                                placeholder="Sobre o que vamos escrever hoje?" className="w-full bg-transparent border-none outline-none font-bold text-zinc-400 h-24 resize-none"
+                            />
+                            <button 
+                                onClick={handleGenerate} disabled={editor.isGenerating}
+                                className="w-full py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-2xl transition-all shadow-xl shadow-emerald-600/20"
+                            >
+                                {editor.isGenerating ? <i className="fa-solid fa-circle-notch fa-spin"></i> : 'GERAR COM IA'}
+                            </button>
                         </div>
                     </div>
-                ))}
+                    <div className="bento-card p-10 rounded-[3.5rem] flex-1">
+                        <textarea 
+                            value={editor.content} onChange={e => setEditor({...editor, content: e.target.value})}
+                            placeholder="Código HTML/Tailwind..." className="w-full h-96 bg-zinc-950/50 p-6 rounded-3xl font-mono text-xs text-zinc-400 outline-none border border-white/5 resize-none"
+                        />
+                    </div>
+                </div>
+
+                <div className="bento-card p-10 rounded-[3.5rem] bg-white text-zinc-900 overflow-y-auto max-h-[800px]">
+                    <div className="flex justify-between items-center mb-10 border-b border-zinc-100 pb-6">
+                        <span className="font-black text-xs uppercase tracking-widest text-emerald-600">PREVIEW LIVE</span>
+                    </div>
+                    <div className="prose prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: editor.content }} />
+                </div>
             </div>
         </div>
     );
