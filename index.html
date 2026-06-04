@@ -5486,7 +5486,7 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
                                     <div className="absolute top-4 right-4 text-white text-2xl cursor-pointer hover:scale-110 transition-transform font-sans">
                                         <i className="fa-solid fa-xmark font-sans"></i>
                                     </div>
-                                    <img src={lightboxImage} className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl animate-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()} alt="Zoom" />
+                                    <img src={lightboxImage} className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl animate-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()} alt="Zoom" referrerPolicy="no-referrer" />
                                 </div>
                             )}
                         </div>
@@ -5715,7 +5715,7 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
                                                 {challengeToRender.figures.map(fig => (
                                                     <div key={fig.id} onClick={() => setLightboxImage(localFigUrls[fig.id] || fig.url)} className="group cursor-pointer rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3 hover:scale-[1.02] hover:border-emerald-500/50 transition-all shadow-sm font-sans">
                                                         <div className="aspect-video w-full bg-zinc-100 dark:bg-zinc-950 rounded-xl overflow-hidden mb-2 relative">
-                                                            <img src={localFigUrls[fig.id] || fig.url} className="w-full h-full object-contain" alt={fig.label} />
+                                                            <img src={localFigUrls[fig.id] || fig.url} className="w-full h-full object-contain" alt={fig.label} referrerPolicy="no-referrer" />
                                                             <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                                                                 <i className="fa-solid fa-magnifying-glass-plus text-white text-lg"></i>
                                                             </div>
@@ -5839,7 +5839,7 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
                             <div className="absolute top-4 right-4 text-white text-2xl cursor-pointer hover:scale-110 transition-transform font-sans">
                                 <i className="fa-solid fa-xmark font-sans"></i>
                             </div>
-                            <img src={lightboxImage} className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl animate-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()} alt="Zoom" />
+                            <img src={lightboxImage} className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl animate-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()} alt="Zoom" referrerPolicy="no-referrer" />
                         </div>
                     )}
                 </div>
@@ -5895,10 +5895,66 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
                     if (saved) {
                         const parsed = JSON.parse(saved);
                         if (!parsed.desafiosDiarios) parsed.desafiosDiarios = [];
+
+                        // Restaurar imagens e dados limpos do window.__INITIAL_STATE__
+                        if (window.__INITIAL_STATE__) {
+                            if (window.__INITIAL_STATE__.summaries && parsed.summaries) {
+                                parsed.summaries = parsed.summaries.map(s => {
+                                    if (!s.image) {
+                                        const orig = window.__INITIAL_STATE__.summaries.find(x => x.id === s.id);
+                                        if (orig && orig.image) {
+                                            return { ...s, image: orig.image };
+                                        }
+                                    }
+                                    return s;
+                                });
+                            }
+                            if (window.__INITIAL_STATE__.errors && parsed.errors) {
+                                parsed.errors = parsed.errors.map(err => {
+                                    if (!err.image) {
+                                        const orig = window.__INITIAL_STATE__.errors.find(x => x.id === err.id);
+                                        if (orig && orig.image) {
+                                            return { ...err, image: orig.image };
+                                        }
+                                    }
+                                    return err;
+                                });
+                            }
+                            if (window.__INITIAL_STATE__.games && parsed.games) {
+                                parsed.games = parsed.games.map(g => {
+                                    const origGame = window.__INITIAL_STATE__.games.find(x => x.id === g.id);
+                                    if (origGame && origGame.pairs && g.pairs) {
+                                        return {
+                                            ...g,
+                                            pairs: g.pairs.map(p => {
+                                                const origPair = origGame.pairs.find(x => x.id === p.id);
+                                                if (origPair) {
+                                                    return {
+                                                        ...p,
+                                                        a: p.a.val === '[Imagem na Cloud]' ? origPair.a : p.a,
+                                                        b: p.b.val === '[Imagem na Cloud]' ? origPair.b : p.b
+                                                    };
+                                                }
+                                                return p;
+                                            })
+                                        };
+                                    }
+                                    return g;
+                                });
+                            }
+                        }
                         return parsed;
                     }
+                    if (window.__INITIAL_STATE__) {
+                        return { ...emptyDb, ...window.__INITIAL_STATE__ };
+                    }
                     return emptyDb;
-                } catch (e) { return emptyDb; }
+                } catch (e) {
+                    if (window.__INITIAL_STATE__) {
+                        return { ...emptyDb, ...window.__INITIAL_STATE__ };
+                    }
+                    return emptyDb;
+                }
             });
 
             // --- SINCRONIZAÇÃO E CONTROLE ---
@@ -12682,7 +12738,7 @@ ${(obj.questoesAnalisadas || []).map(q => `### ${q.identificacao}
                         </div>
                     )}
                     {dialog.isOpen && <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[2000] flex justify-center items-center p-4"><div className="bg-white dark:bg-slate-800 p-8 rounded-3xl w-full max-w-sm text-center shadow-2xl border dark:border-slate-700"><h3 className="font-black text-xl mb-4 text-slate-800 dark:text-white">{dialog.type === 'alert' ? 'Aviso' : 'Confirmação'}</h3><p className="mb-8 whitespace-pre-wrap text-slate-600 dark:text-slate-300 leading-relaxed text-sm font-medium">{dialog.message}</p><div className="flex gap-2 justify-end">{dialog.type === 'confirm' && <button onClick={closeDialog} className="px-4 py-2 bg-slate-100 dark:bg-slate-700 rounded-xl font-bold">Cancelar</button>}<button onClick={() => { if (dialog.onConfirm) dialog.onConfirm(); closeDialog(); }} className="px-6 py-3 bg-emerald-600 text-white rounded-xl font-bold shadow-lg">OK</button></div></div></div>}
-                    {lightbox && <div className="fixed inset-0 bg-black/95 z-[1000] flex items-center justify-center p-8 cursor-zoom-out" onClick={() => setLightbox(null)}><img src={lightbox} className="max-h-full object-contain rounded-xl shadow-[0_0_100px_rgba(0,0,0,0.8)]" alt="Imagem ampliada" /></div>}
+                    {lightbox && <div className="fixed inset-0 bg-black/95 z-[1000] flex items-center justify-center p-8 cursor-zoom-out" onClick={() => setLightbox(null)}><img src={lightbox} className="max-h-full object-contain rounded-xl shadow-[0_0_100px_rgba(0,0,0,0.8)]" alt="Imagem ampliada" referrerPolicy="no-referrer" /></div>}
 
                     {/* --- ASSISTENTE FLUTUANTE IA --- */}
                     <div className="fixed bottom-6 right-6 z-[6000] flex flex-col items-end gap-4">
