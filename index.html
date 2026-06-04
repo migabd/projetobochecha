@@ -5912,6 +5912,7 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
             const lastGistReceiveTime = useRef(0);
             const isFirstRenderDb = useRef(true);
             const isFirstRenderChat = useRef(true);
+            const isFirstPersistence = useRef(true);
 
             // ----- GIST SYNC CONFIG -----
             const [gistConfig, setGistConfig] = useState(() => {
@@ -6003,7 +6004,7 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
                 }));
                 if (remote.chatSessions && Array.isArray(remote.chatSessions) && remote.chatSessions.length > 0) {
                     setChatSessions(remote.chatSessions);
-                    const activeMatch = remote.chatSessions.find(s => s.id === activeSessionId);
+                    const activeMatch = remote.chatSessions.find(s => s.id === activeSessionIdRef.current);
                     if (activeMatch) {
                         setChatMessages(activeMatch.messages || []);
                     } else {
@@ -6015,6 +6016,8 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
                 }
                 setSyncStatus('synced');
                 setLastSyncTime(new Date());
+                isDirty.current = false;
+                localStorage.setItem('caderno_db_is_dirty', 'false');
             };
 
             // ==========================================
@@ -6161,7 +6164,7 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
                     return;
                 }
                 const timer = setTimeout(() => {
-                    if (Date.now() - lastGistReceiveTime.current < 5000) return;
+                    if (!isDirty.current) return;
                     syncToGist(db);
                 }, 3000);
                 return () => clearTimeout(timer);
@@ -6357,6 +6360,11 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
                 } catch (e) {}
                 return 'default_session';
             });
+
+            const activeSessionIdRef = useRef(activeSessionId);
+            useEffect(() => {
+                activeSessionIdRef.current = activeSessionId;
+            }, [activeSessionId]);
 
             const [chatMessages, setChatMessages] = useState(() => {
                 try {
@@ -6701,8 +6709,13 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
                 } catch (e) {
                     console.warn("Erro ao salvar metadados locais:", e);
                 }
-                isDirty.current = true;
-                localStorage.setItem('caderno_db_is_dirty', 'true');
+                
+                if (isFirstPersistence.current) {
+                    isFirstPersistence.current = false;
+                } else if (Date.now() - lastGistReceiveTime.current > 2000) {
+                    isDirty.current = true;
+                    localStorage.setItem('caderno_db_is_dirty', 'true');
+                }
             }, [db, chatMessages, chatSessions]);
 
             useEffect(() => {
