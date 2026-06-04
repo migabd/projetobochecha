@@ -1036,18 +1036,22 @@ const FluxogramasTab = ({ fluxogramas = [], setDb, callIA, extractTextFromPDF, a
                     
                     // Feedback visual em tempo real
                     if (interimText.trim()) {
-                        setInterimTranscript(interimText.trim());
+                        const fullInterim = recognitionAccumulatedRef.current 
+                            ? recognitionAccumulatedRef.current + ' ' + interimText.trim()
+                            : interimText.trim();
+                        setInterimTranscript(fullInterim);
                     }
                     
                     if (finalText.trim()) {
-                        setInterimTranscript('');
                         recognitionAccumulatedRef.current += (recognitionAccumulatedRef.current ? ' ' : '') + finalText.trim();
+                        setInterimTranscript(recognitionAccumulatedRef.current);
                         
                         // Aguarda 1,8 s de silêncio após a última palavra antes de enviar
                         if (recognitionSilenceTimerRef.current) clearTimeout(recognitionSilenceTimerRef.current);
                         recognitionSilenceTimerRef.current = setTimeout(() => {
                             const toSend = recognitionAccumulatedRef.current.trim();
                             recognitionAccumulatedRef.current = '';
+                            setInterimTranscript('');
                             if (toSend) {
                                 handleSendReviewChatMessage(toSend);
                             }
@@ -5557,7 +5561,7 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
             const syncStatusRef = useRef(syncStatus);
             useEffect(() => { syncStatusRef.current = syncStatus; }, [syncStatus]);
 
-            const isDirty = useRef(false);
+            const isDirty = useRef(localStorage.getItem('caderno_db_is_dirty') === 'true');
             const lastGistReceiveTime = useRef(0);
             const isFirstRenderDb = useRef(true);
             const isFirstRenderChat = useRef(true);
@@ -5595,13 +5599,40 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
             }, []);
 
             // ----- Sincronização via GitHub Gist -----
+            const mergeObjects = (loc, rem) => {
+                if (!loc) return rem;
+                if (!rem) return loc;
+                const merged = { ...loc };
+                for (const key in rem) {
+                    const remVal = rem[key];
+                    const locVal = loc[key];
+                    
+                    if (remVal === null || remVal === undefined || remVal === '') {
+                        continue;
+                    }
+                    
+                    if (typeof remVal === 'object' && typeof locVal === 'object' && !Array.isArray(remVal) && !Array.isArray(locVal)) {
+                        merged[key] = mergeObjects(locVal, remVal);
+                    } else {
+                        if (key === 'answer' && locVal && !remVal) {
+                            merged[key] = locVal;
+                        } else if (key === 'evaluation' && remVal && !locVal) {
+                            merged[key] = remVal;
+                        } else {
+                            merged[key] = remVal;
+                        }
+                    }
+                }
+                return merged;
+            };
+
             const mergeAdditive = (localArr, remoteArr) => {
                 const map = new Map();
                 (localArr || []).forEach(x => { if (x && x.id) map.set(x.id, x); });
                 (remoteArr || []).forEach(x => {
                     if (!x || !x.id) return;
                     const loc = map.get(x.id);
-                    map.set(x.id, { ...loc, ...x });
+                    map.set(x.id, mergeObjects(loc, x));
                 });
                 return Array.from(map.values());
             };
@@ -5672,6 +5703,7 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
                     setSyncStatus('synced');
                     setLastSyncTime(new Date());
                     isDirty.current = false;
+                    localStorage.setItem('caderno_db_is_dirty', 'false');
                     console.log("Gist: Sincronizado com sucesso.");
                 } catch (err) {
                     console.error("Erro ao sincronizar Gist:", err);
@@ -5793,7 +5825,9 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
                 if (gistConfig.id && gistConfig.token) {
                     // Pequeno delay para garantir que o resto do sistema inicializou
                     const initialTimer = setTimeout(() => {
-                        syncFromGist();
+                        if (!isDirty.current) {
+                            syncFromGist();
+                        }
                     }, 500);
 
                     // Pull automático a cada 60 segundos para manter PC e Celular sincronizados
@@ -5801,7 +5835,7 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
                         const interval = setInterval(() => {
                             // Só baixa se não estivermos enviando algo no momento
                             // Usamos ref para evitar closure stale
-                            if (syncStatusRef.current !== 'syncing' && syncStatusRef.current !== 'connecting') {
+                            if (syncStatusRef.current !== 'syncing' && syncStatusRef.current !== 'connecting' && !isDirty.current) {
                                 syncFromGist();
                             }
                         }, 60000);
@@ -6321,6 +6355,7 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
                     console.warn("Erro ao salvar metadados locais:", e);
                 }
                 isDirty.current = true;
+                localStorage.setItem('caderno_db_is_dirty', 'true');
             }, [db, chatMessages, chatSessions]);
 
             useEffect(() => {
@@ -6601,6 +6636,7 @@ ${safeScript}
                     await writable.write(newHtml);
                     await writable.close();
                     isDirty.current = false;
+                    localStorage.setItem('caderno_db_is_dirty', 'false');
                 } catch (e) {
                     console.error("Erro no Auto-Save:", e);
                     setFileHandle(null);
@@ -6668,6 +6704,7 @@ ${safeScript}
                 a.click();
                 URL.revokeObjectURL(url);
                 isDirty.current = false;
+                localStorage.setItem('caderno_db_is_dirty', 'false');
                 showAlert("✅ Arquivo HTML atualizado gerado! Substitua o arquivo antigo por este para salvar permanentemente.");
             };
 
