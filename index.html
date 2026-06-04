@@ -4181,6 +4181,7 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
 
         // --- ABA DESAFIO CLÍNICO DIÁRIO ---
         const DesafioDiarioTab = ({ db, setDb, callIA, aiConfig, availableModels, setActiveTab }) => {
+            const [viewMode, setViewMode] = useState('dashboard');
             const [activeChallenge, setActiveChallenge] = useState(null);
             const [answer, setAnswer] = useState('');
             const [isGenerating, setIsGenerating] = useState(false);
@@ -4190,6 +4191,14 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
             const [lightboxImage, setLightboxImage] = useState(null);
             const [localFigUrls, setLocalFigUrls] = useState({});
             const [challengeSearchQuery, setChallengeSearchQuery] = useState('');
+            const [toast, setToast] = useState(null);
+
+            const showLocalToast = (msg, type = 'success') => {
+                setToast({ message: msg, type });
+                setTimeout(() => {
+                    setToast(null);
+                }, 4000);
+            };
 
             useEffect(() => {
                 loadTodayChallenge();
@@ -4564,6 +4573,7 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                     });
 
                     setActiveChallenge(newChallenge);
+                    showLocalToast("Desafio de hoje gerado com sucesso!", "success");
                 } catch (err) {
                     console.error("Erro na geração do caso:", err);
                     setError(err.message);
@@ -4675,6 +4685,7 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
                     } else {
                         setActiveChallenge(updatedChallenge);
                     }
+                    showLocalToast("Desafio avaliado com sucesso!", "success");
                 } catch (err) {
                     console.error("Erro na avaliação:", err);
                     setError("Erro ao avaliar: " + err.message);
@@ -5117,6 +5128,8 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
                     setActiveChallenge(newChallenge);
                     setSelectedHistoryCase(null);
                     setAnswer('');
+                    setViewMode('solve');
+                    showLocalToast("Novo desafio gerado com sucesso!", "success");
                 } catch (err) {
                     console.error("Erro na geração de novo caso:", err);
                     setError("Erro ao gerar novo caso: " + err.message);
@@ -5166,13 +5179,334 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
                     });
                 }
 
-                if (setActiveTab) {
-                    setActiveTab('dashboard');
-                }
+                setSelectedHistoryCase(null);
+                setViewMode('dashboard');
+                showLocalToast("Desafio clínico salvo no histórico!", "success");
             };
 
+            // Metric computations for dashboard
+            const completedCount = allChallenges.filter(d => d.evaluation).length;
+            const averageScore = completedCount > 0 
+                ? (allChallenges.filter(d => d.evaluation).reduce((acc, curr) => acc + (curr.evaluation.score || 0), 0) / completedCount).toFixed(1) 
+                : '0.0';
+            const favoriteSpecialty = (() => {
+                if (allChallenges.length === 0) return 'Nenhuma';
+                const counts = {};
+                allChallenges.forEach(c => {
+                    counts[c.specialty] = (counts[c.specialty] || 0) + 1;
+                });
+                return Object.keys(counts).reduce((a, b) => counts[a] > counts[b] ? a : b);
+            })();
+
+            const renderDashboard = () => {
+                const todayStr = new Date().toLocaleDateString('en-CA');
+                const todayChallenge = allChallenges.find(d => d.date.startsWith(todayStr));
+
+                return (
+                    <>
+                        <div className="p-4 md:p-8 space-y-8 overflow-y-auto h-[calc(100vh-130px)] planner-scroll relative">
+                            {/* Header */}
+                            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-zinc-200/50 dark:border-zinc-800/50 pb-6 shrink-0 font-sans">
+                                <div className="space-y-1.5 font-sans">
+                                    <div className="flex items-center gap-3 font-sans">
+                                        <h2 className="text-2xl font-black tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-emerald-600 to-teal-600 dark:from-emerald-400 dark:to-teal-400 font-sans">Painel de Desafios Clínicos</h2>
+                                        <span className="px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 shadow-sm font-sans"><i className="fa-solid fa-list-check mr-1"></i> Central</span>
+                                    </div>
+                                    <p className="text-zinc-550 dark:text-zinc-400 text-xs font-semibold font-sans">Gerencie, resolva e analise seus desafios de diagnóstico baseados em artigos médicos reais.</p>
+                                </div>
+                            </div>
+
+                            {/* Cards de Métricas Rápidas */}
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 font-sans">
+                                <div className="glass-panel p-6 rounded-3xl border border-zinc-200/50 dark:border-zinc-800/50 bg-white/60 dark:bg-zinc-900/60 shadow-sm flex items-center gap-4 hover:scale-[1.01] transition-transform duration-300">
+                                    <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center text-lg shadow-inner">
+                                        <i className="fa-solid fa-circle-check"></i>
+                                    </div>
+                                    <div>
+                                        <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest font-sans font-sans">Desafios Concluídos</p>
+                                        <h4 className="text-2xl font-black text-zinc-850 dark:text-white mt-1 leading-none font-sans">{completedCount}</h4>
+                                    </div>
+                                </div>
+                                
+                                <div className="glass-panel p-6 rounded-3xl border border-zinc-200/50 dark:border-zinc-800/50 bg-white/60 dark:bg-zinc-900/60 shadow-sm flex items-center gap-4 hover:scale-[1.01] transition-transform duration-300">
+                                    <div className="w-12 h-12 rounded-2xl bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 flex items-center justify-center text-lg shadow-inner">
+                                        <i className="fa-solid fa-award"></i>
+                                    </div>
+                                    <div>
+                                        <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest font-sans font-sans">Média Geral</p>
+                                        <h4 className="text-2xl font-black text-zinc-850 dark:text-white mt-1 leading-none font-sans">{averageScore} <span className="text-xs text-zinc-400 font-sans">/ 10</span></h4>
+                                    </div>
+                                </div>
+
+                                <div className="glass-panel p-6 rounded-3xl border border-zinc-200/50 dark:border-zinc-800/50 bg-white/60 dark:bg-zinc-900/60 shadow-sm flex items-center gap-4 hover:scale-[1.01] transition-transform duration-300 font-sans">
+                                    <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center text-lg shadow-inner font-sans">
+                                        <i className="fa-solid fa-stethoscope"></i>
+                                    </div>
+                                    <div>
+                                        <p className="text-[10px] font-black text-zinc-400 uppercase tracking-widest font-sans font-sans">Foco Principal</p>
+                                        <h4 className="text-sm font-black text-zinc-855 dark:text-white mt-2 leading-tight font-sans truncate max-w-[180px]">{favoriteSpecialty}</h4>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Seção Principal: Desafio do Dia e Gerador Personalizado */}
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 font-sans">
+                                {/* Desafio de Hoje */}
+                                <div className="glass-panel p-6 rounded-3xl border border-zinc-200/50 dark:border-zinc-800/50 bg-white/60 dark:bg-zinc-900/60 shadow-md space-y-6 flex flex-col justify-between">
+                                    <div className="space-y-4">
+                                        <div className="flex justify-between items-center gap-2">
+                                            <h3 className="text-sm font-black text-zinc-850 dark:text-white uppercase tracking-wider font-sans"><i className="fa-solid fa-calendar-day mr-1.5 text-emerald-500"></i> Caso do Dia</h3>
+                                            <span className="text-[9px] font-black text-zinc-400 uppercase bg-zinc-100 dark:bg-zinc-800 px-2 py-1 rounded-lg font-sans">Hoje</span>
+                                        </div>
+
+                                        {todayChallenge ? (
+                                            <div className="space-y-3 p-4 bg-zinc-50 dark:bg-zinc-950/40 rounded-2xl border border-zinc-150 dark:border-zinc-850 font-sans">
+                                                <div className="flex justify-between items-start gap-2 flex-wrap font-sans">
+                                                    <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[8px] font-black uppercase tracking-wider">{todayChallenge.specialty}</span>
+                                                    {todayChallenge.evaluation ? (
+                                                        <span className="text-[9px] font-black text-emerald-500 uppercase flex items-center gap-1 font-sans"><i className="fa-solid fa-circle-check"></i> Nota {todayChallenge.evaluation.score.toFixed(1)}</span>
+                                                    ) : todayChallenge.answer ? (
+                                                        <span className="text-[9px] font-black text-amber-500 uppercase flex items-center gap-1 font-sans"><span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse"></span> Rascunho</span>
+                                                    ) : (
+                                                        <span className="text-[9px] font-black text-zinc-450 uppercase flex items-center gap-1 font-sans"><span className="w-1.5 h-1.5 bg-zinc-300 dark:bg-zinc-650 rounded-full"></span> Pendente</span>
+                                                    )}
+                                                </div>
+                                                <h4 className="text-sm font-black text-zinc-800 dark:text-white leading-snug">{todayChallenge.title}</h4>
+                                                <p className="text-xs text-zinc-500 line-clamp-3 leading-relaxed">{todayChallenge.caseReport.replace(/###/g, '').substring(0, 200)}...</p>
+                                            </div>
+                                        ) : (
+                                            <div className="py-8 text-center text-zinc-405">
+                                                <i className="fa-solid fa-spinner fa-spin text-2xl mb-2"></i>
+                                                <p className="text-xs font-semibold font-sans">Carregando caso do dia...</p>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {todayChallenge && (
+                                        <button 
+                                            onClick={() => {
+                                                setActiveChallenge(todayChallenge);
+                                                setSelectedHistoryCase(null);
+                                                setAnswer(todayChallenge.answer || '');
+                                                setViewMode('solve');
+                                            }}
+                                            className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-2xl text-xs shadow-md transition-all active:scale-95 flex items-center justify-center gap-1.5 font-sans"
+                                        >
+                                            {todayChallenge.evaluation ? (
+                                                <><i className="fa-solid fa-envelope-open-text font-sans"></i> Ver Avaliação e Gabarito</>
+                                            ) : todayChallenge.answer ? (
+                                                <><i className="fa-solid fa-pen-nib font-sans"></i> Continuar Rascunho</>
+                                            ) : (
+                                                <><i className="fa-solid fa-play font-sans"></i> Iniciar Resolução</>
+                                            )}
+                                        </button>
+                                    )}
+                                </div>
+
+                                {/* Gerador Personalizado */}
+                                <div className="glass-panel p-6 rounded-3xl border border-zinc-200/50 dark:border-zinc-800/50 bg-white/60 dark:bg-zinc-900/60 shadow-md space-y-6 flex flex-col justify-between font-sans">
+                                    <div className="space-y-4">
+                                        <h3 className="text-sm font-black text-zinc-850 dark:text-white uppercase tracking-wider font-sans"><i className="fa-solid fa-wand-magic-sparkles mr-1.5 text-emerald-500"></i> Gerador Sob Demanda</h3>
+                                        <p className="text-xs text-zinc-550 dark:text-zinc-455 leading-relaxed font-sans">
+                                            Escolha uma especialidade médica específica e o motor de IA para sintetizar um caso clínico inédito baseado em publicações reais.
+                                        </p>
+
+                                        <div className="space-y-3.5 font-sans">
+                                            <div className="flex flex-col gap-1.5 font-sans">
+                                                <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest font-sans">Especialidade Médica</label>
+                                                <select 
+                                                    id="dashboard-specialty-generator"
+                                                    className="w-full px-4 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-xs font-bold text-zinc-850 dark:text-zinc-200 outline-none cursor-pointer focus:border-emerald-500 font-sans"
+                                                >
+                                                    <option value="">Aleatória</option>
+                                                    <option value="Cardiologia font-sans">Cardiologia</option>
+                                                    <option value="Pediatria font-sans">Pediatria</option>
+                                                    <option value="Ginecologia e Obstetrícia font-sans">GO (Ginecologia/Obstetrícia)</option>
+                                                    <option value="Neurologia font-sans">Neurologia</option>
+                                                    <option value="Gastroenterologia font-sans">Gastroenterologia</option>
+                                                    <option value="Pneumologia font-sans">Pneumologia</option>
+                                                    <option value="Infectologia font-sans">Infectologia</option>
+                                                    <option value="Nefrologia font-sans">Nefrologia</option>
+                                                    <option value="Endocrinologia font-sans">Endocrinologia</option>
+                                                    <option value="Hematologia font-sans">Hematologia</option>
+                                                    <option value="Dermatologia font-sans">Dermatologia</option>
+                                                    <option value="Ortopedia font-sans">Ortopedia</option>
+                                                    <option value="Reumatologia font-sans">Reumatologia</option>
+                                                    <option value="Medicina de Emergência font-sans">Medicina de Emergência</option>
+                                                    <option value="Cirurgia Geral font-sans">Cirurgia Geral</option>
+                                                </select>
+                                            </div>
+
+                                            <div className="flex flex-col gap-1.5 font-sans">
+                                                <label className="text-[10px] font-black text-zinc-400 uppercase tracking-widest font-sans">Motor Inteligente</label>
+                                                <select 
+                                                    value={db.desafioDiarioModel || aiConfig.model || 'gemini-1.5-flash'} 
+                                                    onChange={(e) => {
+                                                        const val = e.target.value;
+                                                        setDb(prev => ({ ...prev, desafioDiarioModel: val }));
+                                                    }} 
+                                                    className="w-full px-4 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-xs font-bold text-zinc-850 dark:text-zinc-200 outline-none cursor-pointer focus:border-emerald-500 font-sans"
+                                                >
+                                                    {(availableModels || []).map(m => (
+                                                        <option key={m} value={m}>{m}</option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <button 
+                                        onClick={() => {
+                                            const sel = document.getElementById('dashboard-specialty-generator');
+                                            const val = sel ? sel.value : '';
+                                            handleGenerateNewChallenge(val || null);
+                                        }}
+                                        className="w-full py-3 bg-zinc-800 hover:bg-zinc-750 dark:bg-white dark:hover:bg-zinc-100 dark:text-zinc-900 text-white font-black rounded-2xl text-xs shadow-md transition-all active:scale-95 flex items-center justify-center gap-1.5 font-sans"
+                                    >
+                                        <i className="fa-solid fa-wand-magic-sparkles font-sans"></i> Gerar Novo Desafio
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Tabela/Grid de Histórico de Casos */}
+                            <div className="space-y-4 pt-4 font-sans">
+                                <div className="flex items-center justify-between gap-4 flex-wrap font-sans">
+                                    <h3 className="text-base font-black text-zinc-850 dark:text-white uppercase tracking-widest font-sans"><i className="fa-solid fa-clock-rotate-left mr-1.5 text-emerald-500"></i> Histórico Completo</h3>
+                                    
+                                    <div className="relative w-full sm:w-80 shrink-0 font-sans">
+                                        <input 
+                                            type="text" 
+                                            value={challengeSearchQuery} 
+                                            onChange={(e) => setChallengeSearchQuery(e.target.value)} 
+                                            placeholder="Buscar no histórico..." 
+                                            className="w-full pl-9 pr-8 py-2 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-850 rounded-xl text-xs font-bold text-zinc-850 dark:text-white outline-none focus:border-emerald-500 shadow-sm font-sans"
+                                        />
+                                        <i className="fa-solid fa-magnifying-glass absolute left-3 top-2.5 text-zinc-450 text-xs"></i>
+                                        {challengeSearchQuery && (
+                                            <button 
+                                                onClick={() => setChallengeSearchQuery('')}
+                                                className="absolute right-3 top-1.5 text-zinc-450 hover:text-red-500 transition-colors"
+                                            >
+                                                <i className="fa-solid fa-xmark text-sm"></i>
+                                            </button>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {sortedChallenges.length > 0 ? (
+                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 font-sans">
+                                        {sortedChallenges.map(c => {
+                                            const dateStr = formatDate(c.date);
+                                            const cColor = c.evaluation ? getScoreColor(c.evaluation.score) : null;
+                                            return (
+                                                <div 
+                                                    key={c.id}
+                                                    className={`glass-panel p-5 rounded-3xl border transition-all duration-300 flex flex-col justify-between h-44 hover:scale-[1.02] shadow-sm hover:shadow-md ${
+                                                        c.evaluation 
+                                                            ? 'border-zinc-200/50 dark:border-zinc-800/50 bg-white/60 dark:bg-zinc-900/60 hover:border-emerald-500/20' 
+                                                            : 'border-dashed border-amber-500/40 bg-amber-50/5 dark:bg-amber-955/5 hover:border-amber-500/65'
+                                                    }`}
+                                                >
+                                                    <div className="space-y-2">
+                                                        <div className="flex justify-between items-start gap-2">
+                                                            <span className={`px-2 py-0.5 rounded-md text-[8px] font-black uppercase tracking-wider ${
+                                                                c.evaluation
+                                                                    ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-555 dark:text-zinc-455'
+                                                                    : 'bg-amber-100 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 border border-amber-500/10'
+                                                            }`}>{c.specialty}</span>
+                                                            <span className="text-[8px] font-black text-zinc-450 uppercase">{dateStr}</span>
+                                                        </div>
+                                                        <h4 className="text-xs font-black text-zinc-850 dark:text-white line-clamp-2 leading-tight">{c.title}</h4>
+                                                    </div>
+
+                                                    <div className="pt-3 border-t border-zinc-100 dark:border-zinc-850/65 flex justify-between items-center gap-3">
+                                                        {c.evaluation ? (
+                                                            <div className="flex items-center gap-1.5">
+                                                                <span className={`text-[10px] font-black ${cColor.text} ${cColor.bg} border ${cColor.border} px-2 py-1 rounded-lg`}>
+                                                                    Nota: {c.evaluation.score.toFixed(1)}
+                                                                </span>
+                                                                <span className="text-[8px] font-bold text-zinc-450 uppercase tracking-wider">{c.evaluation.classification}</span>
+                                                            </div>
+                                                        ) : (
+                                                            <span className="text-[9px] font-black uppercase text-amber-500 flex items-center gap-1"><span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse font-sans"></span> Rascunho</span>
+                                                        )}
+                                                        
+                                                        <div className="flex items-center gap-1">
+                                                            <button 
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    if (window.confirm("Deseja realmente excluir este caso do seu histórico?")) {
+                                                                        setDb(prev => ({
+                                                                            ...prev,
+                                                                            desafiosDiarios: (prev.desafiosDiarios || []).filter(item => item.id !== c.id)
+                                                                        }));
+                                                                        showLocalToast("Desafio excluído do histórico.", "info");
+                                                                    }
+                                                                }}
+                                                                className="p-1.5 text-zinc-405 hover:text-red-500 rounded-lg hover:bg-red-50 dark:hover:bg-red-955/20 transition-all active:scale-95"
+                                                                title="Excluir Desafio"
+                                                            >
+                                                                <i className="fa-solid fa-trash-can text-[10px]"></i>
+                                                            </button>
+                                                            <button 
+                                                                onClick={() => {
+                                                                    const found = (db.desafiosDiarios || []).find(d => d.id === c.id);
+                                                                    if (found) {
+                                                                        const todayStr = new Date().toLocaleDateString('en-CA');
+                                                                        if (found.date === todayStr) {
+                                                                            setSelectedHistoryCase(null);
+                                                                        } else {
+                                                                            setSelectedHistoryCase(found);
+                                                                        }
+                                                                        setAnswer(found.answer || '');
+                                                                        setViewMode('solve');
+                                                                    }
+                                                                }}
+                                                                className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-white dark:bg-zinc-100 dark:hover:bg-zinc-200 dark:text-zinc-900 rounded-xl text-[10px] font-black transition-all active:scale-95 font-sans"
+                                                            >
+                                                                {c.evaluation ? 'Ver Caso' : 'Resolver'}
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                ) : (
+                                    <div className="py-12 text-center text-zinc-400/40 border border-dashed border-zinc-200 dark:border-zinc-800 rounded-3xl">
+                                        <i className="fa-solid fa-folder-open text-4xl mb-2"></i>
+                                        <p className="text-xs uppercase font-bold tracking-widest font-sans font-sans">Nenhum caso clínico encontrado no histórico</p>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Lightbox local */}
+                            {lightboxImage && (
+                                <div onClick={() => setLightboxImage(null)} className="fixed inset-0 bg-black/90 z-[9999] flex items-center justify-center p-4 animate-in fade-in duration-200 cursor-zoom-out font-sans">
+                                    <div className="absolute top-4 right-4 text-white text-2xl cursor-pointer hover:scale-110 transition-transform font-sans">
+                                        <i className="fa-solid fa-xmark font-sans"></i>
+                                    </div>
+                                    <img src={lightboxImage} className="max-w-full max-h-[90vh] object-contain rounded-lg shadow-2xl animate-in zoom-in-95 duration-200" onClick={e => e.stopPropagation()} alt="Zoom" />
+                                </div>
+                            )}
+                        </div>
+                        {toast && (
+                            <div className="fixed bottom-6 right-6 z-[9999] flex items-center gap-2 px-4 py-3 bg-zinc-955 dark:bg-white text-white dark:text-zinc-955 font-black rounded-2xl shadow-2xl border border-zinc-850 dark:border-zinc-200 animate-in slide-in-from-bottom-5 fade-in duration-300">
+                                <i className={`fa-solid ${toast.type === 'success' ? 'fa-circle-check text-emerald-500' : 'fa-circle-info text-blue-500'} text-base`}></i>
+                                <span className="text-xs">{toast.message}</span>
+                            </div>
+                        )}
+                    </>
+                );
+            };
+
+            if (viewMode === 'dashboard') {
+                return renderDashboard();
+            }
+
             return (
-                <div className="p-4 md:p-8 space-y-8 overflow-y-auto h-[calc(100vh-130px)] planner-scroll relative">
+                <>
+                    <div className="p-4 md:p-8 space-y-8 overflow-y-auto h-[calc(100vh-130px)] planner-scroll relative">
                     {/* Header */}
                     <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-zinc-200/50 dark:border-zinc-800/50 pb-6 shrink-0">
                         <div className="space-y-1.5">
@@ -5238,20 +5572,26 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
                                 </select>
                             </div>
 
+                            {/* Botão Painel */}
+                            <button 
+                                onClick={() => {
+                                    setSelectedHistoryCase(null);
+                                    setViewMode('dashboard');
+                                }}
+                                className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-white font-black rounded-2xl text-xs shadow-md transition-all flex items-center gap-1.5 active:scale-95 font-sans shrink-0"
+                                title="Voltar ao Painel de Desafios"
+                            >
+                                <i className="fa-solid fa-arrow-left"></i> Painel
+                            </button>
+
                             {/* Botão Fechar e Salvar */}
                             <button 
                                 onClick={handleCloseAndSave} 
                                 className="px-4 py-2 bg-rose-500 hover:bg-rose-600 text-white font-black rounded-2xl text-xs shadow-md transition-all flex items-center gap-1.5 active:scale-95 font-sans shrink-0"
-                                title="Salvar progresso e fechar a aba de desafios"
+                                title="Salvar progresso e voltar ao painel de desafios"
                             >
-                                <i className="fa-solid fa-circle-xmark"></i> Fechar e Salvar
+                                <i className="fa-solid fa-circle-xmark font-sans"></i> Fechar e Salvar
                             </button>
-
-                            {selectedHistoryCase && (
-                                <button onClick={() => setSelectedHistoryCase(null)} className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-white dark:bg-white dark:text-zinc-900 font-black rounded-xl text-xs shadow-md transition-all flex items-center gap-1.5 active:scale-95 font-sans">
-                                    <i className="fa-solid fa-arrow-left"></i> Voltar ao Caso de Hoje
-                                </button>
-                            )}
                         </div>
                     </div>
 
@@ -5503,6 +5843,13 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
                         </div>
                     )}
                 </div>
+                {toast && (
+                    <div className="fixed bottom-6 right-6 z-[9999] flex items-center gap-2 px-4 py-3 bg-zinc-955 dark:bg-white text-white dark:text-zinc-955 font-black rounded-2xl shadow-2xl border border-zinc-850 dark:border-zinc-200 animate-in slide-in-from-bottom-5 fade-in duration-300">
+                        <i className={`fa-solid ${toast.type === 'success' ? 'fa-circle-check text-emerald-500' : 'fa-circle-info text-blue-500'} text-base`}></i>
+                        <span className="text-xs">{toast.message}</span>
+                    </div>
+                )}
+            </>
             );
         };
 
