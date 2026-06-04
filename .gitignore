@@ -1,0 +1,6 @@
+# Ignore local AI environment and settings
+.gemini/
+scratch/
+node_modules/
+package-lock.json
+package.json
