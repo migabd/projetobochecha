@@ -6065,7 +6065,11 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
             const syncFromGist = async (isManual = false) => {
                 const token = gistConfig.token?.trim();
                 const id = gistConfig.id?.trim();
-                if (!token || !id) return;
+                console.log("DEBUG: syncFromGist called", { isManual, tokenLength: token?.length, id, autoSync: gistConfig.autoSync });
+                if (!token || !id) {
+                    console.log("DEBUG: syncFromGist returned early due to missing token or id");
+                    return;
+                }
 
                 console.log("Sync Gist: Iniciando download ultra-seguro...");
                 setSyncStatus('connecting');
@@ -6529,21 +6533,31 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
                 };
 
                 if (input.toLowerCase() === masterKey.toLowerCase()) {
-                    setGistConfig(p => ({ ...p, token: dec(_s.t, masterKey), id: p.id || dec(_s.g, masterKey), autoSync: true }));
+                    const decToken = dec(_s.t, masterKey);
+                    const decId = gistConfig.id || dec(_s.g, masterKey);
+                    console.log("DEBUG: handleLogin matched masterKey (Gabriel)", { hasToken: !!decToken, id: decId });
+                    setGistConfig(p => ({ ...p, token: decToken, id: decId, autoSync: true }));
                     setAiConfig(p => ({ ...p, key: dec(_s.k, masterKey) }));
                     setIsLoggedIn(true);
                     showAlert("✅ Credenciais Master ativadas com sucesso!");
                 } else if (input.toLowerCase() === rafaelKey.toLowerCase()) {
-                    setGistConfig(p => ({ ...p, token: dec(_r.t, rafaelKey), id: p.id || dec(_r.g, rafaelKey), autoSync: true }));
+                    const decToken = dec(_r.t, rafaelKey);
+                    const decId = gistConfig.id || dec(_r.g, rafaelKey);
+                    console.log("DEBUG: handleLogin matched rafaelKey (Rafael)", { hasToken: !!decToken, id: decId });
+                    setGistConfig(p => ({ ...p, token: decToken, id: decId, autoSync: true }));
                     setAiConfig(p => ({ ...p, key: dec(_r.k, rafaelKey) }));
                     setIsLoggedIn(true);
                     showAlert("✅ Credenciais Rafael ativadas com sucesso!");
                 } else if (input.toLowerCase() === miguelKey.toLowerCase()) {
-                    setGistConfig(p => ({ ...p, token: dec(_m.t, miguelKey), id: p.id || dec(_m.g, miguelKey), autoSync: true }));
+                    const decToken = dec(_m.t, miguelKey);
+                    const decId = gistConfig.id || dec(_m.g, miguelKey);
+                    console.log("DEBUG: handleLogin matched miguelKey (Miguel)", { hasToken: !!decToken, id: decId });
+                    setGistConfig(p => ({ ...p, token: decToken, id: decId, autoSync: true }));
                     setAiConfig(p => ({ ...p, key: dec(_m.k, miguelKey) }));
                     setIsLoggedIn(true);
                     showAlert("✅ Credenciais Miguel ativadas com sucesso!");
                 } else if (input.length > 0) {
+                    console.log("DEBUG: handleLogin matched generic login (input length > 0)", { input });
                     setIsLoggedIn(true);
                 }
             };
