@@ -6175,9 +6175,7 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
                 if (gistConfig.id && gistConfig.token) {
                     // Pequeno delay para garantir que o resto do sistema inicializou
                     const initialTimer = setTimeout(() => {
-                        if (!isDirty.current) {
-                            syncFromGist();
-                        }
+                        syncFromGist();
                     }, 500);
 
                     // Pull automático a cada 60 segundos para manter PC e Celular sincronizados
@@ -6531,17 +6529,17 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
                 };
 
                 if (input.toLowerCase() === masterKey.toLowerCase()) {
-                    setGistConfig(p => ({ ...p, token: dec(_s.t, masterKey), id: dec(_s.g, masterKey), autoSync: true }));
+                    setGistConfig(p => ({ ...p, token: dec(_s.t, masterKey), id: p.id || dec(_s.g, masterKey), autoSync: true }));
                     setAiConfig(p => ({ ...p, key: dec(_s.k, masterKey) }));
                     setIsLoggedIn(true);
                     showAlert("✅ Credenciais Master ativadas com sucesso!");
                 } else if (input.toLowerCase() === rafaelKey.toLowerCase()) {
-                    setGistConfig(p => ({ ...p, token: dec(_r.t, rafaelKey), id: dec(_r.g, rafaelKey), autoSync: true }));
+                    setGistConfig(p => ({ ...p, token: dec(_r.t, rafaelKey), id: p.id || dec(_r.g, rafaelKey), autoSync: true }));
                     setAiConfig(p => ({ ...p, key: dec(_r.k, rafaelKey) }));
                     setIsLoggedIn(true);
                     showAlert("✅ Credenciais Rafael ativadas com sucesso!");
                 } else if (input.toLowerCase() === miguelKey.toLowerCase()) {
-                    setGistConfig(p => ({ ...p, token: dec(_m.t, miguelKey), id: dec(_m.g, miguelKey), autoSync: true }));
+                    setGistConfig(p => ({ ...p, token: dec(_m.t, miguelKey), id: p.id || dec(_m.g, miguelKey), autoSync: true }));
                     setAiConfig(p => ({ ...p, key: dec(_m.k, miguelKey) }));
                     setIsLoggedIn(true);
                     showAlert("✅ Credenciais Miguel ativadas com sucesso!");
@@ -12575,7 +12573,7 @@ ${(obj.questoesAnalisadas || []).map(q => `### ${q.identificacao}
                                                         <button
                                                             onClick={() => {
                                                                 if (confirm("Deseja resetar as credenciais e limpar todos os campos?")) {
-                                                                    const hard = { token: '', id: '', autoSync: true, version: 6 };
+                                                                    const hard = { token: '', id: '', autoSync: true, version: 7 };
                                                                     setGistConfig(hard);
                                                                     localStorage.setItem('caderno_gist_config', JSON.stringify(hard));
                                                                     localStorage.setItem('gemini_api_key', "");
