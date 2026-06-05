@@ -3825,6 +3825,7 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                                 });
                                             })()}
                                         </div>
+                                    </div>
                                     )}
                                 </div>
                             </div>
@@ -3833,11 +3834,9 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                 };
 
             const renderIaChatContent = () => {
-                const chatEndRef = React.useRef(null);
-                
-                React.useEffect(() => {
-                    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-                }, [flowchartChat, isFlowchartChatLoading]);
+                const scrollToBottom = (el) => {
+                    if (el) el.scrollIntoView({ behavior: 'smooth' });
+                };
 
                 const suggestions = [
                     "Quais são as doses e via de administração recomendadas?",
@@ -3927,7 +3926,7 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                                 <span>IA analisando diretriz...</span>
                                             </div>
                                         )}
-                                        <div ref={chatEndRef} />
+                                        <div ref={scrollToBottom} />
                                     </>
                                 )}
                             </div>
