@@ -756,6 +756,19 @@ const FluxogramasTab = ({ fluxogramas = [], setDb, callIA, extractTextFromPDF, a
             const [caseSearchQuery, setCaseSearchQuery] = React.useState('');
             const [generalCaseSearchQuery, setGeneralCaseSearchQuery] = React.useState('');
             
+            // States for Flowchart Guideline Chat
+            const [flowchartChat, setFlowchartChat] = React.useState([]);
+            const [flowchartChatInput, setFlowchartChatInput] = React.useState('');
+            const [isFlowchartChatLoading, setIsFlowchartChatLoading] = React.useState(false);
+
+            React.useEffect(() => {
+                if (selectedFlow) {
+                    setFlowchartChat(selectedFlow.chatHistory || []);
+                } else {
+                    setFlowchartChat([]);
+                }
+            }, [selectedFlow?.id]);
+            
             // Creator states
             const [isCreating, setIsCreating] = React.useState(false);
             const [creatorMode, setCreatorMode] = React.useState('pdf'); // 'pdf' | 'text'
@@ -1349,8 +1362,9 @@ Você deve retornar APENAS um objeto JSON válido, sem qualquer bloco de código
                         const updated = (prev.fluxogramas || []).map(f => {
                             if (f.id !== selectedFlow.id) return f;
                             
-                            const nextCount = (f.completedReviewsCount || 0) + 1;
-                            const daysToAdd = nextCount <= reviewIntervals.length ? reviewIntervals[nextCount - 1] : 15;
+                            const isLowScore = calculatedScore < 6.0;
+                            const nextCount = isLowScore ? 0 : ((f.completedReviewsCount || 0) + 1);
+                            const daysToAdd = isLowScore ? 1 : (nextCount <= reviewIntervals.length ? reviewIntervals[nextCount - 1] : 15);
                             const nextDate = new Date();
                             nextDate.setDate(nextDate.getDate() + daysToAdd);
                             nextDate.setHours(0, 0, 0, 0);
@@ -1374,8 +1388,9 @@ Você deve retornar APENAS um objeto JSON válido, sem qualquer bloco de código
                     
                     // Update current selectedFlow states
                     setSelectedFlow(prev => {
-                        const nextCount = (prev.completedReviewsCount || 0) + 1;
-                        const daysToAdd = nextCount <= reviewIntervals.length ? reviewIntervals[nextCount - 1] : 15;
+                        const isLowScore = calculatedScore < 6.0;
+                        const nextCount = isLowScore ? 0 : ((prev.completedReviewsCount || 0) + 1);
+                        const daysToAdd = isLowScore ? 1 : (nextCount <= reviewIntervals.length ? reviewIntervals[nextCount - 1] : 15);
                         const nextDate = new Date();
                         nextDate.setDate(nextDate.getDate() + daysToAdd);
                         nextDate.setHours(0, 0, 0, 0);
@@ -1594,6 +1609,89 @@ Você deve retornar APENAS um objeto JSON válido, sem qualquer bloco de código
                     setSelectedFlow(null);
                     setView('gallery');
                 }
+            };
+
+            const saveFlowchartChat = (flowId, updatedChat) => {
+                setDb(prev => {
+                    const updated = (prev.fluxogramas || []).map(f => {
+                        if (f.id !== flowId) return f;
+                        return {
+                            ...f,
+                            chatHistory: updatedChat
+                        };
+                    });
+                    return { ...prev, fluxogramas: updated };
+                });
+                setSelectedFlow(prev => {
+                    if (prev && prev.id === flowId) {
+                        return {
+                            ...prev,
+                            chatHistory: updatedChat
+                        };
+                    }
+                    return prev;
+                });
+            };
+
+            const handleSendFlowchartChatMessage = async (userInputText) => {
+                const trimmed = userInputText.trim();
+                if (!trimmed || isFlowchartChatLoading || !selectedFlow) return;
+                
+                const updatedChat = [...flowchartChat, { role: 'user', text: trimmed }];
+                setFlowchartChat(updatedChat);
+                setFlowchartChatInput('');
+                setIsFlowchartChatLoading(true);
+                
+                saveFlowchartChat(selectedFlow.id, updatedChat);
+
+                const sourceText = selectedFlow.sourcePdfText || "";
+                
+                let systemPrompt = `Você é o Mentor IA PRO, um tutor de medicina extremamente competente e socrático.
+Sua missão é ajudar o estudante a compreender as condutas, critérios e diretrizes clínicas descritas na referência médica e no fluxograma.
+
+TÍTULO DO FLUXOGRAMA: "${selectedFlow.title}"
+DESCRIÇÃO DO FLUXOGRAMA: "${selectedFlow.description}"
+`;
+
+                if (sourceText.trim()) {
+                    systemPrompt += `\nCONTEÚDO DA DIRETRIZ DE REFERÊNCIA (PDF ORIGINAL):\n${sourceText.substring(0, 15000)}\n`;
+                } else {
+                    systemPrompt += `\nESTRUTURA DO FLUXOGRAMA (NÓS E CONDUTAS):\n${(selectedFlow.data?.nodes || []).map(n => `- [${n.type.toUpperCase()}] ${n.label}: ${n.description}`).join('\n')}\n`;
+                }
+
+                systemPrompt += `\nINSTRUÇÕES PARA A CONVERSA:
+1. Responda de forma direta, clara e extremamente embasada cientificamente.
+2. Esclareça dúvidas sobre dosagens, indicações, diagnósticos diferenciais e fluxos descritos na diretriz ou no fluxograma.
+3. Se o estudante perguntar algo fora do contexto do fluxograma ou da diretriz, tente trazer o foco de volta de forma inteligente para o tema clínico correspondente.
+4. Mantenha um tom profissional, didático e objetivo.`;
+
+                const msgsToApi = [
+                    { role: 'user', parts: [{ text: systemPrompt }] },
+                    ...updatedChat.map(m => ({
+                        role: m.role === 'model' ? 'model' : 'user',
+                        parts: [{ text: m.text }]
+                    }))
+                ];
+
+                try {
+                    const responseText = await callIA(msgsToApi, simulationModel);
+                    const cleanResponse = responseText.replace(/\[ERRO_\w+\] /, '');
+                    
+                    const finalChat = [...updatedChat, { role: 'model', text: cleanResponse }];
+                    setFlowchartChat(finalChat);
+                    saveFlowchartChat(selectedFlow.id, finalChat);
+                } catch (e) {
+                    console.error("Erro no chat do fluxograma:", e);
+                    setFlowchartChat(prev => [...prev, { role: 'model', text: "❌ Desculpe, ocorreu um erro de conexão ao processar sua pergunta. Por favor, tente enviar novamente." }]);
+                } finally {
+                    setIsFlowchartChatLoading(false);
+                }
+            };
+
+            const handleClearFlowchartChat = () => {
+                if (!window.confirm("Tem certeza que deseja limpar o histórico de conversa deste fluxograma?")) return;
+                setFlowchartChat([]);
+                saveFlowchartChat(selectedFlow.id, []);
             };
 
             // Reset pan/zoom or center nodes when canvas is mounted or layout changes
@@ -2059,6 +2157,7 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                         nextReviewDate: initialReviewDate.toISOString(),
                         completedReviewsCount: 0,
                         reviewHistory: [],
+                        sourcePdfText: finalTextContent || "",
                         data: {
                             nodes: parsedFlowchart.nodes,
                             edges: parsedFlowchart.edges
@@ -3727,8 +3826,130 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                             })()}
                                         </div>
                                     </div>
+                );
+            };
+
+            const renderIaChatContent = () => {
+                const chatEndRef = React.useRef(null);
+                
+                React.useEffect(() => {
+                    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+                }, [flowchartChat, isFlowchartChatLoading]);
+
+                const suggestions = [
+                    "Quais são as doses e via de administração recomendadas?",
+                    "Quais os critérios de gravidade ou indicação de UTI?",
+                    "Quais são os diagnósticos diferenciais mais importantes?",
+                    "Explique a conduta no caso de refratariedade ao tratamento."
+                ];
+
+                return (
+                    <div className="max-w-2xl mx-auto space-y-6 animate-in fade-in duration-300">
+                        {/* HEADER BANNER */}
+                        <div className="bg-gradient-to-r from-teal-900/60 to-emerald-950/60 border border-teal-500/25 rounded-3xl p-5 shadow-2xl relative overflow-hidden flex items-center justify-between">
+                            <div className="absolute top-0 right-0 w-36 h-36 bg-teal-500/5 blur-3xl rounded-full"></div>
+                            <div className="flex items-center gap-3">
+                                <div className="w-12 h-12 rounded-2xl bg-teal-500/10 border border-teal-500/20 text-teal-400 flex items-center justify-center shadow-lg">
+                                    <i className="fa-solid fa-comments text-lg animate-pulse"></i>
+                                </div>
+                                <div>
+                                    <span className="text-[10px] font-black text-teal-400 uppercase tracking-widest block leading-none">Chat da Diretriz</span>
+                                    <h3 className="text-sm font-black text-white block mt-1">Dúvidas & Raciocínio Clínico</h3>
+                                </div>
+                            </div>
+                            
+                            {flowchartChat.length > 0 && (
+                                <button 
+                                    onClick={handleClearFlowchartChat}
+                                    className="px-3 py-1.5 bg-rose-500/10 border border-rose-500/20 hover:bg-rose-600 text-rose-450 hover:text-white font-bold text-[9px] rounded-xl uppercase tracking-wider transition-all flex items-center gap-1 active:scale-95"
+                                    title="Limpar Histórico"
+                                >
+                                    <i className="fa-solid fa-trash-can"></i> Limpar
+                                </button>
+                            )}
+                        </div>
+
+                        {/* CHAT BOX */}
+                        <div className="bg-zinc-900/60 border border-zinc-850 rounded-[32px] p-5 shadow-xl flex flex-col h-[480px]">
+                            <div className="flex-1 overflow-y-auto planner-scroll space-y-4 mb-4 p-3 rounded-2xl bg-zinc-950/80 border border-zinc-900 shadow-inner flex flex-col">
+                                {flowchartChat.length === 0 ? (
+                                    <div className="flex-1 flex flex-col items-center justify-center text-center p-6 space-y-5">
+                                        <div className="w-16 h-16 rounded-full bg-teal-500/5 border border-teal-500/10 flex items-center justify-center text-teal-400/60">
+                                            <i className="fa-solid fa-circle-info text-2xl"></i>
+                                        </div>
+                                        <div className="space-y-1.5 max-w-sm">
+                                            <p className="text-zinc-200 text-xs font-black">Nenhuma mensagem ainda</p>
+                                            <p className="text-zinc-500 text-[11px] font-semibold leading-relaxed">
+                                                Tire suas dúvidas clínicas baseadas no PDF da diretriz usado para gerar este fluxograma. O Mentor IA responderá detalhadamente.
+                                            </p>
+                                        </div>
+                                        
+                                        <div className="w-full space-y-2 pt-2">
+                                            <p className="text-[9px] font-black uppercase text-zinc-500 tracking-wider">Perguntas Sugeridas</p>
+                                            <div className="grid grid-cols-1 gap-2">
+                                                {suggestions.map((sug, i) => (
+                                                    <button 
+                                                        key={i}
+                                                        type="button"
+                                                        onClick={() => handleSendFlowchartChatMessage(sug)}
+                                                        className="text-left p-3 bg-zinc-900/50 hover:bg-zinc-900 border border-zinc-850 hover:border-teal-500/40 rounded-xl text-[11px] font-bold text-zinc-400 hover:text-white transition-all text-justify-custom active:scale-[0.99]"
+                                                    >
+                                                        <i className="fa-solid fa-chevron-right text-[8px] mr-1.5 text-teal-500"></i> {sug}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <>
+                                        {flowchartChat.map((msg, idx) => {
+                                            const isUser = msg.role === 'user';
+                                            return (
+                                                <div 
+                                                    key={idx} 
+                                                    className={`flex max-w-[85%] rounded-2xl p-3 shadow-md leading-relaxed text-xs font-semibold ${
+                                                        isUser 
+                                                            ? 'bg-teal-600 text-white ml-auto rounded-tr-none' 
+                                                            : 'bg-zinc-800 text-zinc-100 mr-auto rounded-tl-none border border-zinc-700/50 whitespace-pre-wrap'
+                                                    }`}
+                                                >
+                                                    {msg.text}
+                                                </div>
+                                            );
+                                        })}
+                                        
+                                        {isFlowchartChatLoading && (
+                                            <div className="bg-zinc-800 text-zinc-300 mr-auto rounded-2xl rounded-tl-none border border-zinc-700/50 p-3 shadow-md text-xs font-bold flex items-center gap-2">
+                                                <i className="fa-solid fa-circle-notch fa-spin text-teal-400"></i>
+                                                <span>IA analisando diretriz...</span>
+                                            </div>
+                                        )}
+                                        <div ref={chatEndRef} />
+                                    </>
                                 )}
                             </div>
+
+                            {/* CHAT INPUT BAR */}
+                            <form 
+                                onSubmit={(e) => { e.preventDefault(); handleSendFlowchartChatMessage(flowchartChatInput); }}
+                                className="flex gap-2"
+                            >
+                                <input 
+                                    type="text" 
+                                    value={flowchartChatInput} 
+                                    onChange={(e) => setFlowchartChatInput(e.target.value)} 
+                                    disabled={isFlowchartChatLoading}
+                                    placeholder={selectedFlow.sourcePdfText ? "Pergunte algo sobre a diretriz ou conduta..." : "Consulte a IA sobre este fluxograma..."}
+                                    className="flex-1 px-4 py-3 bg-zinc-950 border border-zinc-855 rounded-2xl text-xs font-bold text-white outline-none focus:border-teal-500 shadow-inner disabled:opacity-50 animate-in fade-in"
+                                />
+                                <button 
+                                    type="submit" 
+                                    disabled={isFlowchartChatLoading || !flowchartChatInput.trim()}
+                                    className="px-5 bg-teal-600 hover:bg-teal-500 disabled:bg-zinc-850 disabled:text-zinc-600 disabled:pointer-events-none text-white rounded-2xl font-black text-xs shadow-lg transition-colors flex items-center justify-center gap-1.5 shrink-0 active:scale-95"
+                                >
+                                    <i className="fa-solid fa-paper-plane text-xs"></i> Enviar
+                                </button>
+                            </form>
                         </div>
                     </div>
                 );
@@ -3764,6 +3985,7 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                 <div className="flex bg-zinc-950 p-0.5 rounded-xl border border-zinc-800 shrink-0">
                                     <button onClick={() => { stopSpeaking(); stopSpeechRecognition(); setCanvasViewMode('canvas'); }} className={`px-2 py-1 md:px-4 md:py-2 rounded-lg text-[9px] md:text-xs font-bold transition-all ${canvasViewMode === 'canvas' ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-zinc-300'}`} title="Diagrama"><i className="fa-solid fa-circle-nodes md:mr-1.5"></i> <span className="hidden md:inline">Diagrama</span></button>
                                     <button onClick={() => { stopSpeaking(); stopSpeechRecognition(); setCanvasViewMode('checklist'); }} className={`px-2 py-1 md:px-4 md:py-2 rounded-lg text-[9px] md:text-xs font-bold transition-all ${canvasViewMode === 'checklist' ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-zinc-300'}`} title="Checklist"><i className="fa-solid fa-list-check md:mr-1.5"></i> <span className="hidden md:inline">Checklist</span></button>
+                                    <button onClick={() => { stopSpeaking(); stopSpeechRecognition(); setCanvasViewMode('ia_chat'); }} className={`px-2 py-1 md:px-4 md:py-2 rounded-lg text-[9px] md:text-xs font-bold transition-all flex items-center gap-1 ${canvasViewMode === 'ia_chat' ? 'bg-gradient-to-r from-teal-600 to-emerald-600 text-white shadow-lg shadow-emerald-900/30' : 'text-teal-400 hover:text-teal-300'}`} title="Conversar com IA sobre a Diretriz"><i className="fa-solid fa-comments md:mr-1.5"></i> <span className="hidden md:inline">Chat Diretriz</span></button>
                                     <button onClick={() => { stopSpeaking(); stopSpeechRecognition(); setCanvasViewMode('ia_review'); }} className={`px-2 py-1 md:px-4 md:py-2 rounded-lg text-[9px] md:text-xs font-black transition-all flex items-center gap-1 ${canvasViewMode === 'ia_review' ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-lg shadow-indigo-900/30' : 'text-purple-400 hover:text-purple-300'}`} title="Revisão Clínica com IA"><i className="fa-solid fa-brain md:mr-1.5 animate-pulse"></i> <span className="hidden md:inline">Revisão IA</span></button>
                                 </div>
 
@@ -4044,7 +4266,7 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
 
                                                         <div className="flex-1 min-w-0">
                                                             <div className="flex justify-between items-center gap-3 mb-1.5">
-                                                                <span className="text-[9px] font-black uppercase tracking-wider text-zinc-500">Etapa ${originalIndex + 1}</span>
+                                                                <span className="text-[9px] font-black uppercase tracking-wider text-zinc-500">Etapa {originalIndex + 1}</span>
                                                                 <span className={`text-[8px] md:text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full ${badgeColor}`}>
                                                                     {node.type}
                                                                 </span>
@@ -4059,15 +4281,20 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                     </div>
                                 </div>
                             </div>
-                        ) : (
+                        ) : canvasViewMode === 'ia_review' ? (
                             /* IA Revision Mode */
                             <div className="flex-1 w-full overflow-y-auto planner-scroll bg-zinc-950 pt-28 pb-28 md:pt-32 p-4 md:p-6 text-zinc-100 select-text">
                                 {renderIaReviewContent()}
                             </div>
+                        ) : (
+                            /* IA Chat Mode */
+                            <div className="flex-1 w-full overflow-y-auto planner-scroll bg-zinc-950 pt-28 pb-28 md:pt-32 p-4 md:p-6 text-zinc-100 select-text">
+                                {renderIaChatContent()}
+                            </div>
                         )}
 
                         {/* Detailed Clinic Sidebar Drawer (Fully Mobile Responsive) */}
-                        {selectedNode && canvasViewMode !== 'ia_review' && (
+                        {selectedNode && canvasViewMode !== 'ia_review' && canvasViewMode !== 'ia_chat' && (
                             isMobile ? (
                                 /* Mobile Slide-up Bottom Sheet (Gesture Swipe and navigation enabled) */
                                 <div 
@@ -4209,17 +4436,41 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
             useEffect(() => {
                 let active = true;
                 
-                // Clear old object URLs to prevent leaks
-                Object.values(localFigUrls).forEach(url => {
-                    if (url && url.startsWith('blob:')) {
-                        try {
-                            URL.revokeObjectURL(url);
-                        } catch (e) {}
+                if (!window.challengeBlobUrlsCache) {
+                    window.challengeBlobUrlsCache = new Map();
+                    window.challengeBlobUrlsKeys = [];
+                }
+                
+                const addToBlobCache = (id, mapping) => {
+                    if (!window.challengeBlobUrlsCache) return;
+                    if (window.challengeBlobUrlsCache.has(id)) return;
+                    
+                    // Keep cache size <= 15
+                    if (window.challengeBlobUrlsKeys.length >= 15) {
+                        const oldestId = window.challengeBlobUrlsKeys.shift();
+                        const oldestMapping = window.challengeBlobUrlsCache.get(oldestId);
+                        if (oldestMapping) {
+                            Object.values(oldestMapping).forEach(url => {
+                                if (url && url.startsWith('blob:')) {
+                                    try { URL.revokeObjectURL(url); } catch (e) {}
+                                }
+                            });
+                        }
+                        window.challengeBlobUrlsCache.delete(oldestId);
                     }
-                });
+                    
+                    window.challengeBlobUrlsCache.set(id, mapping);
+                    window.challengeBlobUrlsKeys.push(id);
+                };
 
                 if (!challengeToRender || !challengeToRender.pmcid || !challengeToRender.figures || challengeToRender.figures.length === 0) {
                     setLocalFigUrls({});
+                    return;
+                }
+
+                // Check cache first
+                if (window.challengeBlobUrlsCache.has(challengeToRender.id)) {
+                    setLocalFigUrls(window.challengeBlobUrlsCache.get(challengeToRender.id));
                     return;
                 }
 
@@ -4269,6 +4520,7 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                         
                         if (active) {
                             setLocalFigUrls(newMapping);
+                            addToBlobCache(challengeToRender.id, newMapping);
                         }
                     } catch (e) {
                         console.warn("Erro ao descompactar exames de imagem do caso:", e);
