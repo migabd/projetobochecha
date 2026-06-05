@@ -2386,9 +2386,13 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                             }}
                                             className="w-full p-3.5 bg-white dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-800 rounded-2xl outline-none text-xs font-black shadow-inner text-zinc-900 dark:text-white focus:border-purple-500 transition-colors"
                                         >
-                                            {availableModels.map(model => (
-                                                <option key={model} value={model}>{model.includes('flash') ? `🚀 ${model}` : `💎 ${model}`}</option>
-                                            ))}
+                                            {availableModels.length === 0 ? (
+                                                <option value="">Insira a Chave API nas Configurações</option>
+                                            ) : (
+                                                availableModels.map(model => (
+                                                    <option key={model} value={model}>{model.includes('flash') ? `🚀 ${model}` : `💎 ${model}`}</option>
+                                                ))
+                                            )}
                                         </select>
                                     </div>
 
@@ -3558,9 +3562,13 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                             }}
                                             className="w-full p-4 bg-zinc-950 border border-zinc-850 rounded-2xl outline-none text-xs font-black shadow-inner text-white focus:border-indigo-500 transition-colors"
                                         >
-                                            {availableModels.map(model => (
-                                                <option key={model} value={model}>{model.includes('flash') ? `🚀 ${model}` : `💎 ${model}`}</option>
-                                            ))}
+                                            {availableModels.length === 0 ? (
+                                                <option value="">Insira a Chave API nas Configurações</option>
+                                            ) : (
+                                                availableModels.map(model => (
+                                                    <option key={model} value={model}>{model.includes('flash') ? `🚀 ${model}` : `💎 ${model}`}</option>
+                                                ))
+                                            )}
                                         </select>
                                     </div>
 
@@ -4408,6 +4416,75 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
             return null;
         };
 
+        // --- UTILIDADE: DOWNLOAD PERSISTENTE DE FIGURAS ---
+        const fetchFigureDataUrls = async (pmcid, figures) => {
+            if (!pmcid || !figures || figures.length === 0) return figures;
+            // Se todas as figuras já têm dataUrl, não precisa refazer
+            if (figures.every(f => f.dataUrl)) return figures;
+            try {
+                const zipUrl = `https://www.ebi.ac.uk/europepmc/webservices/rest/${pmcid}/supplementaryFiles`;
+                const res = await fetch(zipUrl);
+                if (!res.ok) return figures;
+                const arrayBuffer = await res.arrayBuffer();
+                if (typeof window.JSZip === 'undefined') return figures;
+                const zip = await window.JSZip.loadAsync(arrayBuffer);
+                const fileNames = Object.keys(zip.files);
+                const updated = await Promise.all(figures.map(async (fig) => {
+                    if (fig.dataUrl) return fig;
+                    try {
+                        const urlParts = fig.url.split('/');
+                        const fileName = urlParts[urlParts.length - 1];
+                        const hrefBase = fileName.replace(/\.[^/.]+$/, "");
+                        const matchedName = fileNames.find(name => {
+                            const lowerName = name.toLowerCase();
+                            const lowerFile = fileName.toLowerCase();
+                            const lowerBase = hrefBase.toLowerCase();
+                            return lowerName === lowerFile ||
+                                   lowerName === lowerBase ||
+                                   lowerName === lowerBase + '.jpg' ||
+                                   lowerName === lowerBase + '.jpeg' ||
+                                   lowerName === lowerBase + '.png' ||
+                                   (lowerName.startsWith(lowerBase) && /\.(jpg|jpeg|png|tiff)$/i.test(lowerName));
+                        });
+                        if (matchedName) {
+                            const fileContent = await zip.file(matchedName).async('blob');
+                            let mimeType = 'image/jpeg';
+                            if (/\.png$/i.test(matchedName)) mimeType = 'image/png';
+                            const imageBlob = new Blob([fileContent], { type: mimeType });
+                            const dataUrl = await new Promise((resolve) => {
+                                const reader = new FileReader();
+                                reader.onloadend = () => {
+                                    const img = new Image();
+                                    img.onload = () => {
+                                        const canvas = document.createElement('canvas');
+                                        let { width, height } = img;
+                                        const max = 900;
+                                        if (width > height) { if (width > max) { height *= max / width; width = max; } }
+                                        else { if (height > max) { width *= max / height; height = max; } }
+                                        canvas.width = width; canvas.height = height;
+                                        const ctx = canvas.getContext('2d');
+                                        ctx.fillStyle = '#FFFFFF'; ctx.fillRect(0, 0, width, height);
+                                        ctx.drawImage(img, 0, 0, width, height);
+                                        resolve(canvas.toDataURL('image/jpeg', 0.55));
+                                    };
+                                    img.onerror = () => resolve(null);
+                                    img.src = reader.result;
+                                };
+                                reader.onerror = () => resolve(null);
+                                reader.readAsDataURL(imageBlob);
+                            });
+                            if (dataUrl) return { ...fig, dataUrl };
+                        }
+                    } catch (e) { console.warn('fetchFigureDataUrls: erro em figura', fig.id, e); }
+                    return fig;
+                }));
+                return updated;
+            } catch (e) {
+                console.warn('fetchFigureDataUrls: erro geral', e);
+                return figures;
+            }
+        };
+
         // --- ABA DESAFIO CLÍNICO DIÁRIO ---
         const DesafioDiarioTab = ({ db, setDb, callIA, aiConfig, availableModels, setActiveTab }) => {
             const [viewMode, setViewMode] = useState('dashboard');
@@ -4437,103 +4514,56 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
 
             useEffect(() => {
                 let active = true;
-                
-                if (!window.challengeBlobUrlsCache) {
-                    window.challengeBlobUrlsCache = new Map();
-                    window.challengeBlobUrlsKeys = [];
-                }
-                
-                const addToBlobCache = (id, mapping) => {
-                    if (!window.challengeBlobUrlsCache) return;
-                    if (window.challengeBlobUrlsCache.has(id)) return;
-                    
-                    // Keep cache size <= 15
-                    if (window.challengeBlobUrlsKeys.length >= 15) {
-                        const oldestId = window.challengeBlobUrlsKeys.shift();
-                        const oldestMapping = window.challengeBlobUrlsCache.get(oldestId);
-                        if (oldestMapping) {
-                            Object.values(oldestMapping).forEach(url => {
-                                if (url && url.startsWith('blob:')) {
-                                    try { URL.revokeObjectURL(url); } catch (e) {}
-                                }
-                            });
-                        }
-                        window.challengeBlobUrlsCache.delete(oldestId);
-                    }
-                    
-                    window.challengeBlobUrlsCache.set(id, mapping);
-                    window.challengeBlobUrlsKeys.push(id);
-                };
 
-                if (!challengeToRender || !challengeToRender.pmcid || !challengeToRender.figures || challengeToRender.figures.length === 0) {
+                if (!challengeToRender || !challengeToRender.figures || challengeToRender.figures.length === 0) {
                     setLocalFigUrls({});
                     return;
                 }
 
-                // Check cache first
-                if (window.challengeBlobUrlsCache.has(challengeToRender.id)) {
-                    setLocalFigUrls(window.challengeBlobUrlsCache.get(challengeToRender.id));
+                // Se todas as figuras já possuem dataUrl persistido, usa direto — sem fetch
+                const allHaveDataUrl = challengeToRender.figures.every(f => f.dataUrl);
+                if (allHaveDataUrl) {
+                    const mapping = {};
+                    challengeToRender.figures.forEach(f => { mapping[f.id] = f.dataUrl; });
+                    setLocalFigUrls(mapping);
                     return;
                 }
 
-                const loadLocalFigures = async () => {
-                    const pmcid = challengeToRender.pmcid;
+                // Figuras sem dataUrl — tentar baixar do ZIP e persistir no DB
+                const loadAndPersistFigures = async () => {
+                    if (!challengeToRender.pmcid) return;
                     try {
-                        const zipUrl = `https://www.ebi.ac.uk/europepmc/webservices/rest/${pmcid}/supplementaryFiles`;
-                        const res = await fetch(zipUrl);
-                        if (!res.ok) return;
+                        const updatedFigures = await fetchFigureDataUrls(challengeToRender.pmcid, challengeToRender.figures);
+                        if (!active) return;
                         
-                        const arrayBuffer = await res.arrayBuffer();
-                        if (typeof window.JSZip === 'undefined') {
-                            console.warn("JSZip não carregado ainda.");
-                            return;
-                        }
-                        const zip = await window.JSZip.loadAsync(arrayBuffer);
-                        const fileNames = Object.keys(zip.files);
+                        const mapping = {};
+                        updatedFigures.forEach(f => {
+                            if (f.dataUrl) mapping[f.id] = f.dataUrl;
+                        });
+                        setLocalFigUrls(mapping);
                         
-                        const newMapping = {};
-                        for (const fig of challengeToRender.figures) {
-                            const urlParts = fig.url.split('/');
-                            const fileName = urlParts[urlParts.length - 1];
-                            const hrefBase = fileName.replace(/\.[^/.]+$/, "");
-                            
-                            const matchedName = fileNames.find(name => {
-                                const lowerName = name.toLowerCase();
-                                const lowerFile = fileName.toLowerCase();
-                                const lowerBase = hrefBase.toLowerCase();
-                                return lowerName === lowerFile || 
-                                       lowerName === lowerBase || 
-                                       lowerName === lowerBase + '.jpg' || 
-                                       lowerName === lowerBase + '.jpeg' || 
-                                       lowerName === lowerBase + '.png' || 
-                                       (lowerName.startsWith(lowerBase) && /\.(jpg|jpeg|png|tiff)$/i.test(lowerName));
+                        // Persistir dataUrls de volta no DB para que não desapareçam
+                        const hasNewDataUrls = updatedFigures.some((f, i) => f.dataUrl && !challengeToRender.figures[i]?.dataUrl);
+                        if (hasNewDataUrls) {
+                            setDb(prev => {
+                                const desafios = prev.desafiosDiarios || [];
+                                const updatedDesafios = desafios.map(d => {
+                                    if (d.id === challengeToRender.id) {
+                                        return { ...d, figures: updatedFigures };
+                                    }
+                                    return d;
+                                });
+                                return { ...prev, desafiosDiarios: updatedDesafios };
                             });
-                            
-                            if (matchedName && active) {
-                                const fileContent = await zip.file(matchedName).async('blob');
-                                let mimeType = 'image/jpeg';
-                                if (/\.png$/i.test(matchedName)) mimeType = 'image/png';
-                                else if (/\.gif$/i.test(matchedName)) mimeType = 'image/gif';
-                                const imageBlob = new Blob([fileContent], { type: mimeType });
-                                const objUrl = URL.createObjectURL(imageBlob);
-                                newMapping[fig.id] = objUrl;
-                            }
-                        }
-                        
-                        if (active) {
-                            setLocalFigUrls(newMapping);
-                            addToBlobCache(challengeToRender.id, newMapping);
                         }
                     } catch (e) {
-                        console.warn("Erro ao descompactar exames de imagem do caso:", e);
+                        console.warn("Erro ao baixar e persistir figuras:", e);
                     }
                 };
 
-                loadLocalFigures();
+                loadAndPersistFigures();
 
-                return () => {
-                    active = false;
-                };
+                return () => { active = false; };
             }, [challengeToRender?.id]);
 
             const getScoreColor = (score) => {
@@ -4802,6 +4832,9 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
 
                     const generated = JSON.parse(match[0]);
 
+                    // Baixar e embutir imagens como dataUrl persistente
+                    const persistedFigures = await fetchFigureDataUrls(selectedArticle.pmcid, figures);
+
                     const newChallenge = {
                         id: Date.now(),
                         date: todayStr,
@@ -4811,7 +4844,7 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                         doi: selectedArticle.doi,
                         pmcid: selectedArticle.pmcid || '',
                         citation: `${selectedArticle.authorString || 'Autores'}. ${selectedArticle.title} ${selectedArticle.journalTitle || ''}. ${selectedArticle.pubYear || ''}`,
-                        figures: figures,
+                        figures: persistedFigures,
                         gabarito: generated.gabarito_avaliacao,
                         answer: null,
                         evaluation: null
@@ -5353,6 +5386,9 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
 
                     const customDate = new Date().toLocaleDateString('en-CA') + '_' + Date.now();
 
+                    // Baixar e embutir imagens como dataUrl persistente
+                    const persistedFigures = await fetchFigureDataUrls(selectedArticle.pmcid, figures);
+
                     const newChallenge = {
                         id: Date.now(),
                         date: customDate,
@@ -5362,7 +5398,7 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
                         doi: selectedArticle.doi,
                         pmcid: selectedArticle.pmcid || '',
                         citation: `${selectedArticle.authorString || 'Autores'}. ${selectedArticle.title} ${selectedArticle.journalTitle || ''}. ${selectedArticle.pubYear || ''}`,
-                        figures: figures,
+                        figures: persistedFigures,
                         gabarito: generated.gabarito_avaliacao,
                         answer: null,
                         evaluation: null
@@ -5601,9 +5637,13 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
                                                     }} 
                                                     className="w-full px-4 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl text-xs font-bold text-zinc-850 dark:text-zinc-200 outline-none cursor-pointer focus:border-emerald-500 font-sans"
                                                 >
-                                                    {(availableModels || []).map(m => (
-                                                        <option key={m} value={m}>{m}</option>
-                                                    ))}
+                                                    {availableModels.length === 0 ? (
+                                                        <option value="">Insira a Chave API nas Configurações</option>
+                                                    ) : (
+                                                        availableModels.map(m => (
+                                                            <option key={m} value={m}>{m}</option>
+                                                        ))
+                                                    )}
                                                 </select>
                                             </div>
                                         </div>
@@ -5820,9 +5860,13 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
                                     }} 
                                     className="bg-transparent border-none text-xs font-black text-zinc-800 dark:text-zinc-200 outline-none focus:ring-0 cursor-pointer font-sans p-0 m-0"
                                 >
-                                    {(availableModels || []).map(m => (
-                                        <option key={m} value={m} className="bg-white dark:bg-zinc-900 text-zinc-800 dark:text-zinc-200 font-bold">{m}</option>
-                                    ))}
+                                    {availableModels.length === 0 ? (
+                                        <option value="">Insira a Chave API nas Configurações</option>
+                                    ) : (
+                                        availableModels.map(m => (
+                                            <option key={m} value={m} className="bg-white dark:bg-zinc-900 text-zinc-800 dark:text-zinc-200 font-bold">{m}</option>
+                                        ))
+                                    )}
                                 </select>
                             </div>
 
@@ -5966,10 +6010,12 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
                                         </h4>
                                         {challengeToRender.figures && challengeToRender.figures.length > 0 ? (
                                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                                {challengeToRender.figures.map(fig => (
-                                                    <div key={fig.id} onClick={() => setLightboxImage(localFigUrls[fig.id] || fig.url)} className="group cursor-pointer rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3 hover:scale-[1.02] hover:border-emerald-500/50 transition-all shadow-sm font-sans">
+                                                {challengeToRender.figures.map(fig => {
+                                                    const figSrc = fig.dataUrl || localFigUrls[fig.id] || fig.url;
+                                                    return (
+                                                    <div key={fig.id} onClick={() => setLightboxImage(figSrc)} className="group cursor-pointer rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-3 hover:scale-[1.02] hover:border-emerald-500/50 transition-all shadow-sm font-sans">
                                                         <div className="aspect-video w-full bg-zinc-100 dark:bg-zinc-950 rounded-xl overflow-hidden mb-2 relative">
-                                                            <img src={localFigUrls[fig.id] || fig.url} className="w-full h-full object-contain" alt={fig.label} referrerPolicy="no-referrer" />
+                                                            <img src={figSrc} className="w-full h-full object-contain" alt={fig.label} referrerPolicy="no-referrer" />
                                                             <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                                                                 <i className="fa-solid fa-magnifying-glass-plus text-white text-lg"></i>
                                                             </div>
@@ -5977,7 +6023,8 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
                                                         <p className="text-xs font-black text-zinc-850 dark:text-zinc-200 font-sans font-sans">{fig.label}</p>
                                                         <p className="text-[10px] text-zinc-500 truncate font-sans" title={fig.caption}>{fig.caption}</p>
                                                     </div>
-                                                ))}
+                                                    );
+                                                })}
                                             </div>
                                         ) : (
                                             <div className="py-6 text-center text-zinc-400/40 border border-dashed border-zinc-200 dark:border-zinc-800 rounded-2xl">
@@ -6104,7 +6151,67 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
                     </div>
                 )}
             </>
-            );
+        // ==========================================
+        // INDEXEDDB PARA PERSISTÊNCIA DE IMAGENS
+        // ==========================================
+        const initImagesDB = () => {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open("CadernoImagesDB", 1);
+                request.onupgradeneeded = (e) => {
+                    const db = e.target.result;
+                    if (!db.objectStoreNames.contains("images")) {
+                        db.createObjectStore("images");
+                    }
+                };
+                request.onsuccess = (e) => {
+                    resolve(e.target.result);
+                };
+                request.onerror = (e) => {
+                    console.error("IndexedDB error:", e.target.error);
+                    reject(e.target.error);
+                };
+            });
+        };
+
+        const saveImageToIndexedDB = async (id, base64Data) => {
+            if (!base64Data) return;
+            try {
+                const db = await initImagesDB();
+                return new Promise((resolve, reject) => {
+                    const tx = db.transaction("images", "readwrite");
+                    const store = tx.objectStore("images");
+                    const request = store.put(base64Data, id);
+                    request.onsuccess = () => resolve();
+                    request.onerror = () => reject(request.error);
+                });
+            } catch (err) {
+                console.error("Failed to save image to IndexedDB", err);
+            }
+        };
+
+        const getImagesFromIndexedDB = async () => {
+            try {
+                const db = await initImagesDB();
+                return new Promise((resolve, reject) => {
+                    const tx = db.transaction("images", "readonly");
+                    const store = tx.objectStore("images");
+                    const request = store.openCursor();
+                    const images = {};
+                    request.onsuccess = (e) => {
+                        const cursor = e.target.result;
+                        if (cursor) {
+                            images[cursor.key] = cursor.value;
+                            cursor.continue();
+                        } else {
+                            resolve(images);
+                        }
+                    };
+                    request.onerror = () => reject(request.error);
+                });
+            } catch (err) {
+                console.error("Failed to retrieve images from IndexedDB", err);
+                return {};
+            }
         };
 
         const App = () => {
@@ -6223,6 +6330,53 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
             const isFirstRenderDb = useRef(true);
             const isFirstRenderChat = useRef(true);
             const isFirstPersistence = useRef(true);
+            const isInitializingImages = useRef(true);
+
+            // Carregar imagens do IndexedDB na inicialização do app
+            useEffect(() => {
+                const loadImages = async () => {
+                    try {
+                        const imagesMap = await getImagesFromIndexedDB();
+                        setDb(prev => {
+                            const newErrors = (prev.errors || []).map(err => {
+                                const cachedImage = imagesMap[`error_${err.id}`];
+                                if (cachedImage) return { ...err, image: cachedImage };
+                                return err;
+                            });
+                            const newSummaries = (prev.summaries || []).map(s => {
+                                const cachedImage = imagesMap[`summary_${s.id}`];
+                                if (cachedImage) return { ...s, image: cachedImage };
+                                return s;
+                            });
+                            const newGames = (prev.games || []).map(g => {
+                                return {
+                                    ...g,
+                                    pairs: (g.pairs || []).map(p => {
+                                        const cachedImageA = imagesMap[`game_pair_${g.id}_${p.id}_a`];
+                                        const cachedImageB = imagesMap[`game_pair_${g.id}_${p.id}_b`];
+                                        return {
+                                            ...p,
+                                            a: cachedImageA ? { type: 'image', val: cachedImageA } : p.a,
+                                            b: cachedImageB ? { type: 'image', val: cachedImageB } : p.b
+                                        };
+                                    })
+                                };
+                            });
+                            return {
+                                ...prev,
+                                errors: newErrors,
+                                summaries: newSummaries,
+                                games: newGames
+                            };
+                        });
+                    } catch (err) {
+                        console.error("Erro ao carregar imagens do IndexedDB:", err);
+                    } finally {
+                        isInitializingImages.current = false;
+                    }
+                };
+                loadImages();
+            }, []);
 
             // ----- GIST SYNC CONFIG -----
             const [gistConfig, setGistConfig] = useState(() => {
@@ -6589,7 +6743,7 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
             // --- ESTADOS DA INTELIGÊNCIA ARTIFICIAL ---
             const [aiConfig, setAiConfig] = useState({
                 key: localStorage.getItem('gemini_api_key') || "",
-                model: localStorage.getItem('gemini_model') || 'gemini-2.5-flash',
+                model: localStorage.getItem('gemini_model') || 'gemini-1.5-flash',
                 persona: localStorage.getItem('gemini_persona') || 'amigavel'
             });
 
@@ -6642,13 +6796,7 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
                 } catch (e) {
                     console.warn("Erro ao fazer parse de availableModels:", e);
                 }
-                return [
-                    "gemini-2.5-flash", "gemini-2.5-pro",
-                    "gemini-2.0-flash", "gemini-2.0-flash-lite",
-                    "gemini-1.5-flash", "gemini-1.5-pro",
-                    "gemma-3-27b-it", "gemma-3-12b-it", "gemma-3-4b-it",
-                    "gemma-3-1b-it"
-                ];
+                return [];
             });
             const [isAiLoading, setIsAiLoading] = useState(false);
             const [chatSessions, setChatSessions] = useState(() => {
@@ -6984,9 +7132,11 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
                 if (db.darkMode) document.documentElement.classList.add('dark');
                 else document.documentElement.classList.remove('dark');
 
+                if (isInitializingImages.current) return;
+
                 // --- PERSISTÊNCIA OTIMIZADA ---
                 // Não salvamos imagens no LocalStorage para evitar QuotaExceededError.
-                // As imagens residem no Firebase e no cache de memória (firebaseImageCache).
+                // As imagens residem no IndexedDB local.
                 try {
                     const lightPayload = {
                         ...db,
@@ -7032,6 +7182,71 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
                     console.warn("Erro ao salvar metadados locais:", e);
                 }
                 
+                // Sincronizar imagens no IndexedDB e limpar órfãos
+                const syncImagesToIndexedDB = async () => {
+                    try {
+                        const activeKeys = new Set();
+                        (db.errors || []).forEach(err => {
+                            if (err.image) activeKeys.add(`error_${err.id}`);
+                        });
+                        (db.summaries || []).forEach(s => {
+                            if (s.image) activeKeys.add(`summary_${s.id}`);
+                        });
+                        (db.games || []).forEach(g => {
+                            (g.pairs || []).forEach(p => {
+                                if (p.a && p.a.type === 'image' && p.a.val && p.a.val !== '[Imagem na Cloud]') {
+                                    activeKeys.add(`game_pair_${g.id}_${p.id}_a`);
+                                }
+                                if (p.b && p.b.type === 'image' && p.b.val && p.b.val !== '[Imagem na Cloud]') {
+                                    activeKeys.add(`game_pair_${g.id}_${p.id}_b`);
+                                }
+                            });
+                        });
+
+                        // Salvar imagens ativas em base64 no IndexedDB
+                        for (const err of (db.errors || [])) {
+                            if (err.image && err.image.startsWith('data:image')) {
+                                await saveImageToIndexedDB(`error_${err.id}`, err.image);
+                            }
+                        }
+                        for (const s of (db.summaries || [])) {
+                            if (s.image && s.image.startsWith('data:image')) {
+                                await saveImageToIndexedDB(`summary_${s.id}`, s.image);
+                            }
+                        }
+                        for (const g of (db.games || [])) {
+                            for (const p of (g.pairs || [])) {
+                                if (p.a && p.a.type === 'image' && p.a.val && p.a.val.startsWith('data:image')) {
+                                    await saveImageToIndexedDB(`game_pair_${g.id}_${p.id}_a`, p.a.val);
+                                }
+                                if (p.b && p.b.type === 'image' && p.b.val && p.b.val.startsWith('data:image')) {
+                                    await saveImageToIndexedDB(`game_pair_${g.id}_${p.id}_b`, p.b.val);
+                                }
+                            }
+                        }
+
+                        // Remover imagens órfãs
+                        const idb = await initImagesDB();
+                        const tx = idb.transaction("images", "readwrite");
+                        const store = tx.objectStore("images");
+                        const request = store.openKeyCursor();
+                        request.onsuccess = (e) => {
+                            const cursor = e.target.result;
+                            if (cursor) {
+                                const key = cursor.key;
+                                if (!activeKeys.has(key)) {
+                                    store.delete(key);
+                                    console.log(`Imagem órfã deletada do IndexedDB: ${key}`);
+                                }
+                                cursor.continue();
+                            }
+                        };
+                    } catch (err) {
+                        console.error("Erro ao sincronizar imagens com o IndexedDB:", err);
+                    }
+                };
+                syncImagesToIndexedDB();
+
                 if (isFirstPersistence.current) {
                     isFirstPersistence.current = false;
                 } else if (Date.now() - lastGistReceiveTime.current > 2000) {
@@ -7504,6 +7719,13 @@ ${safeScript}
                     const keys = ['caderno_db_master', 'caderno_med_v42_final', 'caderno_med_pro_final', 'caderno_med_v45_final', 'chat_med_ia_master', 'chat_med_ia_sessions', 'gemini_model', 'gemini_available_models', 'gemini_persona'];
                     keys.forEach(k => localStorage.removeItem(k));
 
+                    // Limpar banco de imagens no IndexedDB
+                    try {
+                        indexedDB.deleteDatabase("CadernoImagesDB");
+                    } catch (e) {
+                        console.error("Erro ao deletar banco de imagens:", e);
+                    }
+
                     // Reset do estado para o padrão absoluto
                     setDb({
                         errors: [],
@@ -7540,7 +7762,7 @@ ${safeScript}
 
             const callIA = async (msgs, forceModel = null) => {
                 const apiKey = aiConfig.key || "";
-                let model = forceModel || aiConfig.model || "gemini-3.1-flash-lite-preview";
+                let model = forceModel || aiConfig.model || (availableModels && availableModels[0]) || "gemini-1.5-flash";
                 let retries = 5; let delay = 1000;
 
                 const generationConfig = { maxOutputTokens: 8192 };
@@ -7567,6 +7789,15 @@ ${safeScript}
                         const data = await response.json();
                         if (!response.ok) {
                             console.error(`[callIA] API erro ${response.status}:`, JSON.stringify(data?.error));
+                            // Se o modelo não existe (404), tentar fallback imediato
+                            if (response.status === 404 && !forceModel && retries > 0) {
+                                console.warn(`[callIA] Modelo "${model}" não encontrado. Tentando fallback...`);
+                                if (model !== 'gemini-2.0-flash') {
+                                    model = 'gemini-2.0-flash';
+                                    retries = 2;
+                                    continue;
+                                }
+                            }
                             if ((response.status === 429 || response.status >= 500) && retries > 0) {
                                 retries--; await new Promise(r => setTimeout(r, delay)); delay *= 2; continue;
                             }
@@ -7584,12 +7815,37 @@ ${safeScript}
                             console.warn(`[callIA] finishReason inesperado: ${data.candidates[0].finishReason}`);
                         }
 
-                        const resultText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+                        // Extrair texto — modelos "thinking" (2.5+) podem retornar múltiplas partes
+                        // onde a primeira é o "thought" e as seguintes são o texto real
+                        const parts = data.candidates?.[0]?.content?.parts || [];
+                        let resultText = '';
+                        for (const part of parts) {
+                            if (part.text && !part.thought) {
+                                resultText += part.text;
+                            }
+                        }
+                        // Fallback: se nenhuma parte não-thought tem texto, pegar qualquer texto disponível
+                        if (!resultText) {
+                            resultText = parts.map(p => p.text || '').join('');
+                        }
+                        resultText = resultText || undefined;
+
+                        if (!resultText) {
+                            console.warn(`[callIA] Resposta vazia do modelo ${model}. Estrutura:`, JSON.stringify(data).substring(0, 500));
+                            // Tentar fallback para outro modelo se a resposta é vazia
+                            if (!forceModel && model !== 'gemini-2.0-flash' && retries > 0) {
+                                console.log(`[callIA] Tentando fallback para gemini-2.0-flash...`);
+                                model = 'gemini-2.0-flash';
+                                retries = 1;
+                                continue;
+                            }
+                        }
+
                         console.log(`[callIA] Resposta recebida (${model}):`, resultText?.substring(0, 200));
                         return resultText;
                     } catch (e) {
                         console.error("Erro na chamada IA:", e);
-                        const isTransient = e.message.includes('fetch') || e.message.includes('429') || e.message.includes('500') || e.message.includes('503') || e.message.includes('overloaded');
+                        const isTransient = e.message.includes('fetch') || e.message.includes('Failed') || e.message.includes('429') || e.message.includes('500') || e.message.includes('503') || e.message.includes('overloaded');
                         if (retries > 0 && isTransient) {
                             retries--; await new Promise(r => setTimeout(r, delay)); delay *= 2; continue;
                         }
@@ -7599,7 +7855,7 @@ ${safeScript}
                         }
 
                         if (retries === 0 && !forceModel && msgs.some(m => m.parts && m.parts.some(p => p.inlineData))) {
-                            if (model.includes('3.1') || model.includes('2.5')) {
+                            if (model !== 'gemini-2.0-flash') {
                                 console.log("Tentando fallback para gemini-2.0-flash...");
                                 model = 'gemini-2.0-flash';
                                 retries = 1;
@@ -7794,7 +8050,9 @@ ${safeScript}
                     if (r && (r.startsWith('[ERRO_SEGURANCA]') || r.startsWith('[ERRO_API]'))) {
                         showAlert('\u274c Erro da API Gemini:\n\n' + r.replace(/\[ERRO_\w+\]\s*/, ''));
                     } else if (!r) {
-                        showAlert('\u274c A IA não retornou resposta. Verifique sua Chave API e o modelo selecionado nas Configurações.');
+                        const modelUsed = aiConfig.model || 'não configurado';
+                        const hasKey = !!aiConfig.key;
+                        showAlert(`\u274c A IA não retornou resposta.\n\nModelo: ${modelUsed}\nChave API: ${hasKey ? 'Configurada' : 'NÃO configurada'}\n\nVerifique nas Configurações se a Chave API está correta e se o modelo selecionado está ativo. Tente trocar para "gemini-2.0-flash" ou clicar em "Buscar Modelos" para atualizar a lista.`);
                     } else {
                         showAlert('\u274c Falha na comunicação com a IA. Verifique sua conexão e tente novamente.');
                     }
@@ -7852,8 +8110,11 @@ ${safeScript}
                 reader.readAsDataURL(file); e.target.value = '';
             };
 
-            const fetchModels = async () => {
-                if (!aiConfig.key) return showAlert("Insira sua Chave API primeiro.");
+            const fetchModels = async (quiet = false) => {
+                if (!aiConfig.key) {
+                    if (!quiet) showAlert("Insira sua Chave API primeiro.");
+                    return;
+                }
                 setIsAiLoading(true);
                 try {
                     const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${aiConfig.key}`);
@@ -7864,15 +8125,22 @@ ${safeScript}
                             .map(m => m.name.replace('models/', ''));
                         setAvailableModels(ids);
                         localStorage.setItem('gemini_available_models', JSON.stringify(ids));
-                        showAlert(`✅ ${ids.length} modelos encontrados e carregados!`);
+                        if (!quiet) showAlert(`✅ ${ids.length} modelos encontrados e carregados!`);
                     } else {
                         throw new Error(data.error?.message || "Erro ao listar modelos.");
                     }
                 } catch (e) {
-                    showAlert("❌ Erro ao buscar modelos: " + e.message);
+                    if (!quiet) showAlert("❌ Erro ao buscar modelos: " + e.message);
                 }
                 setIsAiLoading(false);
             };
+
+            // Buscar modelos automaticamente ao inicializar se houver chave API
+            useEffect(() => {
+                if (aiConfig.key) {
+                    fetchModels(true);
+                }
+            }, []);
 
             const testIA = async () => {
                 setIsAiLoading(true);
@@ -12836,9 +13104,13 @@ ${(obj.questoesAnalisadas || []).map(q => `### ${q.identificacao}
                                                 onChange={e => { setAiConfig(p => ({ ...p, model: e.target.value })); localStorage.setItem('gemini_model', e.target.value); }}
                                                 className="w-full p-4 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-700 rounded-2xl outline-none mb-4 text-sm font-bold shadow-inner text-slate-800 dark:text-white focus:border-emerald-500 transition-colors cursor-pointer"
                                             >
-                                                {availableModels.map(m => (
-                                                    <option key={m} value={m}>{m}</option>
-                                                ))}
+                                                {availableModels.length === 0 ? (
+                                                    <option value="">Insira a Chave API e clique em "Buscar Modelos"</option>
+                                                ) : (
+                                                    availableModels.map(m => (
+                                                        <option key={m} value={m}>{m}</option>
+                                                    ))
+                                                )}
                                             </select>
                                         </div>
 
