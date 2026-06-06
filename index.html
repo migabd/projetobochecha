@@ -11436,6 +11436,14 @@ Estrutura esperada:
                             const visionModel = (!aiConfig.key || aiConfig.model.includes('gemma')) ? 'gemini-1.5-flash' : null;
 
                             // ─────────────────────────────────────────────────────────────
+                            // ROBUST FILE TYPE DETECTION
+                            // ─────────────────────────────────────────────────────────────
+                            const isPdf = (elaboradorState.mimeType && elaboradorState.mimeType.toLowerCase().includes('pdf')) ||
+                                          (elaboradorState.fileName && elaboradorState.fileName.toLowerCase().endsWith('.pdf'));
+                            const isImage = (elaboradorState.mimeType && elaboradorState.mimeType.startsWith('image/')) ||
+                                            (elaboradorState.fileName && /\.(jpe?g|png|webp|gif|bmp)$/i.test(elaboradorState.fileName));
+
+                            // ─────────────────────────────────────────────────────────────
                             // HELPERS FOR PDF VISUAL RENDERING AND TEXT EXTRACTION
                             // ─────────────────────────────────────────────────────────────
                             const renderPageAsBase64 = async (pdfDoc, pageNum, scale = 1.2) => {
@@ -11465,9 +11473,10 @@ Estrutura esperada:
                             let extractedImages = []; // Array of { page, b64 }
 
                             // Se for PDF, pré-processar antes de iniciar o loop de lotes
-                            if (elaboradorState.fileData && elaboradorState.mimeType === 'application/pdf') {
+                            if (elaboradorState.fileData && isPdf) {
                                 setElaboradorState(p => ({ ...p, status: 'Carregando PDF...' }));
-                                const base64Str = elaboradorState.fileData.split(',')[1];
+                                const base64Parts = elaboradorState.fileData.split(',');
+                                const base64Str = base64Parts.length > 1 ? base64Parts[1] : base64Parts[0];
                                 const raw = window.atob(base64Str);
                                 const typedarray = new Uint8Array(raw.length);
                                 for (let i = 0; i < raw.length; i++) {
@@ -11525,7 +11534,7 @@ Estrutura esperada:
                                 }));
 
                                 const visionNote = elaboradorState.fileData
-                                    ? (elaboradorState.mimeType === 'application/pdf'
+                                    ? (isPdf
                                         ? 'NOTA DE VISÃO: Analise cuidadosamente o material de entrada fornecido (tanto o texto extraído quanto as imagens das páginas do PDF anexadas). É OBRIGATÓRIO que você elabore questões baseadas nestes dados. Se houver elementos visuais importantes (como diagramas, fluxogramas de conduta, tabelas, critérios de pontuação, exames de imagem ou ECGs) nas imagens das páginas, crie questões sobre eles.'
                                         : 'NOTA DE VISÃO: Analise cuidadosamente a imagem fornecida (como um ECG, exame de imagem RX/TC ou foto clínica) e baseie o caso clínico e as alternativas nos achados visuais desta imagem.')
                                     : '';
@@ -11560,18 +11569,22 @@ IMPORTANTE: Retorne APENAS um array JSON válido com EXATAMENTE ${batchQty} obje
                                 let parts = [];
                                 parts.push({ text: batchPrompt });
 
-                                if (extractedText) {
-                                    parts.push({ text: `\n\nCONTEÚDO DO DOCUMENTO BASE:\n${extractedText}` });
-                                }
-
-                                extractedImages.forEach(img => {
-                                    parts.push({ text: `\n[Página ${img.page} (imagem/diagrama/tabela/esquema)]` });
-                                    parts.push({ inlineData: { mimeType: 'image/jpeg', data: img.b64 } });
-                                });
-
-                                // Se for uma imagem avulsa (não PDF) e tiver fileData
-                                if (elaboradorState.fileData && elaboradorState.mimeType !== 'application/pdf') {
-                                    parts.push({ inlineData: { data: elaboradorState.fileData.split(',')[1], mimeType: elaboradorState.mimeType } });
+                                if (isPdf) {
+                                    if (extractedText) {
+                                        parts.push({ text: `\n\nCONTEÚDO DO DOCUMENTO BASE:\n${extractedText}` });
+                                    }
+                                    extractedImages.forEach(img => {
+                                        parts.push({ text: `\n[Página ${img.page} (imagem/diagrama/tabela/esquema)]` });
+                                        parts.push({ inlineData: { mimeType: 'image/jpeg', data: img.b64 } });
+                                    });
+                                } else if (isImage) {
+                                    const base64Parts = elaboradorState.fileData.split(',');
+                                    const base64Data = base64Parts.length > 1 ? base64Parts[1] : base64Parts[0];
+                                    parts.push({ inlineData: { data: base64Data, mimeType: elaboradorState.mimeType || 'image/jpeg' } });
+                                } else if (elaboradorState.fileData) {
+                                    const base64Parts = elaboradorState.fileData.split(',');
+                                    const base64Data = base64Parts.length > 1 ? base64Parts[1] : base64Parts[0];
+                                    parts.push({ inlineData: { data: base64Data, mimeType: elaboradorState.mimeType || 'application/octet-stream' } });
                                 }
 
                                 const msgs = [{ role: 'user', parts }];
