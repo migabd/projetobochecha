@@ -11435,6 +11435,77 @@ Estrutura esperada:
 
                             const visionModel = (!aiConfig.key || aiConfig.model.includes('gemma')) ? 'gemini-1.5-flash' : null;
 
+                            // ─────────────────────────────────────────────────────────────
+                            // HELPERS FOR PDF VISUAL RENDERING AND TEXT EXTRACTION
+                            // ─────────────────────────────────────────────────────────────
+                            const renderPageAsBase64 = async (pdfDoc, pageNum, scale = 1.2) => {
+                                const page = await pdfDoc.getPage(pageNum);
+                                const viewport = page.getViewport({ scale });
+                                const canvas = document.createElement('canvas');
+                                canvas.width = viewport.width;
+                                canvas.height = viewport.height;
+                                const ctx = canvas.getContext('2d');
+                                await page.render({ canvasContext: ctx, viewport }).promise;
+                                return canvas.toDataURL('image/jpeg', 0.65).split(',')[1];
+                            };
+
+                            const extractTextRange = async (pdfDoc, fromPage, toPage) => {
+                                let text = '';
+                                for (let p = fromPage; p <= toPage; p++) {
+                                    try {
+                                        const page = await pdfDoc.getPage(p);
+                                        const content = await page.getTextContent();
+                                        text += content.items.map(i => i.str).join(' ') + '\n';
+                                    } catch(e) {}
+                                }
+                                return text;
+                            };
+
+                            let extractedText = "";
+                            let extractedImages = []; // Array of { page, b64 }
+
+                            // Se for PDF, pré-processar antes de iniciar o loop de lotes
+                            if (elaboradorState.fileData && elaboradorState.mimeType === 'application/pdf') {
+                                setElaboradorState(p => ({ ...p, status: 'Carregando PDF...' }));
+                                const base64Str = elaboradorState.fileData.split(',')[1];
+                                const raw = window.atob(base64Str);
+                                const typedarray = new Uint8Array(raw.length);
+                                for (let i = 0; i < raw.length; i++) {
+                                    typedarray[i] = raw.charCodeAt(i);
+                                }
+                                const pdfDoc = await pdfjsLib.getDocument({ data: typedarray }).promise;
+                                const totalPages = pdfDoc.numPages;
+
+                                setElaboradorState(p => ({ ...p, status: `Extraindo texto (${totalPages} páginas)...` }));
+                                try { extractedText = await extractTextFromPDF(typedarray); } catch(e) { extractedText = ''; }
+
+                                const LOW_TEXT_THRESHOLD = 150;
+                                const MAX_IMAGES = 10;
+                                let imagesAdded = 0;
+
+                                if (totalPages <= 12) {
+                                    for (let p = 1; p <= totalPages; p++) {
+                                        setElaboradorState(p => ({ ...p, status: `Renderizando página ${p} de ${totalPages}...` }));
+                                        try {
+                                            const b64 = await renderPageAsBase64(pdfDoc, p, 1.2);
+                                            extractedImages.push({ page: p, b64 });
+                                        } catch(e) {}
+                                    }
+                                } else {
+                                    for (let p = 1; p <= totalPages && imagesAdded < MAX_IMAGES; p++) {
+                                        const pageText = await extractTextRange(pdfDoc, p, p);
+                                        if (pageText.trim().length < LOW_TEXT_THRESHOLD) {
+                                            setElaboradorState(p => ({ ...p, status: `Renderizando página visual ${p} de ${totalPages}...` }));
+                                            try {
+                                                const b64 = await renderPageAsBase64(pdfDoc, p, 1.2);
+                                                extractedImages.push({ page: p, b64 });
+                                                imagesAdded++;
+                                            } catch(e) {}
+                                        }
+                                    }
+                                }
+                            }
+
                             // ── GERAÇÃO EM LOTES ────────────────────────────────────────────
                             // Divide o total em lotes de no máximo 10 para garantir que a IA
                             // consiga retornar a quantidade exata sem ser truncada por tokens.
@@ -11453,12 +11524,22 @@ Estrutura esperada:
                                     status: `generating_batch_${batchIndex}_of_${totalBatches}`
                                 }));
 
+                                const visionNote = elaboradorState.fileData
+                                    ? (elaboradorState.mimeType === 'application/pdf'
+                                        ? 'NOTA DE VISÃO: Analise cuidadosamente o material de entrada fornecido (tanto o texto extraído quanto as imagens das páginas do PDF anexadas). É OBRIGATÓRIO que você elabore questões baseadas nestes dados. Se houver elementos visuais importantes (como diagramas, fluxogramas de conduta, tabelas, critérios de pontuação, exames de imagem ou ECGs) nas imagens das páginas, crie questões sobre eles.'
+                                        : 'NOTA DE VISÃO: Analise cuidadosamente a imagem fornecida (como um ECG, exame de imagem RX/TC ou foto clínica) e baseie o caso clínico e as alternativas nos achados visuais desta imagem.')
+                                    : '';
+
                                 const batchPrompt = `Atue como o examinador médico mais carrasco, impiedoso e exigente do mundo, padrão de excelência extrema de nível UTI.
 Crie EXATAMENTE ${batchQty} questões do tipo: ${typeInst}. NÃO crie nem mais, nem menos. O JSON DEVE ter EXATAMENTE ${batchQty} objetos no array.
 Nível de dificuldade: ${difficulty.toUpperCase()} (questões de hipercomplexidade clínica, raciocínio de multi-etapas, desenhadas para derrubar até especialistas, repletas de pegadinhas cruéis e detalhes vitais escondidos no enunciado).
 Tema/Foco opcional: ${focus || 'Baseado estritamente no documento ou imagem anexado'}.
 
-${elaboradorState.fileData ? 'NOTA DE VISÃO: Analise cuidadosamente a imagem ou documento fornecido. Se for uma imagem médica (RX, TC, Foto Clínica, ECG), baseie o caso clínico nos achados visuais. Se for um texto/PDF, use os dados fornecidos.' : ''}
+${visionNote}
+
+REGRAS DE CONTEÚDO E FIDELIDADE (CRÍTICO):
+1. É TERMINANTEMENTE PROIBIDO inventar, deduzir ou utilizar diretrizes médicas, condutas, parâmetros, medicamentos ou doses externos que NÃO estejam explicitamente descritos ou ilustrados no material fornecido (PDF ou imagem).
+2. Baseie todas as perguntas, alternativas corretas e erradas e justificativas UNICAMENTE nos dados contidos no PDF/imagem fornecidos. Se o PDF diz uma conduta específica, use EXATAMENTE ela. Não assuma nada fora do documento!
 
 INSTRUÇÃO CRÍTICA DE VARIEDADE (Seed: ${Date.now()}-lote${batchIndex}): É OBRIGATÓRIO que as questões sejam COMPLETAMENTE NOVAS e INÉDITAS. Explore ângulos clínicos inusitados, rodapés de livro, complicações raras, exceções à regra e cenários diagnósticos confusos. Fuja do óbvio!
 ${allGenerated.length > 0 ? `\nTemas JÁ usados nesta sessão (NÃO repita): ${allGenerated.map(q => q.title).join(', ')}` : ''}
@@ -11471,16 +11552,29 @@ IMPORTANTE: Retorne APENAS um array JSON válido com EXATAMENTE ${batchQty} obje
     "alternatives": ["A) ...", "B) ..."],
     "alternativeExplanations": ["Exp A", "Exp B"],
     "correctAlternative": "A",
-    "lessonLearned": "O detalhe matador desta questão."
+    "lessonLearned": "O detalhe matador desta questão.",
+    "imagePage": 3 // Opcional: Se a questão for baseada ou fizer referência direta a um elemento visual (fluxograma, tabela, imagem, ECG) de uma página específica do PDF, informe o número da página correspondente aqui como um número inteiro. Caso contrário, use null ou omita.
   }
 ]`;
 
-                                let msgs = [];
-                                if (elaboradorState.fileData && batchIndex === 1) {
-                                    msgs = [{ role: 'user', parts: [{ inlineData: { data: elaboradorState.fileData.split(',')[1], mimeType: elaboradorState.mimeType } }, { text: batchPrompt }] }];
-                                } else {
-                                    msgs = [{ role: 'user', parts: [{ text: batchPrompt }] }];
+                                let parts = [];
+                                parts.push({ text: batchPrompt });
+
+                                if (extractedText) {
+                                    parts.push({ text: `\n\nCONTEÚDO DO DOCUMENTO BASE:\n${extractedText}` });
                                 }
+
+                                extractedImages.forEach(img => {
+                                    parts.push({ text: `\n[Página ${img.page} (imagem/diagrama/tabela/esquema)]` });
+                                    parts.push({ inlineData: { mimeType: 'image/jpeg', data: img.b64 } });
+                                });
+
+                                // Se for uma imagem avulsa (não PDF) e tiver fileData
+                                if (elaboradorState.fileData && elaboradorState.mimeType !== 'application/pdf') {
+                                    parts.push({ inlineData: { data: elaboradorState.fileData.split(',')[1], mimeType: elaboradorState.mimeType } });
+                                }
+
+                                const msgs = [{ role: 'user', parts }];
 
                                 const res = await callIA(msgs, visionModel);
                                 if (!res || res.startsWith('[ERRO')) throw new Error(res || 'Erro desconhecido na IA');
@@ -11496,11 +11590,22 @@ IMPORTANTE: Retorne APENAS um array JSON válido com EXATAMENTE ${batchQty} obje
                                     batchGenerated = batchGenerated.slice(0, batchQty);
                                 }
 
-                                // Aplicar tags
-                                batchGenerated = batchGenerated.map(q => ({
-                                    ...q,
-                                    tags: [...(q.tags || []), ...(elaboradorState.settings.customTag ? [elaboradorState.settings.customTag] : [])]
-                                }));
+                                // Associar as imagens das páginas correspondentes, se fornecidas pela IA
+                                batchGenerated = batchGenerated.map(q => {
+                                    let imgB64 = null;
+                                    if (q.imagePage) {
+                                        const pageNum = Number(q.imagePage);
+                                        const foundImg = extractedImages.find(img => img.page === pageNum);
+                                        if (foundImg) {
+                                            imgB64 = `data:image/jpeg;base64,${foundImg.b64}`;
+                                        }
+                                    }
+                                    return {
+                                        ...q,
+                                        image: imgB64 || null,
+                                        tags: [...(q.tags || []), ...(elaboradorState.settings.customTag ? [elaboradorState.settings.customTag] : [])]
+                                    };
+                                });
 
                                 allGenerated = [...allGenerated, ...batchGenerated];
                                 remaining -= batchGenerated.length;
