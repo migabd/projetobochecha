@@ -4476,7 +4476,7 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
             }
 
             return null;
-        };
+        });
 
         // --- UTILIDADE: DOWNLOAD PERSISTENTE DE FIGURAS ---
         const fetchFigureDataUrls = async (pmcid, figures) => {
@@ -4545,7 +4545,7 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                 console.warn('fetchFigureDataUrls: erro geral', e);
                 return figures;
             }
-        });
+        };
 
         // --- ABA DESAFIO CLÍNICO DIÁRIO ---
         const DesafioDiarioTab = React.memo(({ db, setDb, callIA, aiConfig, availableModels, setActiveTab }) => {
@@ -6214,7 +6214,7 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
                 )}
             </>
             );
-        };
+        });
 
         // ==========================================
         // INDEXEDDB PARA PERSISTÊNCIA DE IMAGENS
@@ -6277,7 +6277,7 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
                 console.error("Failed to retrieve images from IndexedDB", err);
                 return {};
             }
-        });
+        };
 
         const App = () => {
             // --- ESTADO INICIAL (DB) ---
