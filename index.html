@@ -5,12 +5,30 @@
     <meta name="google" content="notranslate">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Caderno de Erros Médicos IA PRO</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <meta name="description" content="Caderno de Erros Médicos IA PRO — plataforma de estudos com IA para residência médica, fluxogramas clínicos, simulados e revisão espaçada.">
+    <meta name="theme-color" content="#10b981">
+
+    <!-- Preconnect para CDNs críticos — elimina latência de DNS/TLS no carregamento inicial -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="preconnect" href="https://cdn.tailwindcss.com">
+    <link rel="preconnect" href="https://cdnjs.cloudflare.com">
+    <link rel="preconnect" href="https://unpkg.com">
+
+    <!-- Fontes: link direto em vez de @import dentro de style (mais rápido e confiável) -->
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800;900&display=swap">
+
+    <!-- Tailwind CDN com defer para não bloquear o parser HTML -->
+    <script src="https://cdn.tailwindcss.com" defer></script>
     <script>
-        tailwind.config = { darkMode: 'class', theme: { extend: { colors: { emerald: { 50: '#ecfdf5', 100: '#d1fae5', 200: '#a7f3d0', 300: '#6ee7b7', 400: '#34d399', 500: '#10b981', 600: '#059669', 700: '#047857', 800: '#065f46', 900: '#064e3b', 950: '#022c22' }, zinc: { 50: '#fafafa', 100: '#f4f4f5', 200: '#e4e4e7', 300: '#d4d4d8', 400: '#a1a1aa', 500: '#71717a', 600: '#52525b', 700: '#3f3f46', 800: '#27272a', 900: '#18181b', 950: '#09090b' } } } } }
+        // Configuração do Tailwind — precisa rodar antes do defer acima carregar,
+        // então colocamos via window.__tailwind_config__ e aplicamos no onload
+        window.__tailwindConfig = { darkMode: 'class', theme: { extend: { colors: { emerald: { 50: '#ecfdf5', 100: '#d1fae5', 200: '#a7f3d0', 300: '#6ee7b7', 400: '#34d399', 500: '#10b981', 600: '#059669', 700: '#047857', 800: '#065f46', 900: '#064e3b', 950: '#022c22' }, zinc: { 50: '#fafafa', 100: '#f4f4f5', 200: '#e4e4e7', 300: '#d4d4d8', 400: '#a1a1aa', 500: '#71717a', 600: '#52525b', 700: '#3f3f46', 800: '#27272a', 900: '#18181b', 950: '#09090b' } } } } };
+        document.addEventListener('DOMContentLoaded', function() {
+            if (window.tailwind) tailwind.config = window.__tailwindConfig;
+        });
     </script>
     <style id="custom-styles">
-        @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800;900&display=swap');
 
         body {
             font-family: 'Outfit', sans-serif;
@@ -261,18 +279,22 @@
             letter-spacing: -2px;
         }
     </style>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/jsonrepair/lib/umd/jsonrepair.js"></script>
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <!-- Font Awesome: defer para não bloquear render -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" media="print" onload="this.media='all'">
+    <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"></noscript>
+
+    <!-- Dependências JS: defer garante execução após o parser terminar o HTML -->
+    <!-- Ordem importa: jsonrepair → React → ReactDOM → Babel → PDF.js → JSZip -->
+    <script src="https://cdn.jsdelivr.net/npm/jsonrepair/lib/umd/jsonrepair.js" defer></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin defer></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin defer></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js" defer></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js" defer></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" defer></script>
+    <!-- PDF.js worker: configurado dentro do código principal após o lib carregar -->
     <script>
-        // Configura o worker do PDF.js globalmente para permitir extração de PDFs
-        if (typeof window !== 'undefined' && window.pdfjsLib) {
-            window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
-        }
+        // Registra o worker do PDF.js assim que a lib carregar (via defer)
+        window.__pdfWorkerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
     </script>
     <script id="data-store">
         window.__INITIAL_STATE__ = {
@@ -283,18 +305,58 @@
     </script>
 </head>
 <body class="bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 min-h-screen flex flex-col font-sans transition-colors duration-300">
+    <!-- Splash screen: visível enquanto os scripts com defer estão carregando -->
+    <div id="loading-splash" style="position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#09090b;gap:20px;">
+        <div style="width:64px;height:64px;background:linear-gradient(135deg,#10b981,#0d9488);border-radius:16px;display:flex;align-items:center;justify-content:center;box-shadow:0 0 40px rgba(16,185,129,0.4);">
+            <svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"/></svg>
+        </div>
+        <div style="text-align:center;">
+            <p style="color:#10b981;font-family:system-ui,sans-serif;font-weight:900;font-size:1.25rem;letter-spacing:-0.5px;margin:0;">CADERNO IA PRO</p>
+            <p style="color:#3f3f46;font-family:system-ui,sans-serif;font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:3px;margin:4px 0 0;">Carregando...</p>
+        </div>
+        <div style="width:200px;height:3px;background:#18181b;border-radius:999px;overflow:hidden;">
+            <div style="height:100%;width:60%;background:linear-gradient(90deg,#10b981,#3b82f6);border-radius:999px;animation:splashBar 1.5s ease-in-out infinite;"></div>
+        </div>
+        <style>@keyframes splashBar{0%{width:20%;margin-left:0}50%{width:60%;margin-left:20%}100%{width:20%;margin-left:80%}}</style>
+    </div>
     <div id="root" class="flex-1 flex flex-col"></div>
-    <script type="text/babel" class="notranslate" translate="no">
-
+    <script>
         // Global Error Handler to avoid black screen and show the error
+        // Declared before Babel script so it can capture compilation and runtime errors
         window.addEventListener('error', (event) => {
-            document.body.innerHTML = `<div style="padding: 20px; color: red; font-family: monospace; background: black; height: 100vh;">
-                <h3>Erro Fatal:</h3>
-                <p>${event.message}</p>
-                <p>Linha: ${event.lineno}</p>
-                <pre>${event.error?.stack}</pre>
+            // Remove splash screen if visible
+            const splash = document.getElementById('loading-splash');
+            if (splash) splash.remove();
+            
+            document.body.innerHTML = `<div style="padding: 20px; color: #ef4444; font-family: monospace; background: #09090b; min-height: 100vh;">
+                <h3 style="font-size: 1.5rem; font-weight: bold; margin-bottom: 15px;">Erro Fatal:</h3>
+                <p style="font-size: 1.1rem; margin-bottom: 10px;"><strong>Mensagem:</strong> ${event.message}</p>
+                <p style="font-size: 1rem; margin-bottom: 10px;"><strong>Arquivo:</strong> ${event.filename}</p>
+                <p style="font-size: 1rem; margin-bottom: 10px;"><strong>Linha:</strong> ${event.lineno}:${event.colno}</p>
+                <pre style="background: #18181b; padding: 15px; border-radius: 8px; border: 1px solid #27272a; overflow: auto; max-width: 100%; white-space: pre-wrap;">${event.error?.stack || 'Nenhum stack trace disponível'}</pre>
             </div>`;
         });
+        window.addEventListener('unhandledrejection', (event) => {
+            const splash = document.getElementById('loading-splash');
+            if (splash) splash.remove();
+            
+            document.body.innerHTML = `<div style="padding: 20px; color: #f97316; font-family: monospace; background: #09090b; min-height: 100vh;">
+                <h3 style="font-size: 1.5rem; font-weight: bold; margin-bottom: 15px;">Erro Assíncrono (Promessa Rejeitada):</h3>
+                <p style="font-size: 1.1rem; margin-bottom: 10px;"><strong>Razão:</strong> ${event.reason?.message || event.reason}</p>
+                <pre style="background: #18181b; padding: 15px; border-radius: 8px; border: 1px solid #27272a; overflow: auto; max-width: 100%; white-space: pre-wrap;">${event.reason?.stack || 'Nenhum stack trace disponível'}</pre>
+            </div>`;
+        });
+    </script>
+    <script type="text/babel" data-type="module" class="notranslate" translate="no">
+
+        // Configura o worker do PDF.js (carregado via defer, então já está disponível)
+        if (typeof pdfjsLib !== 'undefined') {
+            pdfjsLib.GlobalWorkerOptions.workerSrc = window.__pdfWorkerSrc || 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+        }
+
+        // Remove o splash screen assim que o React começa a executar
+        const splashEl = document.getElementById('loading-splash');
+        if (splashEl) splashEl.remove();
 
         const { useState, useEffect, useRef, useMemo } = React;
 
@@ -553,7 +615,7 @@
         // ==========================================
         // 2.5 COMPONENTE: FLASHCARD ITEM
         // ==========================================
-        const FlashcardItem = ({ card, onDelete }) => {
+        const FlashcardItem = React.memo(({ card, onDelete }) => {
             const [flipped, setFlipped] = useState(false);
             return (
                 <div
@@ -569,12 +631,12 @@
                     </div>
                 </div>
             );
-        };
+        });
 
         // ==========================================
         // 2.6 COMPONENTE: DAY COLUMN (PLANNER)
         // ==========================================
-        const DayColumn = ({ day, tasks, onUpdate }) => {
+        const DayColumn = React.memo(({ day, tasks, onUpdate }) => {
             const [input, setInput] = useState("");
             const [priority, setPriority] = useState('none');
             const scrollRef = useRef(null);
@@ -684,9 +746,9 @@
                     </div>
                 </div>
             );
-        };
+        });
 
-const FluxogramasTab = ({ fluxogramas = [], setDb, callIA, extractTextFromPDF, aiConfig, setAiConfig, availableModels = [] }) => {
+const FluxogramasTab = React.memo(({ fluxogramas = [], setDb, callIA, extractTextFromPDF, aiConfig, setAiConfig, availableModels = [] }) => {
             const [view, setView] = React.useState('decks');
             const [selectedDeck, setSelectedDeck] = React.useState(null);
             const [selectedFlow, setSelectedFlow] = React.useState(null);
@@ -4483,10 +4545,10 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                 console.warn('fetchFigureDataUrls: erro geral', e);
                 return figures;
             }
-        };
+        });
 
         // --- ABA DESAFIO CLÍNICO DIÁRIO ---
-        const DesafioDiarioTab = ({ db, setDb, callIA, aiConfig, availableModels, setActiveTab }) => {
+        const DesafioDiarioTab = React.memo(({ db, setDb, callIA, aiConfig, availableModels, setActiveTab }) => {
             const [viewMode, setViewMode] = useState('dashboard');
             const [activeChallenge, setActiveChallenge] = useState(null);
             const [answer, setAnswer] = useState('');
@@ -6215,7 +6277,7 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
                 console.error("Failed to retrieve images from IndexedDB", err);
                 return {};
             }
-        };
+        });
 
         const App = () => {
             // --- ESTADO INICIAL (DB) ---
@@ -13362,14 +13424,7 @@ ${(obj.questoesAnalisadas || []).map(q => `### ${q.identificacao}
         };
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
-        try {
-            root.render(<App />);
-        } catch(err) {
-            document.body.innerHTML = `<div style="padding:20px;color:red;font-family:monospace;background:#111;min-height:100vh;white-space:pre-wrap"><h2>Erro ao iniciar o App:</h2><p>${err.message}</p><pre>${err.stack}</pre></div>`;
-        }
-        window.addEventListener('unhandledrejection', e => {
-            document.body.innerHTML = `<div style="padding:20px;color:orange;font-family:monospace;background:#111;min-height:100vh;white-space:pre-wrap"><h2>Erro Assíncrono:</h2><p>${e.reason?.message || e.reason}</p><pre>${e.reason?.stack}</pre></div>`;
-        });
+        root.render(<App />);
 
     
     </script>
