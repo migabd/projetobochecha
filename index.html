@@ -6391,6 +6391,7 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
             useEffect(() => { syncStatusRef.current = syncStatus; }, [syncStatus]);
 
             const isDirty = useRef(localStorage.getItem('caderno_db_is_dirty') === 'true');
+            const isIncomingSyncRef = useRef(false);
             const lastGistReceiveTime = useRef(0);
             const isFirstRenderDb = useRef(true);
             const isFirstRenderChat = useRef(true);
@@ -6402,6 +6403,10 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
                 const loadImages = async () => {
                     try {
                         const imagesMap = await getImagesFromIndexedDB();
+                        isIncomingSyncRef.current = true;
+                        setTimeout(() => {
+                            isIncomingSyncRef.current = false;
+                        }, 1000);
                         setDb(prev => {
                             const newErrors = (prev.errors || []).map(err => {
                                 const cachedImage = imagesMap[`error_${err.id}`];
@@ -6516,6 +6521,10 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
 
             const performFullMerge = (remote) => {
                 if (!remote) return;
+                isIncomingSyncRef.current = true;
+                setTimeout(() => {
+                    isIncomingSyncRef.current = false;
+                }, 1000);
                 setDb(prev => ({
                     ...prev,
                     ...remote,
@@ -6731,6 +6740,10 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
 
             // Garantir que os filtros padrão existam e sejam únicos
             useEffect(() => {
+                isIncomingSyncRef.current = true;
+                setTimeout(() => {
+                    isIncomingSyncRef.current = false;
+                }, 1000);
                 setDb(p => {
                     let changed = false;
 
@@ -7156,6 +7169,11 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
                         const rawErrors = Array.isArray(data) ? data : (data.errors || []);
                         const sanitized = sanitizeErrors(rawErrors);
 
+                        isIncomingSyncRef.current = true;
+                        setTimeout(() => {
+                            isIncomingSyncRef.current = false;
+                        }, 1000);
+
                         setDb(prev => ({
                             ...prev,
                             errors: [...sanitized, ...prev.errors].filter((v, i, a) => v && v.id && a.findIndex(t => t.id === v.id) === i),
@@ -7314,7 +7332,7 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
 
                 if (isFirstPersistence.current) {
                     isFirstPersistence.current = false;
-                } else if (Date.now() - lastGistReceiveTime.current > 2000) {
+                } else if (!isIncomingSyncRef.current) {
                     isDirty.current = true;
                     localStorage.setItem('caderno_db_is_dirty', 'true');
                 }
