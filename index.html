@@ -4548,7 +4548,7 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
         };
 
         // --- ABA DESAFIO CLÍNICO DIÁRIO ---
-        const DesafioDiarioTab = React.memo(({ db, setDb, callIA, aiConfig, availableModels, setActiveTab }) => {
+        const DesafioDiarioTab = React.memo(({ db, setDb, callIA, aiConfig, availableModels, setActiveTab, onActiveChallengeChange }) => {
             const [viewMode, setViewMode] = useState('dashboard');
             const [activeChallenge, setActiveChallenge] = useState(null);
             const [answer, setAnswer] = useState('');
@@ -4561,6 +4561,37 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
             const [challengeSearchQuery, setChallengeSearchQuery] = useState('');
             const [toast, setToast] = useState(null);
 
+            // Estados e referências adicionais do Editor Avançado
+            const [isRefining, setIsRefining] = useState(false);
+            const [refinedText, setRefinedText] = useState('');
+            const [isFullscreen, setIsFullscreen] = useState(false);
+            const [showTemplatesMenu, setShowTemplatesMenu] = useState(false);
+            const textareaRef = React.useRef(null);
+
+            const formatDate = (dateStr) => {
+                if (!dateStr) return '';
+                const baseDate = dateStr.split('_')[0];
+                const parts = baseDate.split('-');
+                if (parts.length !== 3) return dateStr;
+                const timeSuffix = dateStr.includes('_') ? ' (Personalizado)' : '';
+                return `${parts[2]}/${parts[1]}/${parts[0]}${timeSuffix}`;
+            };
+
+            const allChallenges = db.desafiosDiarios || [];
+            const sortedChallenges = allChallenges
+                .filter(challenge => {
+                    const q = challengeSearchQuery.toLowerCase().trim();
+                    if (!q) return true;
+                    const titleStr = (challenge.title || '').toLowerCase();
+                    const specialtyStr = (challenge.specialty || '').toLowerCase();
+                    const reportStr = (challenge.caseReport || '').toLowerCase();
+                    const dateStr = formatDate(challenge.date).toLowerCase();
+                    return titleStr.includes(q) || specialtyStr.includes(q) || reportStr.includes(q) || dateStr.includes(q);
+                })
+                .sort((a, b) => b.id - a.id);
+
+            const challengeToRender = selectedHistoryCase || activeChallenge || sortedChallenges[0];
+
             const showLocalToast = (msg, type = 'success') => {
                 setToast({ message: msg, type });
                 setTimeout(() => {
@@ -4569,8 +4600,10 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
             };
 
             useEffect(() => {
-                loadTodayChallenge();
-            }, [db.desafiosDiarios]);
+                if (!activeChallenge) {
+                    loadTodayChallenge();
+                }
+            }, [db.desafiosDiarios, activeChallenge]);
 
             // challengeToRender is declared at the top
 
@@ -5055,15 +5088,6 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
                 return html;
             };
 
-            const formatDate = (dateStr) => {
-                if (!dateStr) return '';
-                const baseDate = dateStr.split('_')[0];
-                const parts = baseDate.split('-');
-                if (parts.length !== 3) return dateStr;
-                const timeSuffix = dateStr.includes('_') ? ' (Personalizado)' : '';
-                return `${parts[2]}/${parts[1]}/${parts[0]}${timeSuffix}`;
-            };
-
             const renderScorecard = (challenge) => {
                 const evalData = challenge.evaluation;
                 if (!evalData) return null;
@@ -5183,19 +5207,6 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
                     </div>
                 );
             };
-
-            const allChallenges = db.desafiosDiarios || [];
-            const sortedChallenges = allChallenges
-                .filter(challenge => {
-                    const q = challengeSearchQuery.toLowerCase().trim();
-                    if (!q) return true;
-                    const titleStr = (challenge.title || '').toLowerCase();
-                    const specialtyStr = (challenge.specialty || '').toLowerCase();
-                    const reportStr = (challenge.caseReport || '').toLowerCase();
-                    const dateStr = formatDate(challenge.date).toLowerCase();
-                    return titleStr.includes(q) || specialtyStr.includes(q) || reportStr.includes(q) || dateStr.includes(q);
-                })
-                .sort((a, b) => b.id - a.id);
 
             const handleNavigateChallenge = (direction) => {
                 const list = sortedChallenges;
@@ -5490,8 +5501,6 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
                 }
             };
 
-                        const challengeToRender = selectedHistoryCase || activeChallenge || sortedChallenges[0];
-
             // Sincronizar campo de resposta ao trocar de desafio
             useEffect(() => {
                 if (challengeToRender) {
@@ -5500,6 +5509,102 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
                     setAnswer('');
                 }
             }, [challengeToRender?.id]);
+
+            // Notificar pai sobre o desafio e resposta atuais
+            useEffect(() => {
+                if (onActiveChallengeChange) {
+                    onActiveChallengeChange(challengeToRender ? {
+                        id: challengeToRender.id,
+                        title: challengeToRender.title,
+                        specialty: challengeToRender.specialty,
+                        caseReport: challengeToRender.caseReport,
+                        answer: answer,
+                        evaluation: challengeToRender.evaluation
+                    } : null);
+                }
+                return () => {
+                    if (onActiveChallengeChange) {
+                        onActiveChallengeChange(null);
+                    }
+                };
+            }, [challengeToRender, answer, onActiveChallengeChange]);
+
+            // Autosave da resposta no banco de dados (debouncado 1s)
+            useEffect(() => {
+                if (challengeToRender && !challengeToRender.evaluation && answer !== challengeToRender.answer) {
+                    const timer = setTimeout(() => {
+                        setDb(prev => {
+                            const currentDesafios = prev.desafiosDiarios || [];
+                            const exists = currentDesafios.some(d => d.id === challengeToRender.id);
+                            if (!exists) return prev;
+                            const updatedList = currentDesafios.map(d => d.id === challengeToRender.id ? { ...d, answer: answer } : d);
+                            return { ...prev, desafiosDiarios: updatedList };
+                        });
+                    }, 1000);
+                    return () => clearTimeout(timer);
+                }
+            }, [answer, challengeToRender?.id]);
+
+            // Inserir texto no cursor do editor
+            const insertText = (before, after = '') => {
+                const textarea = textareaRef.current;
+                if (!textarea) return;
+
+                const start = textarea.selectionStart;
+                const end = textarea.selectionEnd;
+                const text = textarea.value;
+                const selected = text.substring(start, end);
+                const replacement = before + selected + after;
+
+                const newAnswer = text.substring(0, start) + replacement + text.substring(end);
+                setAnswer(newAnswer);
+
+                setTimeout(() => {
+                    textarea.focus();
+                    textarea.selectionStart = start + before.length;
+                    textarea.selectionEnd = start + before.length + selected.length;
+                }, 0);
+            };
+
+            const CLINICAL_TEMPLATES = [
+                { label: 'Hipótese Diagnóstica', icon: 'fa-stethoscope', text: '### Hipótese Diagnóstica\n- **Principal:** \n- **Diferenciais:** \n\n' },
+                { label: 'Investigação Clínica', icon: 'fa-vial', text: '### Investigação Clínica\n- **Exames Laboratoriais:** \n- **Exames de Imagem:** \n- **Outros:** \n\n' },
+                { label: 'Conduta Terapêutica', icon: 'fa-prescription-bottle-medical', text: '### Conduta Terapêutica\n- **Medicamentosa:** \n- **Não Medicamentosa:** \n- **Medidas de Emergência:** \n\n' },
+                { label: 'Seguimento & Alertas', icon: 'fa-house-chimney-medical', text: '### Seguimento & Sinais de Alerta\n- **Retorno:** \n- **Critérios de Gravidade:** \n\n' }
+            ];
+
+            const handleAIRefine = async () => {
+                if (!answer.trim()) return;
+                setIsRefining(true);
+                setRefinedText('');
+                
+                const prompt = `Você é um Mentor Médico de Elite. O estudante escreveu a seguinte resposta provisória para o caso clínico abaixo.
+Sua missão é REFINAR a resposta do estudante, melhorando a precisão da terminologia médica, organizando a estrutura em seções claras se necessário, corrigindo a gramática e enriquecendo a redação clínica.
+ATENÇÃO: NÃO entregue o diagnóstico de bandeja ou a resposta se o aluno não tiver chegado lá. Apenas estruture e aperfeiçoe tecnicamente o que ele já escreveu.
+
+CASO CLÍNICO:
+${challengeToRender.caseReport}
+
+RESPOSTA DO ALUNO:
+${answer}
+
+Retorne a resposta refinada em formato Markdown profissional e limpo. Retorne APENAS a resposta refinada, sem cabeçalhos explicativos, sem introduções adicionais ("Aqui está o refinamento..."), sem notas de rodapé ou delimitadores de markdown (como blocos de código \`\`\`markdown).`;
+
+                try {
+                    const selectedModel = db.desafioDiarioModel || aiConfig.model || 'gemini-1.5-flash';
+                    const res = await callIA([{ role: 'user', parts: [{ text: prompt }] }], selectedModel);
+                    if (res && !res.startsWith('[ERRO')) {
+                        setRefinedText(res.trim());
+                    } else {
+                        showLocalToast("Erro ao refinar a resposta com a IA.", "error");
+                    }
+                } catch (e) {
+                    console.error("Erro no refinamento da IA:", e);
+                    showLocalToast("Falha na comunicação com o servidor de IA.", "error");
+                } finally {
+                    setIsRefining(false);
+                }
+            };
 
             // Helper centralizado para selecionar histórico salvando rascunho anterior
             const handleSelectHistoryCase = (challenge) => {
@@ -6096,32 +6201,158 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
                                         )}
                                     </div>
 
-                                    {/* Formulário de Resposta */}
+                                    {/* Formulário de Resposta com Editor Clínico Avançado */}
                                     {!challengeToRender.evaluation ? (
-                                        <div className="glass-panel p-6 md:p-8 rounded-3xl border border-zinc-200/50 dark:border-zinc-800/50 bg-white/60 dark:bg-zinc-900/60 shadow-xl space-y-4">
-                                            <h4 className="text-xs font-black text-zinc-400 uppercase tracking-widest flex items-center gap-1.5 font-sans">
-                                                <i className="fa-solid fa-pen-nib text-emerald-500 font-sans"></i> Sua Resposta Discursiva
-                                            </h4>
-                                            
-                                            <textarea 
-                                                value={answer} 
-                                                onChange={e => setAnswer(e.target.value)} 
-                                                disabled={isEvaluating} 
-                                                placeholder="Com base no relato de caso e nos exames anexados, prescreva sua hipótese diagnóstica principal, condutas iniciais terapêuticas e de investigação, e recomendações de seguimento..." 
-                                                className="w-full h-44 p-4 text-sm font-semibold rounded-2xl bg-white dark:bg-zinc-950/50 border border-zinc-200 dark:border-zinc-800 text-zinc-800 dark:text-zinc-100 outline-none focus:ring-2 focus:ring-emerald-500 transition-all resize-none shadow-inner font-sans font-sans" 
-                                            />
-                                            
-                                            <button 
-                                                onClick={handleSubmitAnswer} 
-                                                disabled={!answer.trim() || isEvaluating} 
-                                                className="w-full py-4 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-black rounded-2xl shadow-xl shadow-emerald-600/20 transition-all flex items-center justify-center gap-2 text-xs border border-emerald-400/20 active:scale-95 font-sans font-sans"
-                                            >
-                                                {isEvaluating ? (
-                                                    <><i className="fa-solid fa-circle-notch fa-spin text-sm"></i> Analisando Desempenho por Domínios...</>
-                                                ) : (
-                                                    <><i className="fa-solid fa-paper-plane text-xs"></i> Enviar para Avaliação</>
-                                                )}
-                                            </button>
+                                        <div className={`glass-panel p-6 rounded-3xl border border-zinc-200/50 dark:border-zinc-800/50 bg-white/60 dark:bg-zinc-900/60 shadow-xl space-y-4 transition-all duration-300 ${isFullscreen ? 'fixed inset-4 z-[5000] flex flex-col justify-between max-h-[calc(100vh-2rem)] bg-white dark:bg-zinc-900' : ''}`}>
+                                            <div className="flex justify-between items-center gap-4">
+                                                <h4 className="text-xs font-black text-zinc-450 dark:text-zinc-400 uppercase tracking-widest flex items-center gap-1.5 font-sans">
+                                                    <i className="fa-solid fa-pen-nib text-emerald-500 font-sans"></i> Sua Resposta Discursiva
+                                                </h4>
+                                                
+                                                <div className="flex items-center gap-2">
+                                                    {/* Indicador de Rascunho Salvo */}
+                                                    <span className="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 flex items-center gap-1">
+                                                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                                                        Auto-salvo
+                                                    </span>
+                                                    
+                                                    {/* Botão de Tela Cheia */}
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setIsFullscreen(!isFullscreen)}
+                                                        className="w-7 h-7 flex items-center justify-center rounded-lg bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-500 dark:text-zinc-405 transition-all active:scale-95"
+                                                        title={isFullscreen ? "Sair da Tela Cheia" : "Modo Tela Cheia"}
+                                                    >
+                                                        <i className={`fa-solid ${isFullscreen ? 'fa-compress' : 'fa-expand'} text-xs`}></i>
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            {/* BARRA DE FERRAMENTAS */}
+                                            <div className="flex flex-wrap items-center justify-between gap-2 bg-zinc-50 dark:bg-zinc-950/40 p-2.5 rounded-2xl border border-zinc-200/50 dark:border-zinc-800/50 font-sans">
+                                                <div className="flex items-center gap-1 flex-wrap font-sans">
+                                                    {/* Formatação Básica */}
+                                                    <button 
+                                                        type="button"
+                                                        onClick={() => insertText('**', '**')} 
+                                                        className="w-8 h-8 rounded-lg bg-white dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 border border-zinc-200/40 dark:border-zinc-800/40 text-xs font-black text-zinc-700 dark:text-zinc-350 transition-all flex items-center justify-center active:scale-95"
+                                                        title="Negrito"
+                                                    >
+                                                        <i className="fa-solid fa-bold"></i>
+                                                    </button>
+                                                    <button 
+                                                        type="button"
+                                                        onClick={() => insertText('*', '*')} 
+                                                        className="w-8 h-8 rounded-lg bg-white dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 border border-zinc-200/40 dark:border-zinc-800/40 text-xs font-black text-zinc-700 dark:text-zinc-350 transition-all flex items-center justify-center active:scale-95"
+                                                        title="Itálico"
+                                                    >
+                                                        <i className="fa-solid fa-italic"></i>
+                                                    </button>
+                                                    <button 
+                                                        type="button"
+                                                        onClick={() => insertText('- ', '')} 
+                                                        className="w-8 h-8 rounded-lg bg-white dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 border border-zinc-200/40 dark:border-zinc-800/40 text-xs font-black text-zinc-700 dark:text-zinc-355 transition-all flex items-center justify-center active:scale-95"
+                                                        title="Lista"
+                                                    >
+                                                        <i className="fa-solid fa-list-ul"></i>
+                                                    </button>
+
+                                                    <div className="w-px h-5 bg-zinc-200 dark:bg-zinc-800 mx-1"></div>
+
+                                                    {/* Dropdown de Modelos Clínicos */}
+                                                    <div className="relative">
+                                                        <button 
+                                                            type="button"
+                                                            onClick={() => setShowTemplatesMenu(!showTemplatesMenu)}
+                                                            className="px-3 h-8 rounded-lg bg-white dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 border border-zinc-200/40 dark:border-zinc-800/40 text-[10px] font-black uppercase tracking-wider text-zinc-700 dark:text-zinc-350 transition-all flex items-center justify-center gap-1.5 active:scale-95"
+                                                            title="Modelos Clínicos"
+                                                        >
+                                                            <i className="fa-solid fa-file-invoice text-emerald-500"></i> Modelos <i className="fa-solid fa-caret-down text-[8px] opacity-60"></i>
+                                                        </button>
+
+                                                        {showTemplatesMenu && (
+                                                            <>
+                                                                <div className="fixed inset-0 z-[100]" onClick={() => setShowTemplatesMenu(false)}></div>
+                                                                <div className="absolute left-0 mt-1.5 w-60 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-xl p-2 z-[101] animate-in fade-in slide-in-from-top-2 duration-150 font-sans">
+                                                                    <p className="text-[8px] font-black uppercase text-zinc-450 tracking-widest px-3.5 py-2">Inserir Seção Estruturada</p>
+                                                                    {CLINICAL_TEMPLATES.map((tpl, i) => (
+                                                                        <button
+                                                                            key={i}
+                                                                            type="button"
+                                                                            onClick={() => {
+                                                                                insertText(tpl.text);
+                                                                                setShowTemplatesMenu(false);
+                                                                            }}
+                                                                            className="w-full text-left px-3.5 py-2.5 hover:bg-zinc-50 dark:hover:bg-zinc-950/40 rounded-xl text-xs font-bold text-zinc-700 dark:text-zinc-300 flex items-center gap-2 transition-all active:scale-[0.98]"
+                                                                        >
+                                                                            <i className={`fa-solid ${tpl.icon} text-emerald-500 w-4 text-center`}></i>
+                                                                            {tpl.label}
+                                                                        </button>
+                                                                    ))}
+                                                                </div>
+                                                            </>
+                                                        )}
+                                                    </div>
+                                                </div>
+
+                                                <div className="flex items-center gap-1.5">
+                                                    {/* Refinar com IA */}
+                                                    <button 
+                                                        type="button"
+                                                        onClick={handleAIRefine}
+                                                        disabled={isRefining || !answer.trim()}
+                                                        className="px-3.5 h-8 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-[10px] font-black uppercase tracking-wider text-white transition-all flex items-center justify-center gap-1.5 shadow-sm active:scale-95 disabled:active:scale-100"
+                                                        title="Refinar resposta com Inteligência Artificial"
+                                                    >
+                                                        {isRefining ? (
+                                                            <i className="fa-solid fa-circle-notch fa-spin"></i>
+                                                        ) : (
+                                                            <i className="fa-solid fa-wand-magic-sparkles"></i>
+                                                        )}
+                                                        {isRefining ? 'Refinando...' : 'Refinar com IA'}
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            {/* TEXTAREA EDITOR */}
+                                            <div className="relative flex-1">
+                                                <textarea 
+                                                    ref={textareaRef}
+                                                    value={answer} 
+                                                    onChange={e => setAnswer(e.target.value)} 
+                                                    disabled={isEvaluating} 
+                                                    placeholder="Com base no relato de caso e nos exames anexados, prescreva sua hipótese diagnóstica principal, condutas iniciais terapêuticas e de investigação, e recomendações de seguimento..." 
+                                                    className={`w-full p-5 text-sm font-semibold rounded-3xl bg-white dark:bg-zinc-950/40 border border-zinc-200/50 dark:border-zinc-800/50 text-zinc-800 dark:text-zinc-100 outline-none focus:ring-2 focus:ring-emerald-500 transition-all resize-none shadow-inner font-sans ${isFullscreen ? 'flex-1 h-full' : 'h-64'}`} 
+                                                />
+                                            </div>
+
+                                            {/* FOOTER BAR (STATS & SUBMIT) */}
+                                            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 font-sans border-t border-zinc-100 dark:border-zinc-850 pt-4">
+                                                {/* Estatísticas de Digitação */}
+                                                <div className="flex items-center gap-4 text-xs font-bold text-zinc-450 dark:text-zinc-500">
+                                                    <span>
+                                                        <i className="fa-solid fa-font text-[10px] mr-1 font-sans"></i>
+                                                        {answer.length} caracteres
+                                                    </span>
+                                                    <span>
+                                                        <i className="fa-solid fa-align-left text-[10px] mr-1 font-sans"></i>
+                                                        {answer.trim() ? answer.trim().split(/\s+/).length : 0} palavras
+                                                    </span>
+                                                </div>
+
+                                                <button 
+                                                    type="button"
+                                                    onClick={handleSubmitAnswer} 
+                                                    disabled={!answer.trim() || isEvaluating} 
+                                                    className="sm:w-60 py-3.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-black rounded-2xl shadow-lg shadow-emerald-600/10 transition-all flex items-center justify-center gap-2 text-xs border border-emerald-400/20 active:scale-95 font-sans"
+                                                >
+                                                    {isEvaluating ? (
+                                                        <><i className="fa-solid fa-circle-notch fa-spin text-sm"></i> Avaliando com IA...</>
+                                                    ) : (
+                                                        <><i className="fa-solid fa-paper-plane text-[10px]"></i> Enviar para Avaliação</>
+                                                    )}
+                                                </button>
+                                            </div>
                                         </div>
                                     ) : (
                                         /* Exibição da Resposta Submetida */
@@ -6195,6 +6426,63 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
                             )}
                         </div>
                     ) : null}
+
+                    {/* Popover de Refinamento IA */}
+                    {refinedText && (
+                        <div className="fixed inset-0 bg-zinc-950/80 backdrop-blur-sm z-[7000] flex items-center justify-center p-4 animate-in fade-in duration-200">
+                            <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-[32px] p-6 max-w-2xl w-full max-h-[85vh] flex flex-col shadow-2xl animate-in zoom-in-95 duration-200 font-sans text-zinc-900 dark:text-zinc-100">
+                                <div className="flex justify-between items-center pb-4 border-b border-zinc-100 dark:border-zinc-800">
+                                    <h3 className="text-base font-black text-emerald-600 dark:text-emerald-400 flex items-center gap-2">
+                                        <i className="fa-solid fa-wand-magic-sparkles animate-pulse"></i> Refinamento de Resposta por IA
+                                    </h3>
+                                    <button onClick={() => setRefinedText('')} className="text-zinc-400 hover:text-red-500 w-8 h-8 flex items-center justify-center rounded-full bg-zinc-100 dark:bg-zinc-800 transition-all">
+                                        <i className="fa-solid fa-xmark"></i>
+                                    </button>
+                                </div>
+                                
+                                <div className="flex-1 overflow-y-auto py-6 space-y-4 text-sm planner-scroll font-sans">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div>
+                                            <h4 className="text-[10px] font-black uppercase text-zinc-450 dark:text-zinc-500 tracking-wider mb-2 font-sans">Sua Resposta Original</h4>
+                                            <div className="p-4 bg-zinc-50 dark:bg-zinc-950/60 border border-zinc-200 dark:border-zinc-850 rounded-2xl text-xs font-semibold text-zinc-550 dark:text-zinc-400 h-64 overflow-y-auto whitespace-pre-wrap leading-relaxed font-sans">
+                                                {answer}
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <h4 className="text-[10px] font-black uppercase text-emerald-500 tracking-wider mb-2 font-sans">Versão Refinada pela IA</h4>
+                                            <div className="p-4 bg-emerald-50/20 dark:bg-emerald-950/20 border border-emerald-100/50 dark:border-emerald-900/50 rounded-2xl text-xs font-semibold text-zinc-800 dark:text-zinc-200 h-64 overflow-y-auto whitespace-pre-wrap leading-relaxed font-sans">
+                                                {refinedText}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <p className="text-[10px] text-zinc-400 font-medium italic mt-2 font-sans">
+                                        * O refinamento revisa a gramática, terminologia médica e estrutura sem dar spoilers do gabarito.
+                                    </p>
+                                </div>
+                                
+                                <div className="flex justify-end gap-3 pt-4 border-t border-zinc-100 dark:border-zinc-800 font-sans">
+                                    <button 
+                                        type="button"
+                                        onClick={() => setRefinedText('')}
+                                        className="px-4 py-2.5 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-xl text-xs font-bold transition-all"
+                                    >
+                                        Descartar
+                                    </button>
+                                    <button 
+                                        type="button"
+                                        onClick={() => {
+                                            setAnswer(refinedText);
+                                            setRefinedText('');
+                                            showLocalToast("Resposta atualizada com a versão refinada!", "success");
+                                        }}
+                                        className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black shadow-lg shadow-emerald-600/20 active:scale-95 transition-all flex items-center gap-1.5"
+                                    >
+                                        <i className="fa-solid fa-check"></i> Aplicar Refinamento
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
 
                     {/* Lightbox local */}
                     {lightboxImage && (
@@ -6962,7 +7250,8 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
             }, [chatMessages, activeSessionId]);
 
             // --- ESTADO DO ASSISTENTE FLUTUANTE ---
-            const [floatingAi, setFloatingAi] = useState({ isOpen: false, query: '', result: '', isLoading: false });
+            const [floatingAi, setFloatingAi] = useState({ isOpen: false, query: '', result: '', isLoading: false, includeScreen: true });
+            const [activeChallengeInfo, setActiveChallengeInfo] = useState(null);
 
             useEffect(() => {
                 if (chatMessages.length === 0) {
@@ -7986,6 +8275,127 @@ ${safeScript}
                     console.error("Erro ao construir contexto da plataforma:", e);
                     return "Ocorreu um erro ao acessar a base de dados de estudos.";
                 }
+            };
+
+            const getCurrentScreenContent = () => {
+                let screenInfo = `Aba ativa atual: "${activeTab}"\n\n`;
+
+                switch (activeTab) {
+                    case 'dashboard':
+                        screenInfo += `CONTEÚDO DO PAINEL GERAL:\n`;
+                        screenInfo += `- Total de erros cadastrados no Caderno: ${db.errors?.length || 0}\n`;
+                        screenInfo += `- Total de flashcards: ${db.flashcards?.length || 0}\n`;
+                        screenInfo += `- Total de insights: ${db.perceptions?.length || 0}\n`;
+                        screenInfo += `- Total de checklists: ${db.checklists?.length || 0}\n`;
+                        break;
+                    case 'errors':
+                        screenInfo += `CONTEÚDO DO CADERNO DE ERROS:\n`;
+                        screenInfo += `O aluno está visualizando a lista de erros cadastrados.\n`;
+                        if (searchTerm) screenInfo += `- Termo de busca ativo: "${searchTerm}"\n`;
+                        if (listFilters.subj?.length > 0) {
+                            screenInfo += `- Filtro de disciplinas/temas: ${listFilters.subj.join(', ')}\n`;
+                        }
+                        if (listFilters.exam && listFilters.exam !== 'ALL') {
+                            screenInfo += `- Filtro de concurso/prova: ${listFilters.exam}\n`;
+                        }
+                        break;
+                    case 'simulado':
+                        screenInfo += `CONTEÚDO DO SIMULADOR:\n`;
+                        if (simulado.isActive) {
+                            const curQ = simulado.deck[simulado.curIdx];
+                            if (curQ) {
+                                screenInfo += `Questão atual (${simulado.curIdx + 1} de ${simulado.deck.length}):\n`;
+                                screenInfo += `Enunciado: ${curQ.question}\n`;
+                                if (curQ.alternatives && curQ.alternatives.length > 0) {
+                                    screenInfo += `Alternativas disponíveis:\n`;
+                                    curQ.alternatives.forEach((alt, idx) => {
+                                        const letter = String.fromCharCode(65 + idx);
+                                        screenInfo += `- ${letter}) ${alt}\n`;
+                                    });
+                                }
+                                if (simulado.selAlt) {
+                                    screenInfo += `Alternativa selecionada pelo aluno: "${simulado.selAlt}"\n`;
+                                } else {
+                                    screenInfo += `O aluno ainda não selecionou nenhuma alternativa.\n`;
+                                }
+                                if (simulado.showAns) {
+                                    screenInfo += `Gabarito correto: "${curQ.correctAlternative}"\n`;
+                                    if (curQ.lessonLearned) screenInfo += `Lição aprendida cadastrada: "${curQ.lessonLearned}"\n`;
+                                    if (simulado.aiExplanation) screenInfo += `Explicação da IA na tela: "${simulado.aiExplanation}"\n`;
+                                } else {
+                                    screenInfo += `O gabarito ainda não foi revelado.\n`;
+                                }
+                            }
+                        } else {
+                            screenInfo += `Nenhum simulado ativo no momento. O aluno está na tela de configuração de simulados.\n`;
+                        }
+                        break;
+                    case 'desafio_diario':
+                        screenInfo += `CONTEÚDO DOS DESAFIOS CLÍNICOS:\n`;
+                        if (activeChallengeInfo) {
+                            screenInfo += `Desafio Clínico Ativo: "${activeChallengeInfo.title}"\n`;
+                            screenInfo += `Especialidade: ${activeChallengeInfo.specialty}\n`;
+                            screenInfo += `Relato do Caso Clínico:\n${activeChallengeInfo.caseReport}\n\n`;
+                            if (activeChallengeInfo.evaluation) {
+                                screenInfo += `O desafio já foi avaliado.\n`;
+                                screenInfo += `Nota recebida pelo aluno: ${activeChallengeInfo.evaluation.score.toFixed(1)} / 10\n`;
+                                screenInfo += `Comentário do Mentor IA: "${activeChallengeInfo.evaluation.comment}"\n`;
+                            } else if (activeChallengeInfo.answer) {
+                                screenInfo += `Resposta provisória/rascunho que o aluno escreveu na caixa de texto:\n"${activeChallengeInfo.answer}"\n`;
+                            } else {
+                                screenInfo += `O aluno ainda não escreveu nenhuma resposta para este caso.\n`;
+                            }
+                        } else {
+                            screenInfo += `Nenhum desafio clínico ativo selecionado. O aluno está na tela principal de desafios.\n`;
+                        }
+                        break;
+                    case 'planner':
+                        screenInfo += `CONTEÚDO DO CRONOGRAMA SEMANAL:\n`;
+                        if (activeWeekId) {
+                            const week = db.weeks?.find(w => w.id === activeWeekId);
+                            if (week) {
+                                screenInfo += `Semana visualizada: "${week.title}"\n`;
+                                if (week.days) {
+                                    screenInfo += `Tarefas cadastradas na semana:\n`;
+                                    Object.entries(week.days).forEach(([day, tasks]) => {
+                                        const dayNames = { seg: 'Segunda-feira', ter: 'Terça-feira', qua: 'Quarta-feira', qui: 'Quinta-feira', sex: 'Sexta-feira', sab: 'Sábado', dom: 'Domingo' };
+                                        const dayLabel = dayNames[day] || day;
+                                        if (tasks && tasks.length > 0) {
+                                            screenInfo += `${dayLabel}:\n`;
+                                            tasks.forEach(t => {
+                                                screenInfo += `  - [${t.done ? 'Concluído' : 'Pendente'}] ${t.text}\n`;
+                                            });
+                                        }
+                                    });
+                                }
+                            }
+                        } else {
+                            screenInfo += `O aluno está visualizando o cronograma geral.\n`;
+                        }
+                        break;
+                    case 'insights':
+                        screenInfo += `CONTEÚDO DE INSIGHTS CLÍNICOS:\n`;
+                        screenInfo += `Lista de insights/percepções clínicas cadastradas:\n`;
+                        if (db.perceptions && db.perceptions.length > 0) {
+                            db.perceptions.forEach((p, idx) => {
+                                screenInfo += `${idx + 1}. [${p.date || ''}] ${p.text}\n`;
+                            });
+                        }
+                        break;
+                    case 'flashcards':
+                        screenInfo += `CONTEÚDO DE FLASHCARDS:\n`;
+                        break;
+                    case 'html_summaries':
+                        screenInfo += `CONTEÚDO DE RESUMOS HTML:\n`;
+                        if (htmlSummaryState.view === 'edit' && htmlSummaryState.editor) {
+                            screenInfo += `Editando/Visualizando Resumo: "${htmlSummaryState.editor.title}"\n`;
+                            screenInfo += `Categoria: ${htmlSummaryState.editor.category}\n`;
+                        }
+                        break;
+                    default:
+                        break;
+                }
+                return screenInfo;
             };
 
             const handleChatSend = async (forcedText) => {
@@ -13166,7 +13576,7 @@ ${(obj.questoesAnalisadas || []).map(q => `### ${q.identificacao}
                     case 'resumos_html': return renderResumosHtmlTab();
                     case 'analise_reversa': return renderReverseAnalysisTab();
                     case 'fluxogramas': return <FluxogramasTab fluxogramas={db.fluxogramas} setDb={setDb} callIA={callIA} extractTextFromPDF={window.extractTextFromPDF || extractTextFromPDF} aiConfig={aiConfig} setAiConfig={setAiConfig} availableModels={availableModels} />;
-                    case 'desafio_diario': return <DesafioDiarioTab db={db} setDb={setDb} callIA={callIA} aiConfig={aiConfig} availableModels={availableModels} setActiveTab={setActiveTab} />;
+                    case 'desafio_diario': return <DesafioDiarioTab db={db} setDb={setDb} callIA={callIA} aiConfig={aiConfig} availableModels={availableModels} setActiveTab={setActiveTab} onActiveChallengeChange={setActiveChallengeInfo} />;
                     default: return renderErrorList();
                 }
             };
@@ -13481,9 +13891,45 @@ ${(obj.questoesAnalisadas || []).map(q => `### ${q.identificacao}
                                         value={floatingAi.query}
                                         onChange={e => setFloatingAi(p => ({ ...p, query: e.target.value }))}
                                         placeholder="O que deseja saber?"
-                                        className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-4 text-sm font-bold resize-none outline-none focus:ring-2 focus:ring-emerald-500 transition-all"
+                                        className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-4 text-sm font-bold resize-none outline-none focus:ring-2 focus:ring-emerald-500 transition-all font-sans"
                                         rows="3"
                                     />
+                                    
+                                    {/* CONTEXTO DA TELA DETECTADO */}
+                                    <div className="p-3 bg-zinc-50 dark:bg-zinc-950/40 border border-zinc-200/60 dark:border-zinc-800/60 rounded-2xl flex flex-col gap-2 shadow-inner font-sans">
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex items-center gap-1.5">
+                                                <i className="fa-solid fa-desktop text-emerald-500 text-[10px]"></i>
+                                                <span className="text-[10px] font-black uppercase tracking-wider text-zinc-500 dark:text-zinc-400">Contexto da Tela</span>
+                                            </div>
+                                            <label className="relative inline-flex items-center cursor-pointer">
+                                                <input 
+                                                    type="checkbox" 
+                                                    checked={floatingAi.includeScreen} 
+                                                    onChange={e => setFloatingAi(p => ({ ...p, includeScreen: e.target.checked }))} 
+                                                    className="sr-only peer"
+                                                />
+                                                <div className="w-7 h-4 bg-zinc-200 dark:bg-zinc-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-zinc-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all dark:border-zinc-650 peer-checked:bg-emerald-600"></div>
+                                            </label>
+                                        </div>
+                                        {floatingAi.includeScreen ? (
+                                            <div className="text-[10px] font-bold text-zinc-600 dark:text-zinc-300 flex items-center gap-1.5 bg-white dark:bg-zinc-900 px-2.5 py-1.5 rounded-xl border border-zinc-150 dark:border-zinc-850">
+                                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                                                <span>Aba: <strong className="text-emerald-600 dark:text-emerald-400">{
+                                                    activeTab === 'dashboard' ? 'Painel Geral' :
+                                                    activeTab === 'errors' ? 'Caderno de Erros' :
+                                                    activeTab === 'simulado' ? 'Simulador' :
+                                                    activeTab === 'desafio_diario' ? 'Desafios Clínicos' :
+                                                    activeTab === 'planner' ? 'Cronograma Semanal' :
+                                                    activeTab === 'insights' ? 'Insights' :
+                                                    activeTab === 'flashcards' ? 'Flashcards' :
+                                                    activeTab === 'html_summaries' ? 'Resumos HTML' : activeTab
+                                                }</strong></span>
+                                            </div>
+                                        ) : (
+                                            <span className="text-[9px] font-black uppercase tracking-wider text-zinc-400">Contexto desativado</span>
+                                        )}
+                                    </div>
                                     {floatingPdf && (
                                         <div className="p-3 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl flex items-center justify-between text-xs font-bold animate-in fade-in">
                                             <div className="flex items-center gap-2 truncate">
@@ -13519,7 +13965,15 @@ ${(obj.questoesAnalisadas || []).map(q => `### ${q.identificacao}
                                             disabled={(!floatingAi.query.trim() && !floatingPdf) || floatingAi.isLoading || (floatingPdf && floatingPdf.isReading)}
                                             onClick={async () => {
                                                 setFloatingAi(p => ({ ...p, isLoading: true, result: '' }));
-                                                const context = `[INSTRUÇÃO DE MENTORIA: Você é o Mentor IA PRO, um tutor médico EXTREMAMENTE rude e irônico. O aluno é burro e você está aqui para lembrá-lo disso. Responda de forma curta e ácida.\nBASE DE DADOS DO ALUNO: ${buildPlatformContext()}]\n\n`;
+                                                
+                                                // Construir contexto base
+                                                let context = `[INSTRUÇÃO DE MENTORIA: Você é o Mentor IA PRO, um tutor médico EXTREMAMENTE rude e irônico. O aluno é burro e você está aqui para lembrá-lo disso. Responda de forma curta e ácida.\nBASE DE DADOS DO ALUNO: ${buildPlatformContext()}]`;
+                                                
+                                                // Anexar contexto da tela se ativo
+                                                if (floatingAi.includeScreen) {
+                                                    context += `\n[CONTEÚDO DA TELA ATUAL:\n${getCurrentScreenContent()}]`;
+                                                }
+                                                context += `\n\n`;
                                                 
                                                 let promptText = floatingAi.query.trim() ? floatingAi.query : "Analise o arquivo PDF anexado e me dê um resumo ou responda de acordo.";
                                                 if (floatingPdf) {
@@ -13542,6 +13996,7 @@ ${(obj.questoesAnalisadas || []).map(q => `### ${q.identificacao}
                             onClick={() => {
                                 const sel = window.getSelection().toString().trim();
                                 setFloatingAi(p => ({
+                                    ...p,
                                     isOpen: !p.isOpen,
                                     query: sel ? sel : p.query,
                                     result: p.isOpen ? p.result : '',
