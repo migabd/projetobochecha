@@ -1759,10 +1759,14 @@ DESCRIÇÃO DO FLUXOGRAMA: "${selectedFlow.description}"
             // Reset pan/zoom or center nodes when canvas is mounted or layout changes
             const centerCanvas = () => {
                 if (canvasRef.current && selectedFlow?.data?.nodes) {
-                    const width = canvasRef.current.clientWidth;
-                    setPan({
-                        x: (width / 2) - 1200 * zoom,
-                        y: isMobile ? 120 : 80
+                    requestAnimationFrame(() => {
+                        if (!canvasRef.current) return;
+                        const width = canvasRef.current.clientWidth;
+                        const currentZoom = window.innerWidth < 768 ? 0.6 : 1;
+                        setPan({
+                            x: (width / 2) - 1200 * currentZoom,
+                            y: window.innerWidth < 768 ? 120 : 80
+                        });
                     });
                 }
             };
@@ -4099,9 +4103,8 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                     </button>
                                 </div>
 
-                                {/* Flowchart Content Wrapper */}
                                 <div 
-                                    className="absolute origin-top-left transition-transform duration-100 ease-out select-none"
+                                    className={`absolute origin-top-left select-none ${isDragging ? '' : 'transition-transform duration-250 ease-out'}`}
                                     style={{
                                         transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
                                     }}
