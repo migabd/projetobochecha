@@ -7498,35 +7498,50 @@ Retorne a resposta refinada em formato Markdown profissional e limpo. Retorne AP
             const [viewerState, setViewerState] = useState({ rotate: 0, zoom: 1, brightness: 100, contrast: 100, invert: false });
 
             // ==========================================
-            // PERSISTÊNCIA E EFEITOS
+            // PERSISTÊNCIA E EFEITOS (DEBOUNCADO PARA EVITAR TRAVAMENTOS)
             // ==========================================
             useEffect(() => {
                 if (db.darkMode) document.documentElement.classList.add('dark');
                 else document.documentElement.classList.remove('dark');
+            }, [db.darkMode]);
 
+            useEffect(() => {
                 if (isInitializingImages.current) return;
 
-                // --- PERSISTÊNCIA OTIMIZADA ---
-                // Não salvamos imagens no LocalStorage para evitar QuotaExceededError.
-                // As imagens residem no IndexedDB local.
-                try {
-                    const lightPayload = {
-                        ...db,
-                        errors: (db.errors || []).map(err => ({ ...err, image: null })),
-                        summaries: (db.summaries || []).map(s => ({ ...s, image: null })),
-                        games: (db.games || []).map(g => ({
-                            ...g, pairs: (g.pairs || []).map(p => ({
-                                ...p,
-                                a: p.a.type === 'image' ? { type: 'text', val: '[Imagem na Cloud]' } : p.a,
-                                b: p.b.type === 'image' ? { type: 'text', val: '[Imagem na Cloud]' } : p.b
+                // --- PERSISTÊNCIA OTIMIZADA DEBOUNCADA ---
+                // Aguarda 1.5 segundos sem novas mudanças para executar a serialização pesada
+                const timer = setTimeout(() => {
+                    try {
+                        const lightPayload = {
+                            ...db,
+                            errors: (db.errors || []).map(err => ({ ...err, image: null })),
+                            summaries: (db.summaries || []).map(s => ({ ...s, image: null })),
+                            games: (db.games || []).map(g => ({
+                                ...g, pairs: (g.pairs || []).map(p => ({
+                                    ...p,
+                                    a: p.a.type === 'image' ? { type: 'text', val: '[Imagem na Cloud]' } : p.a,
+                                    b: p.b.type === 'image' ? { type: 'text', val: '[Imagem na Cloud]' } : p.b
+                                }))
                             }))
-                        }))
-                    };
-                    localStorage.setItem('caderno_db_master', JSON.stringify(lightPayload));
-                    // Limpa pdfText de mensagens antigas em todas as sessões para não estourar limite do localStorage (5MB)
-                    const cleanedSessions = chatSessions.map(session => ({
-                        ...session,
-                        messages: (session.messages || []).slice(-50).map((m, idx, arr) => {
+                        };
+                        localStorage.setItem('caderno_db_master', JSON.stringify(lightPayload));
+                        // Limpa pdfText de mensagens antigas em todas as sessões para não estourar limite do localStorage (5MB)
+                        const cleanedSessions = chatSessions.map(session => ({
+                            ...session,
+                            messages: (session.messages || []).slice(-50).map((m, idx, arr) => {
+                                if (m.pdfText) {
+                                    const pdfIndices = arr.map((x, i) => x.role === 'user' && x.pdfText ? i : -1).filter(i => i !== -1);
+                                    const cutoffIndex = pdfIndices.length > 2 ? pdfIndices[pdfIndices.length - 2] : -1;
+                                    if (idx < cutoffIndex) {
+                                        return { ...m, pdfText: undefined, pdfTruncated: true };
+                                    }
+                                }
+                                return m;
+                            })
+                        }));
+                        localStorage.setItem('chat_med_ia_sessions', JSON.stringify(cleanedSessions));
+
+                        const cleanedChatMessages = chatMessages.slice(-50).map((m, idx, arr) => {
                             if (m.pdfText) {
                                 const pdfIndices = arr.map((x, i) => x.role === 'user' && x.pdfText ? i : -1).filter(i => i !== -1);
                                 const cutoffIndex = pdfIndices.length > 2 ? pdfIndices[pdfIndices.length - 2] : -1;
@@ -7535,96 +7550,86 @@ Retorne a resposta refinada em formato Markdown profissional e limpo. Retorne AP
                                 }
                             }
                             return m;
-                        })
-                    }));
-                    localStorage.setItem('chat_med_ia_sessions', JSON.stringify(cleanedSessions));
-
-                    const cleanedChatMessages = chatMessages.slice(-50).map((m, idx, arr) => {
-                        if (m.pdfText) {
-                            const pdfIndices = arr.map((x, i) => x.role === 'user' && x.pdfText ? i : -1).filter(i => i !== -1);
-                            const cutoffIndex = pdfIndices.length > 2 ? pdfIndices[pdfIndices.length - 2] : -1;
-                            if (idx < cutoffIndex) {
-                                return { ...m, pdfText: undefined, pdfTruncated: true };
-                            }
-                        }
-                        return m;
-                    });
-                    localStorage.setItem('chat_med_ia_master', JSON.stringify(cleanedChatMessages));
-                } catch (e) {
-                    console.warn("Erro ao salvar metadados locais:", e);
-                }
-                
-                // Sincronizar imagens no IndexedDB e limpar órfãos
-                const syncImagesToIndexedDB = async () => {
-                    try {
-                        const activeKeys = new Set();
-                        (db.errors || []).forEach(err => {
-                            if (err.image) activeKeys.add(`error_${err.id}`);
                         });
-                        (db.summaries || []).forEach(s => {
-                            if (s.image) activeKeys.add(`summary_${s.id}`);
-                        });
-                        (db.games || []).forEach(g => {
-                            (g.pairs || []).forEach(p => {
-                                if (p.a && p.a.type === 'image' && p.a.val && p.a.val !== '[Imagem na Cloud]') {
-                                    activeKeys.add(`game_pair_${g.id}_${p.id}_a`);
-                                }
-                                if (p.b && p.b.type === 'image' && p.b.val && p.b.val !== '[Imagem na Cloud]') {
-                                    activeKeys.add(`game_pair_${g.id}_${p.id}_b`);
-                                }
-                            });
-                        });
-
-                        // Salvar imagens ativas em base64 no IndexedDB
-                        for (const err of (db.errors || [])) {
-                            if (err.image && err.image.startsWith('data:image')) {
-                                await saveImageToIndexedDB(`error_${err.id}`, err.image);
-                            }
-                        }
-                        for (const s of (db.summaries || [])) {
-                            if (s.image && s.image.startsWith('data:image')) {
-                                await saveImageToIndexedDB(`summary_${s.id}`, s.image);
-                            }
-                        }
-                        for (const g of (db.games || [])) {
-                            for (const p of (g.pairs || [])) {
-                                if (p.a && p.a.type === 'image' && p.a.val && p.a.val.startsWith('data:image')) {
-                                    await saveImageToIndexedDB(`game_pair_${g.id}_${p.id}_a`, p.a.val);
-                                }
-                                if (p.b && p.b.type === 'image' && p.b.val && p.b.val.startsWith('data:image')) {
-                                    await saveImageToIndexedDB(`game_pair_${g.id}_${p.id}_b`, p.b.val);
-                                }
-                            }
-                        }
-
-                        // Remover imagens órfãs
-                        const idb = await initImagesDB();
-                        const tx = idb.transaction("images", "readwrite");
-                        const store = tx.objectStore("images");
-                        const request = store.openKeyCursor();
-                        request.onsuccess = (e) => {
-                            const cursor = e.target.result;
-                            if (cursor) {
-                                const key = cursor.key;
-                                if (!activeKeys.has(key)) {
-                                    store.delete(key);
-                                    console.log(`Imagem órfã deletada do IndexedDB: ${key}`);
-                                }
-                                cursor.continue();
-                            }
-                        };
-                    } catch (err) {
-                        console.error("Erro ao sincronizar imagens com o IndexedDB:", err);
+                        localStorage.setItem('chat_med_ia_master', JSON.stringify(cleanedChatMessages));
+                    } catch (e) {
+                        console.warn("Erro ao salvar metadados locais:", e);
                     }
-                };
-                syncImagesToIndexedDB();
+                    
+                    // Sincronizar imagens no IndexedDB e limpar órfãos
+                    const syncImagesToIndexedDB = async () => {
+                        try {
+                            const activeKeys = new Set();
+                            (db.errors || []).forEach(err => {
+                                if (err.image) activeKeys.add(`error_${err.id}`);
+                            });
+                            (db.summaries || []).forEach(s => {
+                                if (s.image) activeKeys.add(`summary_${s.id}`);
+                            });
+                            (db.games || []).forEach(g => {
+                                (g.pairs || []).forEach(p => {
+                                    if (p.a && p.a.type === 'image' && p.a.val && p.a.val !== '[Imagem na Cloud]') {
+                                        activeKeys.add(`game_pair_${g.id}_${p.id}_a`);
+                                    }
+                                    if (p.b && p.b.type === 'image' && p.b.val && p.b.val !== '[Imagem na Cloud]') {
+                                        activeKeys.add(`game_pair_${g.id}_${p.id}_b`);
+                                    }
+                                });
+                            });
 
-                if (isFirstPersistence.current) {
-                    isFirstPersistence.current = false;
-                } else if (!isIncomingSyncRef.current) {
-                    isDirty.current = true;
-                    localStorage.setItem('caderno_db_is_dirty', 'true');
-                }
+                            // Salvar imagens ativas em base64 no IndexedDB
+                            for (const err of (db.errors || [])) {
+                                if (err.image && err.image.startsWith('data:image')) {
+                                    await saveImageToIndexedDB(`error_${err.id}`, err.image);
+                                }
+                            }
+                            for (const s of (db.summaries || [])) {
+                                if (s.image && s.image.startsWith('data:image')) {
+                                    await saveImageToIndexedDB(`summary_${s.id}`, s.image);
+                                }
+                            }
+                            for (const g of (db.games || [])) {
+                                for (const p of (g.pairs || [])) {
+                                    if (p.a && p.a.type === 'image' && p.a.val && p.a.val.startsWith('data:image')) {
+                                        await saveImageToIndexedDB(`game_pair_${g.id}_${p.id}_a`, p.a.val);
+                                    }
+                                    if (p.b && p.b.type === 'image' && p.b.val && p.b.val.startsWith('data:image')) {
+                                        await saveImageToIndexedDB(`game_pair_${g.id}_${p.id}_b`, p.b.val);
+                                    }
+                                }
+                            }
+
+                            // Remover imagens órfãs
+                            const idb = await initImagesDB();
+                            const tx = idb.transaction("images", "readwrite");
+                            const store = tx.objectStore("images");
+                            const request = store.openKeyCursor();
+                            request.onsuccess = (e) => {
+                                const cursor = e.target.result;
+                                if (cursor) {
+                                    const key = cursor.key;
+                                    if (!activeKeys.has(key)) {
+                                        store.delete(key);
+                                        console.log(`Imagem órfã deletada do IndexedDB: ${key}`);
+                                    }
+                                    cursor.continue();
+                                }
+                            };
+                        } catch (err) {
+                            console.error("Erro ao sincronizar imagens com o IndexedDB:", err);
+                        }
+                    };
+                    syncImagesToIndexedDB();
+
+                    if (isFirstPersistence.current) {
+                        isFirstPersistence.current = false;
+                    } else if (!isIncomingSyncRef.current) {
+                        isDirty.current = true;
+                        localStorage.setItem('caderno_db_is_dirty', 'true');
+                    }
+                }, 1500);
+
+                return () => clearTimeout(timer);
             }, [db, chatMessages, chatSessions]);
 
             useEffect(() => {
