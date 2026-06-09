@@ -10845,7 +10845,35 @@ Estrutura esperada:
                                     <div className="grid grid-cols-1 gap-2 animate-in fade-in duration-500">
                                         <div className="flex items-center justify-between p-3 rounded-2xl bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-100 dark:border-emerald-800/50">
                                             <span className="text-[9px] font-black uppercase text-emerald-600 dark:text-emerald-400 tracking-widest"><i className="fa-solid fa-circle-check mr-1"></i> Certas</span>
-                                           const renderSimuladoResultsUI = () => {
+                                            <span className="font-black text-sm text-emerald-700 dark:text-emerald-400">{simulado.results.filter(r => r.isCorrect).length}</span>
+                                        </div>
+                                        <div className="flex items-center justify-between p-3 rounded-2xl bg-rose-50 dark:bg-rose-900/10 border border-rose-100 dark:border-rose-800/50">
+                                            <span className="text-[9px] font-black uppercase text-rose-600 dark:text-rose-400 tracking-widest"><i className="fa-solid fa-circle-xmark mr-1"></i> Erradas</span>
+                                            <span className="font-black text-sm text-rose-700 dark:text-rose-400">{simulado.results.filter(r => !r.isCorrect && r.userAns !== 'Pulo').length}</span>
+                                        </div>
+                                        <div className="flex items-center justify-between p-3 rounded-2xl bg-amber-50 dark:bg-amber-900/10 border border-amber-100 dark:border-amber-800/50">
+                                            <span className="text-[9px] font-black uppercase text-amber-600 dark:text-amber-400 tracking-widest"><i className="fa-solid fa-forward-step mr-1"></i> Puladas</span>
+                                            <span className="font-black text-sm text-amber-700 dark:text-amber-400">{simulado.results.filter(r => r.userAns === 'Pulo').length}</span>
+                                        </div>
+                                        {simulado.cebraspeMode && (
+                                            <div className="flex items-center justify-between p-3 rounded-2xl bg-rose-50 dark:bg-rose-900/10 border-2 border-rose-500/50 animate-pulse">
+                                                <span className="text-[9px] font-black uppercase text-rose-600 dark:text-rose-400 tracking-widest"><i className="fa-solid fa-calculator mr-1"></i> Score Líquido</span>
+                                                <span className="font-black text-sm text-rose-700 dark:text-rose-400">{simulado.results.filter(r => r.isCorrect).length - simulado.results.filter(r => !r.isCorrect && r.userAns !== 'Pulo').length}</span>
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
+                                <button onClick={finishSimulado} className="w-full py-4 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded-[20px] font-black text-[10px] uppercase tracking-[0.2em] shadow-xl hover:shadow-emerald-500/10 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2 mt-4">
+                                    <i className="fa-solid fa-flag-checkered"></i> Finalizar Simulado
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            const renderSimuladoResultsUI = () => {
                 const hits = simulado.results.filter(r => r.isCorrect).length;
                 const tot = simulado.deck.length;
                 const perc = Math.round((hits / tot) * 100);
