@@ -7288,10 +7288,36 @@ Retorne a resposta refinada em formato Markdown profissional e limpo. Retorne AP
             }, []);
 
             // --- ESTADOS DOS SIMULADOS ---
-            const [simulado, setSimulado] = useState({ isActive: false, deck: [], curIdx: 0, showAns: false, selAlt: null, showResults: false, isReviewing: false, timeElapsed: 0, results: [], aiExplanation: '', isAiExplaining: false, isGeneratingFlashcards: false, crossedAlts: [], highlightedText: '' });
+            const [simulado, setSimulado] = useState({ 
+                isActive: false, 
+                deck: [], 
+                curIdx: 0, 
+                showAns: false, 
+                selAlt: null, 
+                showResults: false, 
+                isReviewing: false, 
+                timeElapsed: 0, 
+                totalTimeElapsed: 0, 
+                isTimerPaused: false, 
+                timerMode: 'free', 
+                timerLimit: 60, 
+                timerAutoAdvance: false, 
+                timerHide: false, 
+                timeSpentPerQuestion: [],
+                results: [], 
+                aiExplanation: '', 
+                isAiExplaining: false, 
+                isGeneratingFlashcards: false, 
+                crossedAlts: [], 
+                highlightedText: '' 
+            });
             const [simQty, setSimQty] = useState(10);
             const [simUseSpaced, setSimUseSpaced] = useState(true);
             const [simCebraspeMode, setSimCebraspeMode] = useState(false);
+            const [simTimerMode, setSimTimerMode] = useState('free');
+            const [simTimerLimit, setSimTimerLimit] = useState(90);
+            const [simTimerAutoAdvance, setSimTimerAutoAdvance] = useState(false);
+            const [simTimerHide, setSimTimerHide] = useState(false);
 
             // --- ESTADOS DE FILTRAGEM UNIFICADOS ---
             const [listFilters, setListFilters] = useState({ subj: [], exam: 'ALL', fac: 'ALL', tag: 'ALL' });
@@ -7664,13 +7690,110 @@ Retorne a resposta refinada em formato Markdown profissional e limpo. Retorne AP
                 if (activeTab === 'chat') chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
             }, [chatMessages, isAiLoading, activeTab]);
 
+            const handleQuestionTimeout = () => {
+                setSimulado(p => {
+                    const currentQuestion = p.deck[p.curIdx];
+                    if (!currentQuestion) return p;
+                    
+                    setTimeout(() => {
+                        recordAnswer(currentQuestion.id, false, 'Tempo Esgotado');
+                        
+                        if (p.timerAutoAdvance) {
+                            setTimeout(() => {
+                                advanceQuestion();
+                            }, 1500);
+                        } else {
+                            setSimulado(curr => ({ ...curr, showAns: true }));
+                        }
+                    }, 10);
+                    
+                    return p;
+                });
+                showAlert("⏱️ O tempo limite para esta questão foi esgotado!");
+            };
+
+            const advanceQuestion = () => {
+                setSimulado(p => {
+                    if (p.isReviewing) {
+                        return { ...p, isReviewing: false, showResults: true, aiExplanation: '', isAiExplaining: false, crossedAlts: [], highlightedText: '' };
+                    } else if (p.curIdx < p.deck.length - 1) {
+                        return { ...p, curIdx: p.curIdx + 1, showAns: false, selAlt: null, timeElapsed: p.timeSpentPerQuestion[p.curIdx + 1] || 0, aiExplanation: '', isAiExplaining: false, crossedAlts: [], highlightedText: '' };
+                    } else {
+                        setTimeout(() => finishSimulado(), 10);
+                        return p;
+                    }
+                });
+                window.scrollTo(0, 0);
+            };
+
             useEffect(() => {
                 let t = null;
-                if (simulado.isActive && !simulado.showResults && !simulado.showAns && !simulado.isReviewing) {
-                    t = setInterval(() => setSimulado(p => ({ ...p, timeElapsed: p.timeElapsed + 1 })), 1000);
+                if (simulado.isActive && !simulado.showResults && !simulado.isReviewing && !simulado.isTimerPaused) {
+                    const currentQuestion = simulado.deck[simulado.curIdx];
+                    const isAnswered = currentQuestion && (simulado.results.some(r => String(r.id) === String(currentQuestion.id)) || simulado.showAns);
+                    
+                    if (!isAnswered) {
+                        t = setInterval(() => {
+                            setSimulado(p => {
+                                const nextTimeElapsed = p.timeElapsed + 1;
+                                const nextTotalTime = p.totalTimeElapsed + 1;
+                                
+                                const nextTimeSpentPerQuestion = [...(p.timeSpentPerQuestion || [])];
+                                while (nextTimeSpentPerQuestion.length < p.deck.length) {
+                                    nextTimeSpentPerQuestion.push(0);
+                                }
+                                nextTimeSpentPerQuestion[p.curIdx] = (nextTimeSpentPerQuestion[p.curIdx] || 0) + 1;
+                                
+                                if (p.timerMode === 'question_countdown' && nextTimeElapsed >= p.timerLimit) {
+                                    clearInterval(t);
+                                    setTimeout(() => handleQuestionTimeout(), 10);
+                                    return {
+                                        ...p,
+                                        timeElapsed: nextTimeElapsed,
+                                        totalTimeElapsed: nextTotalTime,
+                                        timeSpentPerQuestion: nextTimeSpentPerQuestion
+                                    };
+                                }
+                                
+                                if (p.timerMode === 'total_countdown' && nextTotalTime >= p.timerLimit * 60) {
+                                    clearInterval(t);
+                                    setTimeout(() => {
+                                        finishSimulado();
+                                        showAlert("⏱️ Tempo limite total do simulado esgotado!");
+                                    }, 10);
+                                    return {
+                                        ...p,
+                                        timeElapsed: nextTimeElapsed,
+                                        totalTimeElapsed: nextTotalTime,
+                                        timeSpentPerQuestion: nextTimeSpentPerQuestion
+                                    };
+                                }
+                                
+                                return {
+                                    ...p,
+                                    timeElapsed: nextTimeElapsed,
+                                    totalTimeElapsed: nextTotalTime,
+                                    timeSpentPerQuestion: nextTimeSpentPerQuestion
+                                };
+                            });
+                        }, 1000);
+                    }
                 }
-                return () => clearInterval(t);
-            }, [simulado.isActive, simulado.showResults, simulado.showAns, simulado.isReviewing]);
+                return () => {
+                    if (t) clearInterval(t);
+                };
+            }, [
+                simulado.isActive, 
+                simulado.showResults, 
+                simulado.isReviewing, 
+                simulado.isTimerPaused, 
+                simulado.curIdx, 
+                simulado.results, 
+                simulado.showAns, 
+                simulado.timerMode, 
+                simulado.timerLimit, 
+                simulado.timerAutoAdvance
+            ]);
 
             const handleNewChat = () => {
                 const newId = 'session_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
@@ -9027,7 +9150,7 @@ ${safeScript}
                 return () => window.removeEventListener('keydown', handleKeyDown);
             }, [summaryLightbox, filteredSummaries]);
 
-            const clearDeck = () => setSimulado({ isActive: false, deck: [], curIdx: 0, showAns: false, selAlt: null, showResults: false, isReviewing: false, timeElapsed: 0, results: [], aiExplanation: '', isAiExplaining: false, isGeneratingFlashcards: false, crossedAlts: [], highlightedText: '', cebraspeMode: false, source: '' });
+            const clearDeck = () => setSimulado({ isActive: false, deck: [], curIdx: 0, showAns: false, selAlt: null, showResults: false, isReviewing: false, timeElapsed: 0, totalTimeElapsed: 0, isTimerPaused: false, timerMode: 'free', timerLimit: 60, timerAutoAdvance: false, timerHide: false, timeSpentPerQuestion: [], results: [], aiExplanation: '', isAiExplaining: false, isGeneratingFlashcards: false, crossedAlts: [], highlightedText: '', cebraspeMode: false, source: '' });
 
             const generateDeck = (isQuick = false, forceSpaced = false, useListPool = false) => {
                 let pool = isQuick ? db.errors : (useListPool ? currentPool : simPool);
@@ -9071,7 +9194,31 @@ ${safeScript}
             const startSimulado = (isQuick = false, forceSpaced = false, useListPool = false) => {
                 const deck = generateDeck(isQuick, forceSpaced, useListPool);
                 if (deck.length === 0) return showAlert("Não existem questões suficientes para este filtro.");
-                setSimulado({ isActive: true, deck, curIdx: 0, showAns: false, selAlt: null, showResults: false, isReviewing: false, timeElapsed: 0, results: [], aiExplanation: '', isAiExplaining: false, isGeneratingFlashcards: false, crossedAlts: [], highlightedText: '', cebraspeMode: simCebraspeMode, source: useListPool ? 'lista' : 'simulados' });
+                setSimulado({ 
+                    isActive: true, 
+                    deck, 
+                    curIdx: 0, 
+                    showAns: false, 
+                    selAlt: null, 
+                    showResults: false, 
+                    isReviewing: false, 
+                    timeElapsed: 0, 
+                    totalTimeElapsed: 0,
+                    isTimerPaused: false,
+                    timerMode: isQuick ? 'free' : simTimerMode,
+                    timerLimit: isQuick ? 90 : simTimerLimit,
+                    timerAutoAdvance: isQuick ? false : simTimerAutoAdvance,
+                    timerHide: isQuick ? false : simTimerHide,
+                    timeSpentPerQuestion: new Array(deck.length).fill(0),
+                    results: [], 
+                    aiExplanation: '', 
+                    isAiExplaining: false, 
+                    isGeneratingFlashcards: false, 
+                    crossedAlts: [], 
+                    highlightedText: '', 
+                    cebraspeMode: simCebraspeMode, 
+                    source: useListPool ? 'lista' : 'simulados' 
+                });
                 window.scrollTo(0, 0);
             };
 
@@ -9085,7 +9232,31 @@ ${safeScript}
                 // Save the simulado as paused so the user can input answers later
                 setDb(p => ({
                     ...p,
-                    simuladoPausado: { isActive: true, deck, curIdx: 0, showAns: false, selAlt: null, showResults: false, isReviewing: false, timeElapsed: 0, results: [], aiExplanation: '', isAiExplaining: false, isGeneratingFlashcards: false, crossedAlts: [], highlightedText: '', cebraspeMode: simCebraspeMode, source: useListPool ? 'lista' : 'simulados' }
+                    simuladoPausado: { 
+                        isActive: true, 
+                        deck, 
+                        curIdx: 0, 
+                        showAns: false, 
+                        selAlt: null, 
+                        showResults: false, 
+                        isReviewing: false, 
+                        timeElapsed: 0, 
+                        totalTimeElapsed: 0,
+                        isTimerPaused: false,
+                        timerMode: 'free',
+                        timerLimit: 60,
+                        timerAutoAdvance: false,
+                        timerHide: false,
+                        timeSpentPerQuestion: new Array(deck.length).fill(0),
+                        results: [], 
+                        aiExplanation: '', 
+                        isAiExplaining: false, 
+                        isGeneratingFlashcards: false, 
+                        crossedAlts: [], 
+                        highlightedText: '', 
+                        cebraspeMode: simCebraspeMode, 
+                        source: useListPool ? 'lista' : 'simulados' 
+                    }
                 }));
 
                 const printWindow = window.open('', '_blank');
@@ -9154,6 +9325,54 @@ ${safeScript}
                 showAlert("Simulado pausado com sucesso. Você pode continuá-lo mais tarde na aba de Simulados.");
             };
 
+            const reviewHistoricalSim = (sim) => {
+                const deck = sim.results.map(r => {
+                    let q = db.errors.find(e => String(e.id) === String(r.id));
+                    if (!q) {
+                        for (const list of (db.processedQuestionLists || [])) {
+                            const found = (list.questions || []).find(q2 => `ai_${q2.id}` === String(r.id) || String(q2.id) === String(r.id));
+                            if (found) {
+                                q = found;
+                                break;
+                            }
+                        }
+                    }
+                    return q;
+                }).filter(Boolean);
+
+                if (deck.length === 0) {
+                    return showAlert("⚠️ Não foi possível carregar as questões desta sessão para revisão.");
+                }
+
+                setSimulado({
+                    isActive: true,
+                    showResults: false,
+                    isReviewing: true,
+                    curIdx: 0,
+                    deck,
+                    results: sim.results.map(r => ({
+                        id: r.id,
+                        isCorrect: r.isCorrect,
+                        timeSpent: r.timeSpent,
+                        userAns: r.userAns || 'Pulo'
+                    })),
+                    totalTimeElapsed: sim.totalTimeSpent || 0,
+                    timeSpentPerQuestion: deck.map(q => {
+                        const r = sim.results.find(res => String(res.id) === String(q.id));
+                        return r ? (r.timeSpent || 0) : 0;
+                    }),
+                    isTimerPaused: false,
+                    timerMode: sim.timerMode || 'free',
+                    timerLimit: sim.timerLimit || 60,
+                    timerAutoAdvance: sim.timerAutoAdvance || false,
+                    timerHide: sim.timerHide || false,
+                    cebraspeMode: sim.cebraspeMode || false,
+                    source: 'simulados'
+                });
+                setActiveTab('simulados');
+                window.scrollTo(0, 0);
+            };
+
             const recordAnswer = (id, isCorrect, userAns) => {
                 const prevRes = simulado.results.find(r => String(r.id) === String(id));
                 
@@ -9208,7 +9427,7 @@ ${safeScript}
                     const existingResIdx = p.results.findIndex(r => String(r.id) === String(id));
                     let newResults = [...p.results];
                     if (existingResIdx !== -1) {
-                        newResults[existingResIdx] = { ...newResults[existingResIdx], isCorrect, userAns };
+                        newResults[existingResIdx] = { ...newResults[existingResIdx], isCorrect, userAns, timeSpent: p.timeElapsed };
                     } else {
                         newResults.push({ id, isCorrect, userAns, timeSpent: p.timeElapsed });
                     }
@@ -9230,7 +9449,17 @@ ${safeScript}
                 const hits = simulado.results.filter(r => r.isCorrect).length;
                 const skipped = simulado.results.filter(r => r.userAns === 'Pulo').length;
                 const tot = simulado.deck.length;
-                const session = { id: Date.now(), date: new Date().toLocaleDateString('pt-PT'), hits, skipped, total: tot, context: activeTab };
+                const session = { 
+                    id: Date.now(), 
+                    date: new Date().toLocaleDateString('pt-PT'), 
+                    hits, 
+                    skipped, 
+                    total: tot, 
+                    context: activeTab,
+                    totalTimeSpent: simulado.totalTimeElapsed,
+                    averageTimeSpent: Math.round(simulado.totalTimeElapsed / (simulado.results.length || 1)),
+                    results: simulado.results.map(r => ({ id: r.id, isCorrect: r.isCorrect, timeSpent: r.timeSpent }))
+                };
                 setDb(p => ({ ...p, simuladoHistory: [session, ...p.simuladoHistory], simuladoPausado: null }));
                 setSimulado(p => ({ ...p, showResults: true }));
             };
@@ -9721,6 +9950,59 @@ Estrutura esperada:
                 const totalErrors = db.errors.length || 1;
                 const top5Percentage = Math.round((top5ErrorsCount / totalErrors) * 100);
 
+                // --- Time & Speed Telemetry for Dashboard ---
+                const timedHistory = (db.simuladoHistory || []).filter(h => (h.totalTimeSpent || 0) > 0).slice(0, 10);
+                const lastSim = timedHistory[0];
+
+                const evolutionData = [...timedHistory].reverse().map(h => ({
+                    date: h.date,
+                    avgTime: h.averageTimeSpent || 0,
+                    hits: h.hits,
+                    total: h.total,
+                    id: h.id
+                }));
+                const maxAvg = evolutionData.length > 0 ? Math.max(...evolutionData.map(d => d.avgTime), 1) : 1;
+
+                const specialtyAggregated = {};
+                timedHistory.forEach(h => {
+                    (h.results || []).forEach(r => {
+                        let q = db.errors.find(e => String(e.id) === String(r.id));
+                        if (!q) {
+                            for (const list of (db.processedQuestionLists || [])) {
+                                const found = (list.questions || []).find(q2 => `ai_${q2.id}` === String(r.id) || String(q2.id) === String(r.id));
+                                if (found) {
+                                    q = found;
+                                    break;
+                                }
+                            }
+                        }
+                        if (q) {
+                            const subjId = q.subject || 'clinica_medica';
+                            if (!specialtyAggregated[subjId]) {
+                                specialtyAggregated[subjId] = {
+                                    totalTime: 0,
+                                    count: 0
+                                };
+                            }
+                            specialtyAggregated[subjId].totalTime += r.timeSpent || 0;
+                            specialtyAggregated[subjId].count += 1;
+                        }
+                    });
+                });
+
+                const specialtySpeedList = Object.keys(specialtyAggregated).map(subjId => {
+                    const subj = db.subjects.find(s => s.id === subjId);
+                    const stats = specialtyAggregated[subjId];
+                    return {
+                        id: subjId,
+                        name: subj?.name || 'Outras',
+                        color: subj?.color || 'bg-zinc-150 text-zinc-700',
+                        avgTime: Math.round(stats.totalTime / stats.count),
+                        count: stats.count
+                    };
+                }).sort((a, b) => b.avgTime - a.avgTime);
+                const maxSpecAvg = specialtySpeedList.length > 0 ? Math.max(...specialtySpeedList.map(s => s.avgTime), 1) : 1;
+
                 return (
                     <div className="p-3 sm:p-6 lg:p-10 space-y-6 sm:space-y-8 md:space-y-12 animate-in fade-in slide-in-from-bottom-4 duration-700">
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
@@ -9772,7 +10054,7 @@ Estrutura esperada:
                                 <div className="flex items-center gap-4 sm:gap-6">
                                     <div className="w-12 h-12 sm:w-16 sm:h-16 bg-gradient-to-br from-emerald-400 to-teal-500 rounded-2xl sm:rounded-3xl flex items-center justify-center text-white shadow-lg shadow-emerald-500/20 group-hover:scale-110 transition-transform duration-300 shrink-0 text-xl sm:text-2xl"><i className="fa-solid fa-check-double"></i></div>
                                     <div>
-                                        <h4 className="font-black text-lg sm:text-xl text-zinc-900 dark:text-zinc-100 mb-1 leading-tight">Agendador de Revisão</h4>
+                                        <h4 className="font-black text-lg sm:text-xl text-zinc-900 dark:text-zinc-100 mb-1 leading-tight">Agendador de Revision</h4>
                                         <p className="text-[10px] sm:text-sm font-bold text-zinc-500 dark:text-zinc-400 truncate max-w-[150px] sm:max-w-none">Suas metas de hoje estão prontas.</p>
                                     </div>
                                 </div>
@@ -9833,6 +10115,158 @@ Estrutura esperada:
                                     </div>
                                 </div>
                             </div>
+                        </div>
+
+                        {/* --- Seção de Métricas de Tempo e Ritmo --- */}
+                        <div className="space-y-6 md:space-y-8 mt-12">
+                            <h3 className="text-xl sm:text-2xl font-black text-zinc-900 dark:text-white flex items-center gap-3">
+                                <i className="fa-solid fa-stopwatch text-indigo-500 p-2 bg-indigo-50 dark:bg-indigo-900/20 rounded-xl"></i> Métricas de Tempo & Ritmo
+                            </h3>
+
+                            {timedHistory.length === 0 ? (
+                                <div className="bg-white dark:bg-zinc-900 p-8 rounded-3xl border border-zinc-200 dark:border-zinc-800 text-center shadow-xl animate-in fade-in">
+                                    <div className="w-16 h-16 bg-indigo-550/10 text-indigo-650 dark:text-indigo-400 rounded-full flex items-center justify-center mx-auto mb-4">
+                                        <i className="fa-regular fa-clock text-2xl animate-pulse"></i>
+                                    </div>
+                                    <h4 className="font-black text-lg text-zinc-900 dark:text-white mb-2">Sem Métricas de Tempo Ainda</h4>
+                                    <p className="text-sm text-zinc-500 dark:text-zinc-400 max-w-md mx-auto mb-6">Realize um simulado com o cronômetro ativo para liberar gráficos de ritmo por questão, evolução de velocidade e análise por especialidade.</p>
+                                    <button onClick={() => setActiveTab('simulados')} className="px-6 py-3 bg-indigo-650 hover:bg-indigo-700 text-white rounded-xl font-black transition-all text-xs uppercase tracking-widest shadow-lg active:scale-95">
+                                        Configurar Simulado
+                                    </button>
+                                </div>
+                            ) : (
+                                <>
+                                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 md:gap-10">
+                                        {/* Ritmo do Último Simulado */}
+                                        <div className="lg:col-span-2 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-2xl p-6 md:p-10 rounded-3xl md:rounded-5xl border border-zinc-200/80 dark:border-zinc-800 shadow-2xl h-fit">
+                                            <div className="flex justify-between items-center mb-6">
+                                                <div>
+                                                    <h4 className="font-black text-lg text-zinc-900 dark:text-white flex items-center gap-2">
+                                                        <i className="fa-solid fa-chart-column text-emerald-500"></i> Ritmo do Último Simulado
+                                                    </h4>
+                                                    <p className="text-xs text-zinc-500 dark:text-zinc-450 mt-1">Clique nas barras para revisar.</p>
+                                                </div>
+                                                <span className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-3 py-1.5 rounded-lg border dark:border-zinc-700">
+                                                    {lastSim.date} ({lastSim.hits}/{lastSim.total} Qs)
+                                                </span>
+                                            </div>
+
+                                            <div className="overflow-x-auto pb-4 pt-6">
+                                                <div className="flex items-end gap-1.5 md:gap-2 min-w-[500px] h-48 px-4 border-b border-zinc-300 dark:border-zinc-700 relative">
+                                                    <div className="absolute left-0 right-0 top-0 border-t border-dashed border-zinc-200 dark:border-zinc-800/80 text-[9px] font-bold text-zinc-400 -mt-2.5 pl-2">
+                                                        {formatTime(Math.max(...lastSim.results.map(r => r.timeSpent || 0), 1))}
+                                                    </div>
+                                                    <div className="absolute left-0 right-0 top-1/2 border-t border-dashed border-zinc-200 dark:border-zinc-800/80 text-[9px] font-bold text-zinc-400 pl-2">
+                                                        {formatTime(Math.round(Math.max(...lastSim.results.map(r => r.timeSpent || 0), 1) / 2))}
+                                                    </div>
+
+                                                    {lastSim.results.map((r, i) => {
+                                                        const time = r.timeSpent || 0;
+                                                        const maxTime = Math.max(...lastSim.results.map(x => x.timeSpent || 0), 1);
+                                                        const pct = (time / maxTime) * 100;
+                                                        let barColor = 'bg-emerald-500 hover:bg-emerald-600 dark:bg-emerald-600 dark:hover:bg-emerald-700';
+                                                        if (r.isCorrect) barColor = 'bg-emerald-500 hover:bg-emerald-600';
+                                                        else if (r.userAns === 'Pulo') barColor = 'bg-amber-500 hover:bg-amber-600';
+                                                        else barColor = 'bg-rose-500 hover:bg-rose-600';
+
+                                                        return (
+                                                            <div 
+                                                                key={i} 
+                                                                onClick={() => reviewHistoricalSim(lastSim)} 
+                                                                className="flex-1 flex flex-col items-center group cursor-pointer relative"
+                                                            >
+                                                                <div className="opacity-0 group-hover:opacity-100 absolute bottom-[105%] transition-opacity duration-200 bg-zinc-900 text-white text-[10px] font-black py-1.5 px-2.5 rounded-lg shadow-lg z-50 pointer-events-none mb-1 text-center min-w-[70px] shrink-0">
+                                                                    <span className="block text-zinc-400">Q{i + 1}</span>
+                                                                    <span className="block">{formatTime(time)}</span>
+                                                                    <span className="block uppercase text-[8px] tracking-wider mt-0.5">
+                                                                        {r.isCorrect ? 'Certa' : r.userAns === 'Pulo' ? 'Pulada' : 'Errada'}
+                                                                    </span>
+                                                                </div>
+                                                                <div 
+                                                                    style={{ height: `${Math.max(pct, 5)}%` }} 
+                                                                    className={`w-full rounded-t-lg transition-all duration-300 ${barColor} shadow-md group-hover:scale-y-[1.03]`}
+                                                                ></div>
+                                                                <span className="text-[10px] font-black text-zinc-400 mt-2">Q{i + 1}</span>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* Velocidade por Especialidade */}
+                                        <div className="bg-white dark:bg-zinc-900 p-6 md:p-10 rounded-3xl md:rounded-5xl border border-zinc-200 dark:border-zinc-800 shadow-2xl h-fit">
+                                            <h4 className="font-black text-lg text-zinc-900 dark:text-white flex items-center gap-2 mb-6">
+                                                <i className="fa-solid fa-stethoscope text-indigo-500"></i> Velocidade por Tema
+                                            </h4>
+                                            <div className="space-y-6">
+                                                {specialtySpeedList.map(spec => {
+                                                    const pct = maxSpecAvg > 0 ? (spec.avgTime / maxSpecAvg) * 100 : 0;
+                                                    return (
+                                                        <div key={spec.id} className="group">
+                                                            <div className="flex justify-between items-end mb-2">
+                                                                <span className="text-xs font-black text-zinc-700 dark:text-zinc-200 uppercase tracking-wide truncate max-w-[150px]">{spec.name}</span>
+                                                                <span className="text-[10px] font-black text-indigo-650 dark:text-indigo-400">{formatTime(spec.avgTime)}/Q</span>
+                                                            </div>
+                                                            <div className="h-2 w-full bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden border border-zinc-200/50 dark:border-zinc-700/50">
+                                                                <div 
+                                                                    className="h-full bg-gradient-to-r from-indigo-400 to-indigo-650 rounded-full transition-all duration-1000 ease-out" 
+                                                                    style={{ width: `${pct}%` }}
+                                                                ></div>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                                {specialtySpeedList.length === 0 && (
+                                                    <p className="text-xs text-zinc-400 font-bold italic text-center py-6">Nenhum dado por tema.</p>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 md:gap-10">
+                                        {/* Evolução Histórica do Tempo */}
+                                        <div className="lg:col-span-3 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-2xl p-6 md:p-10 rounded-3xl md:rounded-5xl border border-zinc-200/80 dark:border-zinc-800 shadow-2xl h-fit">
+                                            <h4 className="font-black text-lg text-zinc-900 dark:text-white flex items-center gap-2 mb-6">
+                                                <i className="fa-solid fa-chart-line text-indigo-500"></i> Evolução da Velocidade Média (Últimos 10 Simulados)
+                                            </h4>
+                                            <div className="overflow-x-auto pb-4 pt-6">
+                                                <div className="flex items-end gap-3 md:gap-4 min-w-[600px] h-48 px-4 border-b border-zinc-300 dark:border-zinc-700 relative">
+                                                    <div className="absolute left-0 right-0 top-0 border-t border-dashed border-zinc-200 dark:border-zinc-800/85 text-[9px] font-bold text-zinc-400 -mt-2.5 pl-2">
+                                                        Mais Lento: {formatTime(maxAvg)}/Q
+                                                    </div>
+                                                    <div className="absolute left-0 right-0 top-1/2 border-t border-dashed border-zinc-200 dark:border-zinc-800/85 text-[9px] font-bold text-zinc-400 pl-2">
+                                                        {formatTime(Math.round(maxAvg / 2))}/Q
+                                                    </div>
+
+                                                    {evolutionData.map((d, idx) => {
+                                                        const pct = maxAvg > 0 ? (d.avgTime / maxAvg) * 100 : 0;
+                                                        const simObj = db.simuladoHistory.find(h => h.id === d.id);
+                                                        return (
+                                                            <div 
+                                                                key={d.id} 
+                                                                onClick={() => simObj && reviewHistoricalSim(simObj)} 
+                                                                className="flex-1 flex flex-col items-center group cursor-pointer relative"
+                                                            >
+                                                                <div className="opacity-0 group-hover:opacity-100 absolute bottom-[105%] transition-opacity duration-200 bg-zinc-900 text-white text-[10px] font-black py-1.5 px-2.5 rounded-lg shadow-lg z-50 pointer-events-none mb-1 text-center min-w-[85px] shrink-0">
+                                                                    <span className="block text-zinc-400">{d.date}</span>
+                                                                    <span className="block font-black text-indigo-400">Média: {formatTime(d.avgTime)}/Q</span>
+                                                                    <span className="block text-emerald-400 text-[8px] tracking-wider mt-0.5">{d.hits}/{d.total} Acertos</span>
+                                                                </div>
+                                                                <div 
+                                                                    style={{ height: `${Math.max(pct, 5)}%` }} 
+                                                                    className="w-full rounded-t-lg bg-gradient-to-t from-indigo-500 to-indigo-650 hover:from-indigo-600 hover:to-indigo-750 shadow-md transition-all duration-300 group-hover:scale-y-[1.03]"
+                                                                ></div>
+                                                                <span className="text-[10px] font-black text-zinc-400 mt-2">Sim {idx + 1}</span>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </>
+                            )}
                         </div>
                     </div>
                 );
@@ -10028,17 +10462,100 @@ Estrutura esperada:
                                 </div>
                             )}
                             <div className="glass-panel rounded-[32px] md:rounded-[48px] p-5 sm:p-8 md:p-14 shadow-2xl border-none relative text-zinc-900 dark:text-zinc-100 bg-white/80 dark:bg-slate-900/80">
+                                {/* OVERLAY DE PAUSA DO CRONÔMETRO */}
+                                {simulado.isTimerPaused && (
+                                    <div className="absolute inset-0 bg-slate-900/70 backdrop-blur-md z-[100] flex flex-col justify-center items-center p-6 rounded-[32px] md:rounded-[48px] animate-in fade-in duration-300">
+                                        <div className="bg-white dark:bg-zinc-900 p-8 rounded-[32px] max-w-sm text-center shadow-2xl border border-zinc-200 dark:border-zinc-800 scale-95 animate-in zoom-in-95 duration-300">
+                                            <div className="w-16 h-16 bg-amber-500/10 text-amber-500 rounded-full flex items-center justify-center mx-auto mb-4 animate-bounce">
+                                                <i className="fa-solid fa-pause text-2xl"></i>
+                                            </div>
+                                            <h3 className="font-black text-xl mb-2 text-zinc-800 dark:text-white">Treino Pausado</h3>
+                                            <p className="mb-6 text-zinc-550 dark:text-zinc-400 text-sm font-medium">O cronômetro está congelado. O conteúdo da questão foi ocultado para manter a integridade do seu teste.</p>
+                                            <button 
+                                                onClick={() => setSimulado(p => ({ ...p, isTimerPaused: false }))} 
+                                                className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-black shadow-lg shadow-indigo-600/20 active:scale-95 transition-all text-xs uppercase tracking-wider"
+                                            >
+                                                Retomar Resolução
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+
                                 <div className="absolute top-5 right-5 sm:top-8 sm:right-8 flex gap-2 sm:gap-3 z-20">
-                                    <button onClick={pauseSimulado} className="w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center bg-zinc-100 dark:bg-slate-800 text-zinc-400 hover:text-amber-500 rounded-xl sm:rounded-2xl transition-all shadow-sm" title="Pausar Simulado"><i className="fa-solid fa-pause text-lg"></i></button>
+                                    <button onClick={pauseSimulado} className="w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center bg-zinc-100 dark:bg-slate-800 text-zinc-400 hover:text-amber-500 rounded-xl sm:rounded-2xl transition-all shadow-sm" title="Pausar Simulado e Sair"><i className="fa-solid fa-pause text-lg"></i></button>
                                     <button onClick={clearDeck} className="w-10 h-10 sm:w-12 sm:h-12 flex items-center justify-center bg-zinc-100 dark:bg-slate-800 text-zinc-400 hover:text-rose-500 rounded-xl sm:rounded-2xl transition-all shadow-sm hover:rotate-90" title="Sair sem salvar"><i className="fa-solid fa-xmark text-lg"></i></button>
                                 </div>
-                                <div className="flex justify-between items-center mb-6 sm:mb-10 border-b border-indigo-100 dark:border-indigo-900/30 pb-4 sm:pb-6 pr-24 sm:pr-0">
+                                <div className="flex justify-between items-center mb-6 sm:mb-10 border-b border-indigo-100 dark:border-indigo-900/30 pb-4 sm:pb-6 pr-24 sm:pr-0 flex-wrap gap-4">
                                     <span className="font-black text-indigo-600 dark:text-indigo-400 uppercase text-[9px] sm:text-[10px] tracking-[0.2em] sm:tracking-[0.3em] flex items-center gap-2 sm:gap-3"><i className={`fa-solid ${simulado.isReviewing ? 'fa-magnifying-glass-chart' : 'fa-brain-circuit'}`}></i> <span className="truncate max-w-[120px] sm:max-w-none">{simulado.isReviewing ? 'Revisão' : 'Elite Training'}</span></span>
-                                    <div className="flex items-center gap-2 sm:gap-4 shrink-0">
-                                        <div className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl border font-mono text-[10px] sm:text-xs font-black ${simulado.timeElapsed > 120 ? 'bg-red-50 text-red-600 border-red-200 animate-pulse' : 'bg-zinc-50 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 border-zinc-200 dark:border-zinc-700'}`}>
-                                            <i className="fa-regular fa-clock"></i> {formatTime(simulado.timeElapsed)}
-                                        </div>
-                                        <span className="font-black text-[10px] sm:text-xs bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 px-3 sm:px-5 py-1.5 sm:py-2 rounded-xl border border-indigo-100 dark:border-indigo-800/50">{simulado.curIdx + 1} <span className="opacity-40 mx-0.5">/</span> {simulado.deck.length}</span>
+                                    
+                                    <div className="flex items-center gap-2 sm:gap-4 shrink-0 flex-wrap justify-end">
+                                        {/* BOTOES DE CONTROLE DO CRONÔMETRO */}
+                                        {!simulado.isReviewing && (
+                                            <div className="flex items-center gap-1.5 bg-zinc-50 dark:bg-zinc-800/60 p-1 rounded-xl border border-zinc-200/50 dark:border-zinc-700/50">
+                                                <button 
+                                                    onClick={() => setSimulado(p => ({ ...p, isTimerPaused: !p.isTimerPaused }))}
+                                                    className={`w-7 h-7 flex items-center justify-center rounded-lg transition-all text-xs ${simulado.isTimerPaused ? 'bg-amber-500 text-white animate-pulse' : 'text-zinc-400 hover:text-indigo-500 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+                                                    title={simulado.isTimerPaused ? "Retomar Cronômetro" : "Pausar Cronômetro"}
+                                                >
+                                                    <i className={`fa-solid ${simulado.isTimerPaused ? 'fa-play' : 'fa-pause'}`}></i>
+                                                </button>
+                                                <button 
+                                                    onClick={() => setSimulado(p => ({ ...p, timerHide: !p.timerHide }))}
+                                                    className="w-7 h-7 flex items-center justify-center rounded-lg text-zinc-400 hover:text-indigo-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all text-xs"
+                                                    title={simulado.timerHide ? "Mostrar Cronômetro" : "Ocultar Cronômetro (Modo Anti-Ansiedade)"}
+                                                >
+                                                    <i className={`fa-solid ${simulado.timerHide ? 'fa-eye' : 'fa-eye-slash'}`}></i>
+                                                </button>
+                                            </div>
+                                        )}
+
+                                        {/* EXIBIÇÃO DE TEMPO */}
+                                        {!simulado.timerHide ? (
+                                            <div className="flex items-center gap-2">
+                                                {/* Questão */}
+                                                <div 
+                                                    className={`flex flex-col items-center justify-center px-3 py-1 rounded-xl border font-mono text-[9px] sm:text-[10px] font-black transition-all ${
+                                                        simulado.timerMode === 'question_countdown' && (simulado.timerLimit - simulado.timeElapsed) <= 10
+                                                            ? 'bg-red-500/20 text-red-650 border-red-500 animate-pulse'
+                                                            : simulado.timeElapsed > 90
+                                                            ? 'bg-amber-500/10 text-amber-600 border-amber-300'
+                                                            : 'bg-zinc-50 dark:bg-zinc-800 text-zinc-650 dark:text-zinc-300 border-zinc-200 dark:border-zinc-700'
+                                                    }`}
+                                                >
+                                                    <span className="text-[7px] uppercase tracking-wider opacity-60">Questão</span>
+                                                    <div className="flex items-center gap-1">
+                                                        <i className="fa-regular fa-clock"></i>
+                                                        <span>
+                                                            {simulado.timerMode === 'question_countdown' 
+                                                                ? formatTime(Math.max(0, simulado.timerLimit - simulado.timeElapsed)) 
+                                                                : formatTime(simulado.timeElapsed)}
+                                                        </span>
+                                                    </div>
+                                                </div>
+
+                                                {/* Total */}
+                                                <div className="flex flex-col items-center justify-center px-3 py-1 rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 text-zinc-505 dark:text-zinc-400 font-mono text-[9px] sm:text-[10px] font-black">
+                                                    <span className="text-[7px] uppercase tracking-wider opacity-60">Total</span>
+                                                    <div className="flex items-center gap-1">
+                                                        <i className="fa-solid fa-stopwatch"></i>
+                                                        <span>
+                                                            {simulado.timerMode === 'total_countdown'
+                                                                ? formatTime(Math.max(0, (simulado.timerLimit * 60) - simulado.totalTimeElapsed))
+                                                                : formatTime(simulado.totalTimeElapsed)}
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ) : (
+                                            <button 
+                                                onClick={() => setSimulado(p => ({ ...p, timerHide: false }))}
+                                                className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-zinc-50 dark:bg-zinc-800 text-zinc-550 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700 text-[9px] sm:text-[10px] font-black font-mono hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-all shadow-sm"
+                                            >
+                                                <i className="fa-solid fa-eye-slash"></i> Tempo Oculto (Ver)
+                                            </button>
+                                        )}
+
+                                        <span className="font-black text-[10px] sm:text-xs bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 px-3 sm:px-5 py-2 rounded-xl border border-indigo-100 dark:border-indigo-800/50">{simulado.curIdx + 1} <span className="opacity-40 mx-0.5">/</span> {simulado.deck.length}</span>
                                     </div>
                                 </div>
 
@@ -10277,11 +10794,7 @@ Estrutura esperada:
                                         )}
                                         {/* ----------------------------- */}
 
-                                        <button onClick={() => {
-                                            if (simulado.isReviewing) { setSimulado(p => ({ ...p, isReviewing: false, showResults: true, aiExplanation: '', isAiExplaining: false, crossedAlts: [], highlightedText: '' })); window.scrollTo(0, 0); }
-                                            else if (simulado.curIdx < simulado.deck.length - 1) { setSimulado(p => ({ ...p, curIdx: p.curIdx + 1, showAns: false, selAlt: null, timeElapsed: 0, aiExplanation: '', isAiExplaining: false, crossedAlts: [], highlightedText: '' })); window.scrollTo(0, 0); }
-                                            else finishSimulado();
-                                        }} className="w-full bg-emerald-600 text-white font-black py-5 rounded-2xl shadow-xl shadow-emerald-600/20 hover:bg-emerald-700 active:scale-95 transition-all text-lg flex justify-center items-center gap-3">
+                                        <button onClick={advanceQuestion} className="w-full bg-emerald-600 text-white font-black py-5 rounded-2xl shadow-xl shadow-emerald-600/20 hover:bg-emerald-700 active:scale-95 transition-all text-lg flex justify-center items-center gap-3">
                                             {simulado.isReviewing ? 'Voltar aos Resultados' : (simulado.curIdx < simulado.deck.length - 1 ? 'Avançar para Próxima' : 'Ver Resultados Finais')} <i className="fa-solid fa-arrow-right"></i>
                                         </button>
                                     </div>
@@ -10332,38 +10845,58 @@ Estrutura esperada:
                                     <div className="grid grid-cols-1 gap-2 animate-in fade-in duration-500">
                                         <div className="flex items-center justify-between p-3 rounded-2xl bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-100 dark:border-emerald-800/50">
                                             <span className="text-[9px] font-black uppercase text-emerald-600 dark:text-emerald-400 tracking-widest"><i className="fa-solid fa-circle-check mr-1"></i> Certas</span>
-                                            <span className="font-black text-sm text-emerald-700 dark:text-emerald-400">{simulado.results.filter(r => r.isCorrect).length}</span>
-                                        </div>
-                                        <div className="flex items-center justify-between p-3 rounded-2xl bg-rose-50 dark:bg-rose-900/10 border border-rose-100 dark:border-rose-800/50">
-                                            <span className="text-[9px] font-black uppercase text-rose-600 dark:text-rose-400 tracking-widest"><i className="fa-solid fa-circle-xmark mr-1"></i> Erradas</span>
-                                            <span className="font-black text-sm text-rose-700 dark:text-rose-400">{simulado.results.filter(r => !r.isCorrect && r.userAns !== 'Pulo').length}</span>
-                                        </div>
-                                        <div className="flex items-center justify-between p-3 rounded-2xl bg-amber-50 dark:bg-amber-900/10 border border-amber-100 dark:border-amber-800/50">
-                                            <span className="text-[9px] font-black uppercase text-amber-600 dark:text-amber-400 tracking-widest"><i className="fa-solid fa-forward-step mr-1"></i> Puladas</span>
-                                            <span className="font-black text-sm text-amber-700 dark:text-amber-400">{simulado.results.filter(r => r.userAns === 'Pulo').length}</span>
-                                        </div>
-                                        {simulado.cebraspeMode && (
-                                            <div className="flex items-center justify-between p-3 rounded-2xl bg-rose-50 dark:bg-rose-900/10 border-2 border-rose-500/50 animate-pulse">
-                                                <span className="text-[9px] font-black uppercase text-rose-600 dark:text-rose-400 tracking-widest"><i className="fa-solid fa-calculator mr-1"></i> Score Líquido</span>
-                                                <span className="font-black text-sm text-rose-700 dark:text-rose-400">{simulado.results.filter(r => r.isCorrect).length - simulado.results.filter(r => !r.isCorrect && r.userAns !== 'Pulo').length}</span>
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
-
-                                <button onClick={finishSimulado} className="w-full py-4 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded-[20px] font-black text-[10px] uppercase tracking-[0.2em] shadow-xl hover:shadow-emerald-500/10 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2 mt-4">
-                                    <i className="fa-solid fa-flag-checkered"></i> Finalizar Simulado
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                );
-            };
-
-            const renderSimuladoResultsUI = () => {
+                                           const renderSimuladoResultsUI = () => {
                 const hits = simulado.results.filter(r => r.isCorrect).length;
                 const tot = simulado.deck.length;
                 const perc = Math.round((hits / tot) * 100);
+
+                const totalSecs = simulado.totalTimeElapsed || 0;
+                const avgSecs = Math.round(totalSecs / (simulado.results.length || 1));
+
+                const resultsWithTime = simulado.results.filter(r => (r.timeSpent || 0) > 0);
+                let fastest = null;
+                let slowest = null;
+                if (resultsWithTime.length > 0) {
+                    fastest = resultsWithTime.reduce((min, r) => r.timeSpent < min.timeSpent ? r : min, resultsWithTime[0]);
+                    slowest = resultsWithTime.reduce((max, r) => r.timeSpent > max.timeSpent ? r : max, resultsWithTime[0]);
+                }
+
+                const getQuestionIndex = (qId) => simulado.deck.findIndex(q => String(q.id) === String(qId));
+
+                const specialtyStats = {};
+                simulado.deck.forEach((q, i) => {
+                    const r = simulado.results.find(x => String(x.id) === String(q.id));
+                    const time = r ? (r.timeSpent || 0) : 0;
+                    const subjId = q.subject || 'clinica_medica';
+
+                    if (!specialtyStats[subjId]) {
+                        specialtyStats[subjId] = {
+                            totalTime: 0,
+                            count: 0,
+                            correct: 0,
+                        };
+                    }
+
+                    specialtyStats[subjId].totalTime += time;
+                    specialtyStats[subjId].count += 1;
+                    if (r && r.isCorrect) {
+                        specialtyStats[subjId].correct += 1;
+                    }
+                });
+
+                const specStatsArray = Object.keys(specialtyStats).map(subjId => {
+                    const subj = db.subjects.find(s => s.id === subjId);
+                    const stats = specialtyStats[subjId];
+                    return {
+                        id: subjId,
+                        name: subj?.name || 'Outras',
+                        color: subj?.color || 'bg-zinc-150 text-zinc-700',
+                        count: stats.count,
+                        avgTime: Math.round(stats.totalTime / stats.count),
+                        totalTime: stats.totalTime,
+                        accuracy: Math.round((stats.correct / stats.count) * 100)
+                    };
+                }).sort((a, b) => b.avgTime - a.avgTime);
 
                 return (
                     <div className="max-w-4xl mx-auto py-6 md:py-10 w-full animate-in fade-in pt-8 md:pt-12 px-4">
@@ -10371,7 +10904,7 @@ Estrutura esperada:
                             <h2 className="text-2xl md:text-4xl font-black mb-4 dark:text-white">Simulado Concluído!</h2>
                             <p className="text-zinc-500 font-bold mb-10 uppercase tracking-widest text-xs">Resumo do Desempenho</p>
 
-                            <div className="flex flex-wrap justify-center gap-4 mb-12">
+                            <div className="flex flex-wrap justify-center gap-4 mb-6">
                                 <div className="bg-zinc-50 dark:bg-zinc-950 p-6 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-inner flex-1 min-w-[140px]"><span className={`block text-5xl font-black mb-2 ${perc >= 70 ? 'text-emerald-500' : perc >= 50 ? 'text-amber-500' : 'text-red-500'}`}>{perc}%</span><span className="text-[10px] font-black uppercase text-zinc-400 tracking-widest">Taxa de Acerto</span></div>
                                 {simulado.cebraspeMode ? (
                                     <div className="bg-zinc-50 dark:bg-zinc-950 p-6 rounded-3xl border border-rose-200 dark:border-rose-900 shadow-inner flex-1 min-w-[140px] ring-2 ring-rose-500/20">
@@ -10384,6 +10917,149 @@ Estrutura esperada:
                                 <div className="bg-zinc-50 dark:bg-zinc-950 p-6 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-inner flex-1 min-w-[140px]"><span className="block text-5xl font-black text-red-500 mb-2">{simulado.results.filter(r => !r.isCorrect && r.userAns !== 'Pulo').length}</span><span className="text-[10px] font-black uppercase text-zinc-400 tracking-widest">Erradas</span></div>
                                 <div className="bg-zinc-50 dark:bg-zinc-950 p-6 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-inner flex-1 min-w-[140px]"><span className="block text-5xl font-black text-amber-500 mb-2">{simulado.results.filter(r => r.userAns === 'Pulo').length}</span><span className="text-[10px] font-black uppercase text-zinc-400 tracking-widest">Puladas</span></div>
                             </div>
+
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-12">
+                                <div className="bg-zinc-50 dark:bg-zinc-950 p-5 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-inner">
+                                    <span className="block text-2xl font-black text-indigo-600 dark:text-indigo-400 mb-1">
+                                        {formatTime(totalSecs)}
+                                    </span>
+                                    <span className="text-[10px] font-black uppercase text-zinc-400 tracking-widest">Tempo Total</span>
+                                </div>
+                                <div className="bg-zinc-50 dark:bg-zinc-950 p-5 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-inner">
+                                    <span className="block text-2xl font-black text-indigo-600 dark:text-indigo-400 mb-1">
+                                        {formatTime(avgSecs)}
+                                    </span>
+                                    <span className="text-[10px] font-black uppercase text-zinc-400 tracking-widest">Tempo Médio / Q</span>
+                                </div>
+                                <div 
+                                    className={`bg-zinc-50 dark:bg-zinc-950 p-5 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-inner ${fastest ? 'cursor-pointer hover:border-emerald-450 dark:hover:border-emerald-700 transition-all' : ''}`}
+                                    onClick={() => {
+                                        if (fastest) {
+                                            setSimulado(p => ({ ...p, curIdx: getQuestionIndex(fastest.id), isReviewing: true, showResults: false, crossedAlts: [], highlightedText: '' }));
+                                            window.scrollTo(0, 0);
+                                        }
+                                    }}
+                                >
+                                    <span className="block text-2xl font-black text-emerald-600 dark:text-emerald-400 mb-1 truncate">
+                                        {fastest ? `Q${getQuestionIndex(fastest.id) + 1} (${formatTime(fastest.timeSpent)})` : '-'}
+                                    </span>
+                                    <span className="text-[10px] font-black uppercase text-zinc-400 tracking-widest flex items-center justify-center gap-1">
+                                        <i className="fa-solid fa-bolt text-yellow-500 animate-pulse"></i> Mais Rápida
+                                    </span>
+                                </div>
+                                <div 
+                                    className={`bg-zinc-50 dark:bg-zinc-950 p-5 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-inner ${slowest ? 'cursor-pointer hover:border-rose-450 dark:hover:border-rose-700 transition-all' : ''}`}
+                                    onClick={() => {
+                                        if (slowest) {
+                                            setSimulado(p => ({ ...p, curIdx: getQuestionIndex(slowest.id), isReviewing: true, showResults: false, crossedAlts: [], highlightedText: '' }));
+                                            window.scrollTo(0, 0);
+                                        }
+                                    }}
+                                >
+                                    <span className="block text-2xl font-black text-rose-600 dark:text-rose-400 mb-1 truncate">
+                                        {slowest ? `Q${getQuestionIndex(slowest.id) + 1} (${formatTime(slowest.timeSpent)})` : '-'}
+                                    </span>
+                                    <span className="text-[10px] font-black uppercase text-zinc-400 tracking-widest flex items-center justify-center gap-1">
+                                        <i className="fa-regular fa-clock text-rose-550"></i> Mais Lenta
+                                    </span>
+                                </div>
+                            </div>
+
+                            <div className="bg-zinc-50 dark:bg-zinc-950 p-6 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-inner mb-12 text-left animate-in fade-in duration-500">
+                                <h3 className="font-black text-lg mb-2 dark:text-white flex items-center gap-2">
+                                    <i className="fa-solid fa-chart-column text-indigo-500"></i> Ritmo por Questão (Tempo de Resolução)
+                                </h3>
+                                <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-6 font-bold">Cada barra representa uma questão. Altura = Tempo gasto. Clique para revisar.</p>
+                                <div className="overflow-x-auto pb-4 pt-6">
+                                    <div className="flex items-end gap-1.5 md:gap-2 min-w-[500px] h-48 px-4 border-b border-zinc-300 dark:border-zinc-700 relative">
+                                        <div className="absolute left-0 right-0 top-0 border-t border-dashed border-zinc-200 dark:border-zinc-800/80 text-[9px] font-bold text-zinc-400 -mt-2.5 pl-2">
+                                            {formatTime(Math.max(...simulado.results.map(r => r.timeSpent || 0), 1))}
+                                        </div>
+                                        <div className="absolute left-0 right-0 top-1/2 border-t border-dashed border-zinc-200 dark:border-zinc-800/80 text-[9px] font-bold text-zinc-400 pl-2">
+                                            {formatTime(Math.round(Math.max(...simulado.results.map(r => r.timeSpent || 0), 1) / 2))}
+                                        </div>
+
+                                        {simulado.deck.map((q, i) => {
+                                            const r = simulado.results.find(x => String(x.id) === String(q.id));
+                                            const time = r ? (r.timeSpent || 0) : 0;
+                                            const maxTime = Math.max(...simulado.results.map(x => x.timeSpent || 0), 1);
+                                            const pct = (time / maxTime) * 100;
+                                            let barColor = 'bg-emerald-500 hover:bg-emerald-600 dark:bg-emerald-600 dark:hover:bg-emerald-700';
+                                            if (r) {
+                                                if (r.isCorrect) barColor = 'bg-emerald-500 hover:bg-emerald-600';
+                                                else if (r.userAns === 'Pulo') barColor = 'bg-amber-500 hover:bg-amber-600';
+                                                else barColor = 'bg-rose-500 hover:bg-rose-600';
+                                            }
+                                            return (
+                                                <div 
+                                                    key={q.id} 
+                                                    onClick={() => { 
+                                                        setSimulado(p => ({ ...p, curIdx: i, isReviewing: true, showResults: false, crossedAlts: [], highlightedText: '' })); 
+                                                        window.scrollTo(0, 0); 
+                                                    }} 
+                                                    className="flex-1 flex flex-col items-center group cursor-pointer relative"
+                                                >
+                                                    <div className="opacity-0 group-hover:opacity-100 absolute bottom-[105%] transition-opacity duration-200 bg-zinc-900 text-white text-[10px] font-black py-1.5 px-2.5 rounded-lg shadow-lg z-50 pointer-events-none mb-1 text-center min-w-[70px] shrink-0">
+                                                        <span className="block text-zinc-455">Q{i + 1}</span>
+                                                        <span className="block">{formatTime(time)}</span>
+                                                        <span className="block uppercase text-[8px] tracking-wider mt-0.5">
+                                                            {r?.isCorrect ? 'Certa' : r?.userAns === 'Pulo' ? 'Pulada' : 'Errada'}
+                                                        </span>
+                                                    </div>
+                                                    <div 
+                                                        style={{ height: `${Math.max(pct, 5)}%` }} 
+                                                        className={`w-full rounded-t-lg transition-all duration-300 ${barColor} shadow-[0_-2px_10px_rgba(0,0,0,0.05)] group-hover:scale-y-[1.03]`}
+                                                    ></div>
+                                                    <span className="text-[10px] font-black text-zinc-400 mt-2">Q{i + 1}</span>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {specStatsArray.length > 0 && (
+                                <div className="bg-zinc-50 dark:bg-zinc-950 p-6 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-inner mb-12 text-left animate-in fade-in duration-500">
+                                    <h3 className="font-black text-lg mb-6 dark:text-white flex items-center gap-2">
+                                        <i className="fa-solid fa-stethoscope text-emerald-500"></i> Ritmo por Especialidade Médica
+                                    </h3>
+                                    <div className="overflow-x-auto">
+                                        <table className="w-full text-sm font-bold text-zinc-700 dark:text-zinc-300">
+                                            <thead>
+                                                <tr className="border-b border-zinc-200 dark:border-zinc-800 text-[10px] text-zinc-400 uppercase tracking-widest text-left">
+                                                    <th className="pb-3">Especialidade</th>
+                                                    <th className="pb-3 text-center">Questões</th>
+                                                    <th className="pb-3 text-center">Tempo Médio / Q</th>
+                                                    <th className="pb-3 text-center">Tempo Total</th>
+                                                    <th className="pb-3 text-center">Taxa de Acerto</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800/50">
+                                                {specStatsArray.map(spec => (
+                                                    <tr key={spec.id} className="hover:bg-zinc-100/50 dark:hover:bg-zinc-900/30 transition-colors">
+                                                        <td className="py-4">
+                                                            <span className={`inline-block px-3 py-1.5 rounded-xl text-xs font-black uppercase ${spec.color}`}>
+                                                                {spec.name}
+                                                            </span>
+                                                        </td>
+                                                        <td className="py-4 text-center text-zinc-900 dark:text-white font-black">{spec.count}</td>
+                                                        <td className="py-4 text-center font-black text-indigo-650 dark:text-indigo-400"><i className="fa-regular fa-clock text-xs mr-1"></i> {formatTime(spec.avgTime)}</td>
+                                                        <td className="py-4 text-center text-zinc-500 dark:text-zinc-400 font-medium">{formatTime(spec.totalTime)}</td>
+                                                        <td className="py-4 text-center">
+                                                            <div className="flex items-center justify-center gap-2">
+                                                                <span className={`font-black ${spec.accuracy >= 70 ? 'text-emerald-500' : spec.accuracy >= 50 ? 'text-amber-500' : 'text-red-500'}`}>{spec.accuracy}%</span>
+                                                                <div className="w-16 h-1.5 bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden hidden sm:block">
+                                                                    <div style={{ width: `${spec.accuracy}%` }} className={`h-full rounded-full ${spec.accuracy >= 70 ? 'bg-emerald-500' : spec.accuracy >= 50 ? 'bg-amber-500' : 'bg-red-500'}`}></div>
+                                                                </div>
+                                                            </div>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            )}
 
                             <div className="text-left mb-12">
                                 <h3 className="font-black text-lg mb-6 dark:text-white flex items-center gap-2"><i className="fa-solid fa-list-check text-emerald-500"></i> Gabarito da Sessão</h3>
@@ -10464,7 +11140,7 @@ Estrutura esperada:
                                         {simulado.isAiExplaining && (
                                             <div className="flex gap-3 justify-start">
                                                 <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center shrink-0"><i className="fa-solid fa-robot"></i></div>
-                                                <div className="p-4 rounded-2xl bg-white dark:bg-zinc-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 rounded-tl-sm flex items-center gap-2">
+                                                <div className="p-4 rounded-2xl bg-white dark:bg-zinc-800 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-205 rounded-tl-sm flex items-center gap-2">
                                                     <i className="fa-solid fa-circle-notch fa-spin"></i> O Mentor está a analisar...
                                                 </div>
                                             </div>
@@ -10522,7 +11198,23 @@ Estrutura esperada:
                                     <p className="text-amber-700 dark:text-amber-500 mb-4 font-bold text-sm">Você tem um simulado em andamento ({db.simuladoPausado.curIdx} de {db.simuladoPausado.deck.length} questões respondidas).</p>
                                     <div className="flex gap-4">
                                         <button onClick={() => {
-                                            setSimulado(db.simuladoPausado);
+                                            const resumed = { ...db.simuladoPausado };
+                                            if (!resumed.timeSpentPerQuestion) {
+                                                resumed.timeSpentPerQuestion = new Array(resumed.deck.length).fill(0);
+                                                resumed.results.forEach(r => {
+                                                    const idx = resumed.deck.findIndex(q => String(q.id) === String(r.id));
+                                                    if (idx !== -1) resumed.timeSpentPerQuestion[idx] = r.timeSpent || 0;
+                                                });
+                                            }
+                                            if (resumed.totalTimeElapsed === undefined) {
+                                                resumed.totalTimeElapsed = resumed.results.reduce((acc, r) => acc + (r.timeSpent || 0), 0);
+                                            }
+                                            if (resumed.timerMode === undefined) resumed.timerMode = 'free';
+                                            if (resumed.timerLimit === undefined) resumed.timerLimit = 60;
+                                            if (resumed.timerAutoAdvance === undefined) resumed.timerAutoAdvance = false;
+                                            if (resumed.timerHide === undefined) resumed.timerHide = false;
+                                            if (resumed.isTimerPaused === undefined) resumed.isTimerPaused = false;
+                                            setSimulado(resumed);
                                             window.scrollTo(0, 0);
                                         }} className="bg-amber-500 text-white px-6 py-3 rounded-2xl font-black shadow-lg hover:bg-amber-600 transition-colors flex items-center gap-2">
                                             <i className="fa-solid fa-play"></i> Continuar Simulado
@@ -10628,6 +11320,111 @@ Estrutura esperada:
                                     </button>
                                 </div>
 
+                                {/* CONFIGURAÇÃO DO CRONÔMETRO DE ALTO DESEMPENHO */}
+                                <div className="bg-zinc-50 dark:bg-zinc-950 p-6 rounded-3xl border border-zinc-250 dark:border-zinc-800/80 space-y-6 shadow-inner">
+                                    <h3 className="text-xs font-black text-indigo-600 dark:text-indigo-400 uppercase tracking-widest flex items-center gap-2">
+                                        <i className="fa-solid fa-stopwatch-20 text-lg"></i> Configuração do Cronômetro
+                                    </h3>
+                                    
+                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                        {[
+                                            { id: 'free', label: 'Livre', desc: 'Contagem crescente' },
+                                            { id: 'question_countdown', label: 'Por Questão', desc: 'Contagem regressiva por Q' },
+                                            { id: 'total_countdown', label: 'Tempo Total', desc: 'Contagem regressiva total' }
+                                        ].map(mode => (
+                                            <button
+                                                key={mode.id}
+                                                type="button"
+                                                onClick={() => {
+                                                    setSimTimerMode(mode.id);
+                                                    if (mode.id === 'question_countdown') setSimTimerLimit(90);
+                                                    else if (mode.id === 'total_countdown') setSimTimerLimit(30);
+                                                }}
+                                                className={`p-4 rounded-2xl border-2 text-left transition-all flex flex-col justify-between ${simTimerMode === mode.id ? 'bg-indigo-50 border-indigo-500 dark:bg-indigo-900/20 dark:border-indigo-650 shadow-md' : 'bg-white dark:bg-zinc-900 border-zinc-100 dark:border-zinc-800'}`}
+                                            >
+                                                <span className={`font-black text-sm block ${simTimerMode === mode.id ? 'text-indigo-850 dark:text-indigo-400' : 'text-zinc-650 dark:text-zinc-400'}`}>{mode.label}</span>
+                                                <span className="text-[10px] font-bold text-zinc-500 mt-1 leading-tight">{mode.desc}</span>
+                                            </button>
+                                        ))}
+                                    </div>
+
+                                    {simTimerMode !== 'free' && (
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 animate-in slide-in-from-top-2 duration-300">
+                                            <div>
+                                                <label className="text-[10px] font-black text-zinc-500 dark:text-zinc-400 uppercase tracking-wider block mb-2">
+                                                    {simTimerMode === 'question_countdown' ? 'Tempo por Questão' : 'Tempo Total do Simulado'}
+                                                </label>
+                                                <div className="relative flex items-center">
+                                                    <i className="fa-solid fa-hourglass-half absolute left-4 text-zinc-400 text-sm"></i>
+                                                    <select
+                                                        value={simTimerLimit}
+                                                        onChange={e => setSimTimerLimit(Number(e.target.value))}
+                                                        className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl py-3.5 pl-12 pr-4 text-xs font-black outline-none focus:ring-2 focus:ring-indigo-500"
+                                                    >
+                                                        {simTimerMode === 'question_countdown' ? (
+                                                            <>
+                                                                <option value={15}>15 segundos</option>
+                                                                <option value={30}>30 segundos</option>
+                                                                <option value={45}>45 segundos</option>
+                                                                <option value={60}>60 segundos (1 min)</option>
+                                                                <option value={90}>90 segundos (1.5 min)</option>
+                                                                <option value={120}>120 segundos (2 min)</option>
+                                                                <option value={180}>180 segundos (3 min)</option>
+                                                                <option value={300}>300 segundos (5 min)</option>
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <option value={5}>5 minutos</option>
+                                                                <option value={10}>10 minutos</option>
+                                                                <option value={15}>15 minutos</option>
+                                                                <option value={20}>20 minutos</option>
+                                                                <option value={30}>30 minutos</option>
+                                                                <option value={45}>45 minutos</option>
+                                                                <option value={60}>60 minutos (1 hora)</option>
+                                                                <option value={90}>90 minutos (1.5 hora)</option>
+                                                                <option value={120}>120 minutos (2 horas)</option>
+                                                                <option value={180}>180 minutos (3 horas)</option>
+                                                            </>
+                                                        )}
+                                                    </select>
+                                                </div>
+                                            </div>
+
+                                            {simTimerMode === 'question_countdown' && (
+                                                <div className="flex flex-col justify-end">
+                                                    <button 
+                                                        type="button"
+                                                        onClick={() => setSimTimerAutoAdvance(!simTimerAutoAdvance)}
+                                                        className={`p-3.5 rounded-2xl border-2 flex justify-between items-center transition-all ${simTimerAutoAdvance ? 'bg-emerald-50 border-emerald-500 dark:bg-emerald-900/20 dark:border-emerald-600' : 'bg-white dark:bg-zinc-900 border-zinc-150 dark:border-zinc-800'}`}
+                                                    >
+                                                        <div className="text-left">
+                                                            <span className="font-black text-xs block dark:text-zinc-200">Auto-avançar</span>
+                                                            <span className="text-[9px] text-zinc-500 font-bold">Pula ao esgotar o tempo</span>
+                                                        </div>
+                                                        <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] ${simTimerAutoAdvance ? 'bg-emerald-600 text-white' : 'bg-zinc-200 dark:bg-zinc-800 text-transparent'}`}><i className="fa-solid fa-check"></i></div>
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    <div className="flex items-center justify-between border-t border-zinc-200/60 dark:border-zinc-800/60 pt-4">
+                                        <div className="text-left">
+                                            <span className="font-black text-xs block dark:text-zinc-200">Modo Anti-Ansiedade</span>
+                                            <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-bold block">Oculta o cronômetro visual durante a resolução</span>
+                                        </div>
+                                        <label className="relative inline-flex items-center cursor-pointer">
+                                            <input 
+                                                type="checkbox" 
+                                                checked={simTimerHide} 
+                                                onChange={e => setSimTimerHide(e.target.checked)} 
+                                                className="sr-only peer"
+                                            />
+                                            <div className="w-11 h-6 bg-zinc-205 dark:bg-zinc-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-zinc-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-zinc-650 peer-checked:bg-indigo-650"></div>
+                                        </label>
+                                    </div>
+                                </div>
+
                                 <div className="flex gap-4">
                                     <button
                                         onClick={() => startSimulado()}
@@ -10664,9 +11461,14 @@ Estrutura esperada:
                                             <span className="text-[10px] font-black uppercase text-zinc-400 tracking-widest block mb-1"><i className="fa-regular fa-calendar mr-1"></i> {h.date}</span>
                                             <span className="font-bold dark:text-zinc-100 text-sm">{h.hits} de {h.total} Acertos <span className="opacity-50 font-normal ml-1">({h.context || 'Geral'})</span></span>
                                         </div>
-                                        <span className={`px-4 py-2 rounded-xl text-sm font-black border ${h.hits / h.total >= 0.7 ? 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400 dark:border-emerald-800' : 'bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:border-amber-800'}`}>{Math.round(h.hits / h.total * 100)}%</span>
+                                        <div className="flex items-center gap-3">
+                                            <button onClick={() => reviewHistoricalSim(h)} className="px-4 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-600 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/40 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 text-xs font-black transition-colors">
+                                                Revisar
+                                            </button>
+                                            <span className={`px-4 py-2 rounded-xl text-sm font-black border ${h.hits / h.total >= 0.7 ? 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400 dark:border-emerald-800' : 'bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:border-amber-800'}`}>{Math.round(h.hits / h.total * 100)}%</span>
+                                        </div>
                                     </div>
-                                ))}
+                                )) }
                                 {db.simuladoHistory.length === 0 && (
                                     <div className="h-full flex flex-col items-center justify-center opacity-40 text-center py-10">
                                         <i className="fa-solid fa-ghost text-6xl mb-4"></i>
@@ -12251,9 +13053,27 @@ IMPORTANTE: Retorne APENAS um objeto JSON válido representando o novo array de 
                             tags: [...(q.tags || []), 'Gerada por IA', 'Elaborador']
                         }));
                         setSimulado({
-                            isActive: true, deck, curIdx: 0, showAns: false, selAlt: null, showResults: false,
-                            isReviewing: false, timeElapsed: 0, results: [], aiExplanation: '', isAiExplaining: false,
-                            isGeneratingFlashcards: false, crossedAlts: [], highlightedText: '',
+                            isActive: true, 
+                            deck, 
+                            curIdx: 0, 
+                            showAns: false, 
+                            selAlt: null, 
+                            showResults: false,
+                            isReviewing: false, 
+                            timeElapsed: 0,
+                            totalTimeElapsed: 0,
+                            isTimerPaused: false,
+                            timerMode: simTimerMode,
+                            timerLimit: simTimerLimit,
+                            timerAutoAdvance: simTimerAutoAdvance,
+                            timerHide: simTimerHide,
+                            timeSpentPerQuestion: new Array(deck.length).fill(0),
+                            results: [], 
+                            aiExplanation: '', 
+                            isAiExplaining: false,
+                            isGeneratingFlashcards: false, 
+                            crossedAlts: [], 
+                            highlightedText: '',
                             source: 'elaborador'
                         });
                         setElaboradorState(p => ({ ...p, questions: [], status: 'idle', fileData: null, fileName: '' }));
@@ -12533,9 +13353,27 @@ IMPORTANTE: Retorne APENAS um objeto JSON válido representando o novo array de 
                                                             tags: ['Gerada por IA', 'Elaborador']
                                                         }));
                                                         setSimulado({
-                                                            isActive: true, deck, curIdx: 0, showAns: false, selAlt: null, showResults: false,
-                                                            isReviewing: false, timeElapsed: 0, results: [], aiExplanation: '', isAiExplaining: false,
-                                                            isGeneratingFlashcards: false, crossedAlts: [], highlightedText: '',
+                                                            isActive: true, 
+                                                            deck, 
+                                                            curIdx: 0, 
+                                                            showAns: false, 
+                                                            selAlt: null, 
+                                                            showResults: false,
+                                                            isReviewing: false, 
+                                                            timeElapsed: 0, 
+                                                            totalTimeElapsed: 0,
+                                                            isTimerPaused: false,
+                                                            timerMode: simTimerMode,
+                                                            timerLimit: simTimerLimit,
+                                                            timerAutoAdvance: simTimerAutoAdvance,
+                                                            timerHide: simTimerHide,
+                                                            timeSpentPerQuestion: new Array(deck.length).fill(0),
+                                                            results: [], 
+                                                            aiExplanation: '', 
+                                                            isAiExplaining: false,
+                                                            isGeneratingFlashcards: false, 
+                                                            crossedAlts: [], 
+                                                            highlightedText: '',
                                                             source: 'elaborador'
                                                         });
                                                     }} className="flex-1 bg-indigo-50 hover:bg-indigo-600 text-indigo-600 hover:text-white dark:bg-indigo-900/20 dark:text-indigo-400 py-3 rounded-xl font-black transition-all text-xs flex justify-center items-center gap-2 border border-indigo-200 dark:border-indigo-800/50"><i className="fa-solid fa-play"></i> Resolver</button>
