@@ -14922,8 +14922,52 @@ ${(obj.questoesAnalisadas || []).map(q => `### ${q.identificacao}
             );
         };
 
+        class ErrorBoundary extends React.Component {
+            constructor(props) {
+                super(props);
+                this.state = { hasError: false, error: null };
+            }
+
+            static getDerivedStateFromError(error) {
+                return { hasError: true, error };
+            }
+
+            componentDidCatch(error, errorInfo) {
+                console.error("React ErrorBoundary caught:", error, errorInfo);
+            }
+
+            render() {
+                if (this.state.hasError) {
+                    return (
+                        <div style={{ padding: '20px', color: '#ef4444', fontFamily: 'monospace', background: '#09090b', minHeight: '100vh', display: 'flex', flexDirection: 'column', gap: '15px' }}>
+                            <h3 style={{ fontSize: '1.5rem', fontWeight: 'bold', margin: '0 0 10px 0' }}>Erro de Renderização Interno (React):</h3>
+                            <p style={{ fontSize: '1.1rem', margin: '0' }}><strong>Mensagem:</strong> {this.state.error?.message}</p>
+                            <pre style={{ background: '#18181b', padding: '15px', borderRadius: '8px', border: '1px solid #27272a', overflow: 'auto', maxWidth: '100%', whiteSpace: 'pre-wrap', color: '#fca5a5' }}>
+                                {this.state.error?.stack || 'Nenhum stack trace disponível'}
+                            </pre>
+                            <button 
+                                onClick={() => {
+                                    localStorage.removeItem('caderno_db_master');
+                                    window.location.reload();
+                                }}
+                                style={{ padding: '10px 20px', background: '#ef4444', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', width: 'fit-content' }}
+                            >
+                                Limpar Dados Locais (Reset) e Recarregar
+                            </button>
+                        </div>
+                    );
+                }
+
+                return this.props.children;
+            }
+        }
+
         const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
+        root.render(
+            <ErrorBoundary>
+                <App />
+            </ErrorBoundary>
+        );
 
     
     </script>
