@@ -10173,7 +10173,7 @@ Estrutura esperada:
                                                             <div 
                                                                 key={i} 
                                                                 onClick={() => reviewHistoricalSim(lastSim)} 
-                                                                className="flex-1 flex flex-col items-center group cursor-pointer relative"
+                                                                className="flex-1 flex flex-col items-center group cursor-pointer relative h-full justify-end"
                                                             >
                                                                 <div className="opacity-0 group-hover:opacity-100 absolute bottom-[105%] transition-opacity duration-200 bg-zinc-900 text-white text-[10px] font-black py-1.5 px-2.5 rounded-lg shadow-lg z-50 pointer-events-none mb-1 text-center min-w-[70px] shrink-0">
                                                                     <span className="block text-zinc-400">Q{i + 1}</span>
@@ -10246,7 +10246,7 @@ Estrutura esperada:
                                                             <div 
                                                                 key={d.id} 
                                                                 onClick={() => simObj && reviewHistoricalSim(simObj)} 
-                                                                className="flex-1 flex flex-col items-center group cursor-pointer relative"
+                                                                className="flex-1 flex flex-col items-center group cursor-pointer relative h-full justify-end"
                                                             >
                                                                 <div className="opacity-0 group-hover:opacity-100 absolute bottom-[105%] transition-opacity duration-200 bg-zinc-900 text-white text-[10px] font-black py-1.5 px-2.5 rounded-lg shadow-lg z-50 pointer-events-none mb-1 text-center min-w-[85px] shrink-0">
                                                                     <span className="block text-zinc-400">{d.date}</span>
@@ -10997,7 +10997,7 @@ Estrutura esperada:
                                                         setSimulado(p => ({ ...p, curIdx: i, isReviewing: true, showResults: false, crossedAlts: [], highlightedText: '' })); 
                                                         window.scrollTo(0, 0); 
                                                     }} 
-                                                    className="flex-1 flex flex-col items-center group cursor-pointer relative"
+                                                    className="flex-1 flex flex-col items-center group cursor-pointer relative h-full justify-end"
                                                 >
                                                     <div className="opacity-0 group-hover:opacity-100 absolute bottom-[105%] transition-opacity duration-200 bg-zinc-900 text-white text-[10px] font-black py-1.5 px-2.5 rounded-lg shadow-lg z-50 pointer-events-none mb-1 text-center min-w-[70px] shrink-0">
                                                         <span className="block text-zinc-455">Q{i + 1}</span>
