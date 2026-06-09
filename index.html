@@ -19,7 +19,7 @@
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800;900&display=swap">
 
     <!-- Tailwind CDN com defer para não bloquear o parser HTML -->
-    <script src="https://cdn.tailwindcss.com" defer></script>
+    <script src="https://cdn.tailwindcss.com" crossorigin="anonymous" defer></script>
     <script>
         // Configuração do Tailwind — precisa rodar antes do defer acima carregar,
         // então colocamos via window.__tailwind_config__ e aplicamos no onload
@@ -285,12 +285,12 @@
 
     <!-- Dependências JS: defer garante execução após o parser terminar o HTML -->
     <!-- Ordem importa: jsonrepair → React → ReactDOM → Babel → PDF.js → JSZip -->
-    <script src="https://cdn.jsdelivr.net/npm/jsonrepair/lib/umd/jsonrepair.js" defer></script>
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin defer></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin defer></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js" defer></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js" defer></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsonrepair/lib/umd/jsonrepair.js" crossorigin="anonymous" defer></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin="anonymous" defer></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin="anonymous" defer></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js" crossorigin="anonymous" defer></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js" crossorigin="anonymous" defer></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" crossorigin="anonymous" defer></script>
     <!-- PDF.js worker: configurado dentro do código principal após o lib carregar -->
     <script>
         // Registra o worker do PDF.js assim que a lib carregar (via defer)
@@ -9326,11 +9326,16 @@ ${safeScript}
             };
 
             const reviewHistoricalSim = (sim) => {
+                if (!sim || !sim.results) {
+                    return showAlert("⚠️ Dados do simulado inválidos.");
+                }
                 const deck = sim.results.map(r => {
-                    let q = db.errors.find(e => String(e.id) === String(r.id));
+                    if (!r) return null;
+                    let q = (db?.errors || []).find(e => e && String(e.id) === String(r.id));
                     if (!q) {
-                        for (const list of (db.processedQuestionLists || [])) {
-                            const found = (list.questions || []).find(q2 => `ai_${q2.id}` === String(r.id) || String(q2.id) === String(r.id));
+                        for (const list of (db?.processedQuestionLists || [])) {
+                            if (!list) continue;
+                            const found = (list.questions || []).find(q2 => q2 && (`ai_${q2.id}` === String(r.id) || String(q2.id) === String(r.id)));
                             if (found) {
                                 q = found;
                                 break;
@@ -9351,14 +9356,15 @@ ${safeScript}
                     curIdx: 0,
                     deck,
                     results: sim.results.map(r => ({
-                        id: r.id,
-                        isCorrect: r.isCorrect,
-                        timeSpent: r.timeSpent,
-                        userAns: r.userAns || 'Pulo'
+                        id: r?.id || 0,
+                        isCorrect: r?.isCorrect || false,
+                        timeSpent: r?.timeSpent || 0,
+                        userAns: r?.userAns || 'Pulo'
                     })),
                     totalTimeElapsed: sim.totalTimeSpent || 0,
                     timeSpentPerQuestion: deck.map(q => {
-                        const r = sim.results.find(res => String(res.id) === String(q.id));
+                        if (!q) return 0;
+                        const r = sim.results.find(res => res && String(res.id) === String(q.id));
                         return r ? (r.timeSpent || 0) : 0;
                     }),
                     isTimerPaused: false,
@@ -9951,25 +9957,28 @@ Estrutura esperada:
                 const top5Percentage = Math.round((top5ErrorsCount / totalErrors) * 100);
 
                 // --- Time & Speed Telemetry for Dashboard ---
-                const timedHistory = (db.simuladoHistory || []).filter(h => (h.totalTimeSpent || 0) > 0).slice(0, 10);
+                const timedHistory = (db?.simuladoHistory || []).filter(h => h && (h.totalTimeSpent || 0) > 0).slice(0, 10);
                 const lastSim = timedHistory[0];
 
                 const evolutionData = [...timedHistory].reverse().map(h => ({
-                    date: h.date,
-                    avgTime: h.averageTimeSpent || 0,
-                    hits: h.hits,
-                    total: h.total,
-                    id: h.id
+                    date: h?.date || '',
+                    avgTime: h?.averageTimeSpent || 0,
+                    hits: h?.hits || 0,
+                    total: h?.total || 0,
+                    id: h?.id || 0
                 }));
                 const maxAvg = evolutionData.length > 0 ? Math.max(...evolutionData.map(d => d.avgTime), 1) : 1;
 
                 const specialtyAggregated = {};
                 timedHistory.forEach(h => {
+                    if (!h) return;
                     (h.results || []).forEach(r => {
-                        let q = db.errors.find(e => String(e.id) === String(r.id));
+                        if (!r) return;
+                        let q = (db?.errors || []).find(e => e && String(e.id) === String(r.id));
                         if (!q) {
-                            for (const list of (db.processedQuestionLists || [])) {
-                                const found = (list.questions || []).find(q2 => `ai_${q2.id}` === String(r.id) || String(q2.id) === String(r.id));
+                            for (const list of (db?.processedQuestionLists || [])) {
+                                if (!list) continue;
+                                const found = (list.questions || []).find(q2 => q2 && (`ai_${q2.id}` === String(r.id) || String(q2.id) === String(r.id)));
                                 if (found) {
                                     q = found;
                                     break;
@@ -9991,7 +10000,7 @@ Estrutura esperada:
                 });
 
                 const specialtySpeedList = Object.keys(specialtyAggregated).map(subjId => {
-                    const subj = db.subjects.find(s => s.id === subjId);
+                    const subj = (db?.subjects || []).find(s => s && s.id === subjId);
                     const stats = specialtyAggregated[subjId];
                     return {
                         id: subjId,
@@ -10154,19 +10163,19 @@ Estrutura esperada:
                                             <div className="overflow-x-auto pb-4 pt-6">
                                                 <div className="flex items-end gap-1.5 md:gap-2 min-w-[500px] h-48 px-4 border-b border-zinc-300 dark:border-zinc-700 relative">
                                                     <div className="absolute left-0 right-0 top-0 border-t border-dashed border-zinc-200 dark:border-zinc-800/80 text-[9px] font-bold text-zinc-400 -mt-2.5 pl-2">
-                                                        {formatTime(Math.max(...lastSim.results.map(r => r.timeSpent || 0), 1))}
+                                                        {formatTime(Math.max(...(lastSim?.results || []).map(r => r?.timeSpent || 0), 1))}
                                                     </div>
                                                     <div className="absolute left-0 right-0 top-1/2 border-t border-dashed border-zinc-200 dark:border-zinc-800/80 text-[9px] font-bold text-zinc-400 pl-2">
-                                                        {formatTime(Math.round(Math.max(...lastSim.results.map(r => r.timeSpent || 0), 1) / 2))}
+                                                        {formatTime(Math.round(Math.max(...(lastSim?.results || []).map(r => r?.timeSpent || 0), 1) / 2))}
                                                     </div>
 
-                                                    {lastSim.results.map((r, i) => {
-                                                        const time = r.timeSpent || 0;
-                                                        const maxTime = Math.max(...lastSim.results.map(x => x.timeSpent || 0), 1);
+                                                    {(lastSim?.results || []).map((r, i) => {
+                                                        const time = r?.timeSpent || 0;
+                                                        const maxTime = Math.max(...(lastSim?.results || []).map(x => x?.timeSpent || 0), 1);
                                                         const pct = (time / maxTime) * 100;
                                                         let barColor = 'bg-emerald-500 hover:bg-emerald-600 dark:bg-emerald-600 dark:hover:bg-emerald-700';
-                                                        if (r.isCorrect) barColor = 'bg-emerald-500 hover:bg-emerald-600';
-                                                        else if (r.userAns === 'Pulo') barColor = 'bg-amber-500 hover:bg-amber-600';
+                                                        if (r?.isCorrect) barColor = 'bg-emerald-500 hover:bg-emerald-600';
+                                                        else if (r?.userAns === 'Pulo') barColor = 'bg-amber-500 hover:bg-amber-600';
                                                         else barColor = 'bg-rose-500 hover:bg-rose-600';
 
                                                         return (
@@ -10179,7 +10188,7 @@ Estrutura esperada:
                                                                     <span className="block text-zinc-400">Q{i + 1}</span>
                                                                     <span className="block">{formatTime(time)}</span>
                                                                     <span className="block uppercase text-[8px] tracking-wider mt-0.5">
-                                                                        {r.isCorrect ? 'Certa' : r.userAns === 'Pulo' ? 'Pulada' : 'Errada'}
+                                                                        {r?.isCorrect ? 'Certa' : r?.userAns === 'Pulo' ? 'Pulada' : 'Errada'}
                                                                     </span>
                                                                 </div>
                                                                 <div 
