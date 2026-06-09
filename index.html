@@ -19,7 +19,7 @@
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800;900&display=swap">
 
     <!-- Tailwind CDN com defer para não bloquear o parser HTML -->
-    <script src="https://cdn.tailwindcss.com" crossorigin="anonymous" defer></script>
+    <script src="https://cdn.tailwindcss.com" defer></script>
     <script>
         // Configuração do Tailwind — precisa rodar antes do defer acima carregar,
         // então colocamos via window.__tailwind_config__ e aplicamos no onload
@@ -285,12 +285,12 @@
 
     <!-- Dependências JS: defer garante execução após o parser terminar o HTML -->
     <!-- Ordem importa: jsonrepair → React → ReactDOM → Babel → PDF.js → JSZip -->
-    <script src="https://cdn.jsdelivr.net/npm/jsonrepair/lib/umd/jsonrepair.js" crossorigin="anonymous" defer></script>
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin="anonymous" defer></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin="anonymous" defer></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js" crossorigin="anonymous" defer></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js" crossorigin="anonymous" defer></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" crossorigin="anonymous" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsonrepair/lib/umd/jsonrepair.js" defer></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin defer></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin defer></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js" defer></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js" defer></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" defer></script>
     <!-- PDF.js worker: configurado dentro do código principal após o lib carregar -->
     <script>
         // Registra o worker do PDF.js assim que a lib carregar (via defer)
