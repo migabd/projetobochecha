@@ -6697,7 +6697,7 @@ Retorne a resposta refinada em formato Markdown profissional e limpo. Retorne AP
                         isIncomingSyncRef.current = true;
                         setTimeout(() => {
                             isIncomingSyncRef.current = false;
-                        }, 1000);
+                        }, 3000);
                         setDb(prev => {
                             const newErrors = (prev.errors || []).map(err => {
                                 const cachedImage = imagesMap[`error_${err.id}`];
@@ -6815,7 +6815,7 @@ Retorne a resposta refinada em formato Markdown profissional e limpo. Retorne AP
                 isIncomingSyncRef.current = true;
                 setTimeout(() => {
                     isIncomingSyncRef.current = false;
-                }, 1000);
+                }, 3000);
                 setDb(prev => ({
                     ...prev,
                     ...remote,
@@ -6832,16 +6832,41 @@ Retorne a resposta refinada em formato Markdown profissional e limpo. Retorne AP
                     dailyStats: { ...(prev.dailyStats || {}), ...(remote.dailyStats || {}) }
                 }));
                 if (remote.chatSessions && Array.isArray(remote.chatSessions) && remote.chatSessions.length > 0) {
-                    setChatSessions(remote.chatSessions);
-                    const activeMatch = remote.chatSessions.find(s => s.id === activeSessionIdRef.current);
-                    if (activeMatch) {
-                        setChatMessages(activeMatch.messages || []);
-                    } else {
-                        setActiveSessionId(remote.chatSessions[0].id);
-                        setChatMessages(remote.chatSessions[0].messages || []);
-                    }
+                    setChatSessions(prev => {
+                        const merged = [...prev];
+                        remote.chatSessions.forEach(remS => {
+                            const localIdx = merged.findIndex(locS => locS.id === remS.id);
+                            if (localIdx === -1) {
+                                merged.push(remS);
+                            } else {
+                                const locS = merged[localIdx];
+                                const locMsgs = locS.messages || [];
+                                const remMsgs = remS.messages || [];
+                                if (remMsgs.length >= locMsgs.length) {
+                                    merged[localIdx] = { ...locS, ...remS };
+                                }
+                            }
+                        });
+
+                        const activeId = activeSessionIdRef.current;
+                        const activeMatch = merged.find(s => s.id === activeId) || merged[0];
+                        if (activeMatch) {
+                            setTimeout(() => {
+                                if (activeMatch.id !== activeId) {
+                                    setActiveSessionId(activeMatch.id);
+                                }
+                                setChatMessages(activeMatch.messages || []);
+                            }, 0);
+                        }
+                        return merged;
+                    });
                 } else if (remote.chatMessages) {
-                    setChatMessages(remote.chatMessages);
+                    setChatMessages(prev => {
+                        if (remote.chatMessages.length >= prev.length) {
+                            return remote.chatMessages;
+                        }
+                        return prev;
+                    });
                 }
                 setSyncStatus('synced');
                 setLastSyncTime(new Date());
@@ -7034,7 +7059,7 @@ Retorne a resposta refinada em formato Markdown profissional e limpo. Retorne AP
                 isIncomingSyncRef.current = true;
                 setTimeout(() => {
                     isIncomingSyncRef.current = false;
-                }, 1000);
+                }, 3000);
                 setDb(p => {
                     let changed = false;
 
@@ -7464,7 +7489,7 @@ Retorne a resposta refinada em formato Markdown profissional e limpo. Retorne AP
                         isIncomingSyncRef.current = true;
                         setTimeout(() => {
                             isIncomingSyncRef.current = false;
-                        }, 1000);
+                        }, 3000);
 
                         setDb(prev => ({
                             ...prev,
