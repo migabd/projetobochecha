@@ -5935,6 +5935,23 @@ Retorne a resposta refinada em formato Markdown profissional e limpo. Retorne AP
                                                         )}
                                                         
                                                         <div className="flex items-center gap-1">
+                                                            {c.evaluation && notionConfig && notionConfig.enabled && notionConfig.token && notionConfig.dbId && notionConfig.proxyUrl && generateAndSendToNotion && (
+                                                                <button
+                                                                    onClick={(e) => {
+                                                                        e.stopPropagation();
+                                                                        const found = (db.desafiosDiarios || []).find(d => d.id === c.id);
+                                                                        if (!found) return;
+                                                                        showLocalToast("📚 Gerando resumo de fisiopatologia para o Notion...", "success");
+                                                                        generateAndSendToNotion(found, found.evaluation)
+                                                                            .then(() => showLocalToast("✅ Resumo enviado ao Notion!", "success"))
+                                                                            .catch(err => showLocalToast("❌ Falha: " + err.message, "error"));
+                                                                    }}
+                                                                    className="p-1.5 text-violet-400 hover:text-violet-600 rounded-lg hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-all active:scale-95"
+                                                                    title="Gerar resumo e enviar ao Notion"
+                                                                >
+                                                                    <i className="fa-solid fa-paper-plane text-[10px]"></i>
+                                                                </button>
+                                                            )}
                                                             <button 
                                                                 onClick={(e) => {
                                                                     e.stopPropagation();
