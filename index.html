@@ -9045,18 +9045,37 @@ ${safeScript}
             };
 
             const handleFactoryReset = () => {
-                showConfirm("⚠️ ATENÇÃO: Esta ação é IRREVERSÍVEL!\n\nIsto irá apagar permanentemente todas as suas questões, simulados, resumos, flashcards, checklists, tarefas do planner e configurações guardadas no seu navegador.\n\nDeseja realmente restaurar o padrão de fábrica?", () => {
-                    const keys = ['caderno_db_master', 'caderno_med_v42_final', 'caderno_med_pro_final', 'caderno_med_v45_final', 'chat_med_ia_master', 'chat_med_ia_sessions', 'gemini_model', 'gemini_available_models', 'gemini_persona'];
+                showConfirm("⚠️ ATENÇÃO: Esta ação é IRREVERSÍVEL!\n\nIsto irá apagar permanentemente TODOS os seus dados:\n• Questões, simulados e histórico completo\n• Resumos, flashcards e jogos\n• Fluxogramas clínicos e listas processadas\n• Checklists, planner e desafios diários\n• Sessões de chat com IA\n• Configurações de API, Gist e Anki\n• Imagens armazenadas localmente\n• Fórum de questões e comentários\n\nDeseja realmente restaurar o padrão de fábrica?", () => {
+                    // 1. Limpar TODAS as chaves do localStorage relacionadas à plataforma
+                    const keys = [
+                        'caderno_db_master',
+                        'caderno_med_v42_final',
+                        'caderno_med_pro_final',
+                        'caderno_med_v45_final',
+                        'caderno_db_is_dirty',
+                        'caderno_reset_status',
+                        'caderno_legacy_url',
+                        'caderno_legacy_fetched',
+                        'caderno_gist_config',
+                        'chat_med_ia_master',
+                        'chat_med_ia_sessions',
+                        'gemini_api_key',
+                        'gemini_model',
+                        'gemini_available_models',
+                        'gemini_persona',
+                        'forum_custom_author',
+                        'forum_user_votes'
+                    ];
                     keys.forEach(k => localStorage.removeItem(k));
 
-                    // Limpar banco de imagens no IndexedDB
+                    // 2. Limpar banco de imagens no IndexedDB
                     try {
                         indexedDB.deleteDatabase("CadernoImagesDB");
                     } catch (e) {
                         console.error("Erro ao deletar banco de imagens:", e);
                     }
 
-                    // Reset do estado para o padrão absoluto
+                    // 3. Reset COMPLETO do estado para o padrão absoluto (idêntico ao emptyDb)
                     setDb({
                         errors: [],
                         subjects: DEFAULT_SUBJECTS,
@@ -9070,15 +9089,25 @@ ${safeScript}
                         checklists: [],
                         summaries: [],
                         summariesHtml: [],
+                        processedQuestionLists: [],
                         dailyStats: {},
-                        darkMode: true
+                        darkMode: true,
+                        simuladoPausado: null,
+                        fluxogramas: [],
+                        desafiosDiarios: [],
+                        comments: {}
                     });
 
+                    // 4. Limpar sessões de chat
                     setChatSessions([{ id: 'default_session', title: 'Nova Conversa', messages: [{ role: 'model', text: 'Plataforma restaurada com sucesso! Todos os dados locais foram limpos. Como posso ajudar hoje?' }], createdAt: new Date().toISOString() }]);
                     setActiveSessionId('default_session');
                     setChatMessages([{ role: 'model', text: 'Plataforma restaurada com sucesso! Todos os dados locais foram limpos. Como posso ajudar hoje?' }]);
+
+                    // 5. Resetar configuração de IA
+                    setAiConfig({ key: '', model: 'gemini-1.5-flash', persona: 'amigavel' });
+
                     setShowSettings(false);
-                    showAlert("✅ Sistema restaurado para o padrão de fábrica com sucesso.");
+                    showAlert("✅ Sistema restaurado para o padrão de fábrica com sucesso. Todos os dados foram apagados.");
 
                     if (fileHandle) {
                         showAlert("Nota: O arquivo físico sincronizado (Auto-Save) não foi excluído, mas agora contém uma base de dados vazia. Salve as alterações se desejar manter esta limpeza.");
@@ -15929,12 +15958,21 @@ ${(obj.questoesAnalisadas || []).map(q => `### ${q.identificacao}
                             </pre>
                             <button 
                                 onClick={() => {
-                                    localStorage.removeItem('caderno_db_master');
+                                    const keys = [
+                                        'caderno_db_master', 'caderno_med_v42_final', 'caderno_med_pro_final',
+                                        'caderno_med_v45_final', 'caderno_db_is_dirty', 'caderno_reset_status',
+                                        'caderno_legacy_url', 'caderno_legacy_fetched', 'caderno_gist_config',
+                                        'chat_med_ia_master', 'chat_med_ia_sessions',
+                                        'gemini_api_key', 'gemini_model', 'gemini_available_models', 'gemini_persona',
+                                        'forum_custom_author', 'forum_user_votes'
+                                    ];
+                                    keys.forEach(k => localStorage.removeItem(k));
+                                    try { indexedDB.deleteDatabase("CadernoImagesDB"); } catch(e) {}
                                     window.location.reload();
                                 }}
                                 style={{ padding: '10px 20px', background: '#ef4444', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', width: 'fit-content' }}
                             >
-                                Limpar Dados Locais (Reset) e Recarregar
+                                Limpar Todos os Dados (Reset Total) e Recarregar
                             </button>
                         </div>
                     );
