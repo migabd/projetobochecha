@@ -6571,6 +6571,757 @@ Retorne a resposta refinada em formato Markdown profissional e limpo. Retorne AP
             }
         };
 
+        // ==========================================================
+        // COMPONENTE: FÓRUM DE QUESTÕES (COMENTÁRIOS E IA)
+        // ==========================================================
+        const QuestionForum = ({ question, db, setDb, callIA, aiConfig, showAlert, getPersonaInstruction }) => {
+            const [newCommentText, setNewCommentText] = useState("");
+            const [commentTag, setCommentTag] = useState("Dúvida"); // Dúvida, Mnemônica, Pegadinha, Explicação, Correção
+            const [authorType, setAuthorType] = useState("user"); // user, anon, custom
+            const [customAuthorName, setCustomAuthorName] = useState(() => localStorage.getItem('forum_custom_author') || "");
+            const [searchTerm, setSearchTerm] = useState("");
+            const [filterTag, setFilterTag] = useState("Todos"); // Todos, Dúvida, etc.
+            const [sortBy, setSortBy] = useState("useful"); // useful, recent, oldest
+            const [replyingToId, setReplyingToId] = useState(null);
+            const [replyText, setReplyText] = useState("");
+            const [isGeneratingForum, setIsGeneratingForum] = useState(false);
+            const [isAiReplyingCommentId, setIsAiReplyingCommentId] = useState(null);
+
+            const [userVotes, setUserVotes] = useState(() => JSON.parse(localStorage.getItem('forum_user_votes') || '{}'));
+
+            const comments = (db.comments && db.comments[question.id]) || [];
+
+            const saveComments = (newComments) => {
+                setDb(prev => ({
+                    ...prev,
+                    comments: {
+                        ...(prev.comments || {}),
+                        [question.id]: newComments
+                    }
+                }));
+            };
+
+            const handleVote = (commentId, type, isReply = false, parentId = null) => {
+                const key = `${commentId}`;
+                const currentVote = userVotes[key];
+                let newVote = null;
+                
+                if (currentVote === type) {
+                    newVote = null;
+                } else {
+                    newVote = type;
+                }
+                
+                const nextVotes = { ...userVotes };
+                if (newVote) nextVotes[key] = newVote;
+                else delete nextVotes[key];
+                setUserVotes(nextVotes);
+                localStorage.setItem('forum_user_votes', JSON.stringify(nextVotes));
+                
+                const updatedComments = comments.map(c => {
+                    if (isReply) {
+                        if (c.id === parentId) {
+                            return {
+                                ...c,
+                                replies: (c.replies || []).map(r => {
+                                    if (r.id === commentId) {
+                                        let up = r.upvotes || 0;
+                                        let down = r.downvotes || 0;
+                                        if (currentVote === 'up') up = Math.max(0, up - 1);
+                                        if (currentVote === 'down') down = Math.max(0, down - 1);
+                                        if (newVote === 'up') up += 1;
+                                        if (newVote === 'down') down += 1;
+                                        return { ...r, upvotes: up, downvotes: down };
+                                    }
+                                    return r;
+                                })
+                            };
+                        }
+                    } else {
+                        if (c.id === commentId) {
+                            let up = c.upvotes || 0;
+                            let down = c.downvotes || 0;
+                            if (currentVote === 'up') up = Math.max(0, up - 1);
+                            if (currentVote === 'down') down = Math.max(0, down - 1);
+                            if (newVote === 'up') up += 1;
+                            if (newVote === 'down') down += 1;
+                            return { ...c, upvotes: up, downvotes: down };
+                        }
+                    }
+                    return c;
+                });
+                saveComments(updatedComments);
+            };
+
+            const handleAddComment = (e) => {
+                e.preventDefault();
+                if (!newCommentText.trim()) return;
+
+                let author = "Você";
+                let avatar = "fa-user text-emerald-500";
+                if (authorType === 'anon') {
+                    author = "Dr(a). Anônimo";
+                    avatar = "fa-user-secret text-zinc-500";
+                } else if (authorType === 'custom') {
+                    const name = customAuthorName.trim() || "Dr(a). Visitante";
+                    author = name.startsWith("Dr.") || name.startsWith("Dra.") || name.startsWith("Dr(a).") ? name : `Dr(a). ${name}`;
+                    avatar = "fa-user-doctor text-indigo-500";
+                    localStorage.setItem('forum_custom_author', name);
+                }
+
+                const newComment = {
+                    id: Date.now() + Math.random(),
+                    author,
+                    avatar,
+                    content: newCommentText,
+                    timestamp: "Agora",
+                    tag: commentTag,
+                    upvotes: 0,
+                    downvotes: 0,
+                    replies: []
+                };
+
+                saveComments([newComment, ...comments]);
+                setNewCommentText("");
+            };
+
+            const handleAddReply = (parentId) => {
+                if (!replyText.trim()) return;
+
+                let author = "Você";
+                let avatar = "fa-user text-emerald-500";
+                if (authorType === 'anon') {
+                    author = "Dr(a). Anônimo";
+                    avatar = "fa-user-secret text-zinc-500";
+                } else if (authorType === 'custom') {
+                    const name = customAuthorName.trim() || "Dr(a). Visitante";
+                    author = name.startsWith("Dr.") || name.startsWith("Dra.") || name.startsWith("Dr(a).") ? name : `Dr(a). ${name}`;
+                    avatar = "fa-user-doctor text-indigo-500";
+                    localStorage.setItem('forum_custom_author', name);
+                }
+
+                const newReply = {
+                    id: Date.now() + Math.random(),
+                    author,
+                    avatar,
+                    content: replyText,
+                    timestamp: "Agora",
+                    tag: "Explicação",
+                    upvotes: 0,
+                    downvotes: 0
+                };
+
+                const updatedComments = comments.map(c => {
+                    if (c.id === parentId) {
+                        return {
+                            ...c,
+                            replies: [...(c.replies || []), newReply]
+                        };
+                    }
+                    return c;
+                });
+
+                saveComments(updatedComments);
+                setReplyText("");
+                setReplyingToId(null);
+            };
+
+            const handleDeleteComment = (commentId, isReply = false, parentId = null) => {
+                let updatedComments = [];
+                if (isReply) {
+                    updatedComments = comments.map(c => {
+                        if (c.id === parentId) {
+                            return {
+                                ...c,
+                                replies: (c.replies || []).filter(r => r.id !== commentId)
+                            };
+                        }
+                        return c;
+                    });
+                } else {
+                    updatedComments = comments.filter(c => c.id !== commentId);
+                }
+                saveComments(updatedComments);
+            };
+
+            const insertFormatting = (syntax) => {
+                const textarea = document.getElementById(`forum-textarea-${question.id}`);
+                if (!textarea) return;
+                const start = textarea.selectionStart;
+                const end = textarea.selectionEnd;
+                const text = textarea.value;
+                const selectedText = text.substring(start, end);
+                let replacement = "";
+                
+                if (syntax === 'bold') replacement = `**${selectedText || 'negrito'}**`;
+                else if (syntax === 'italic') replacement = `*${selectedText || 'itálico'}*`;
+                else if (syntax === 'code') replacement = `\`${selectedText || 'código'}\``;
+                else if (syntax === 'quote') replacement = `\n> ${selectedText || 'citação'}\n`;
+                else if (syntax === 'list') replacement = `\n- ${selectedText || 'tópico'}`;
+                else if (syntax === 'link') replacement = `[${selectedText || 'link'}](url)`;
+                else if (syntax === 'mnemonic') replacement = `\n💡 **Mnemônica Rápida:**\n- **M**: \n- **E**: \n- **D**: \n`;
+                
+                setNewCommentText(text.substring(0, start) + replacement + text.substring(end));
+                
+                setTimeout(() => {
+                    textarea.focus();
+                    textarea.setSelectionRange(start + replacement.length, start + replacement.length);
+                }, 50);
+            };
+
+            const handleGenerateAiForum = async () => {
+                setIsGeneratingForum(true);
+                try {
+                    const personaInst = getPersonaInstruction(aiConfig.persona, 'chat');
+                    const prompt = `Você é um simulador de fórum de medicina para o "Caderno de Erros Médicos IA PRO".
+O estudante errou a seguinte questão médica e abriu o fórum de discussão.
+Gere uma lista de 3 comentários ricos e realistas de outros usuários (como médicos residentes, especialistas de renome ou estudantes dedicados) comentando e discutindo a questão em português.
+
+Eis a questão errada:
+Título: ${question.title}
+Enunciado: ${question.question}
+Alternativas:
+A) ${question.alternatives[0]}
+B) ${question.alternatives[1]}
+C) ${question.alternatives[2]}
+D) ${question.alternatives[3]}
+E) ${question.alternatives[4]}
+Gabarito Correto: ${question.correctAlternative}
+Explicação do Professor: ${question.alternativeExplanations?.join('\n') || ''}
+Lição Aprendida: ${question.lessonLearned || ''}
+
+A atmosfera geral do aplicativo de estudos é definida pela seguinte personalidade de mentoria da IA:
+"${personaInst}"
+Adapte sutilmente o tom da discussão para harmonizar com este tema:
+- Se a mentoria for irônica/sarcástica ou arrogante, os outros usuários no fórum também podem fazer provocações leves ou piadas amigáveis e inteligentes sobre as pegadinhas e erros comuns da questão.
+- Se for amigável ou compreensiva, o tom geral dos usuários deve ser muito acolhedor, prestativo, empático e extremamente focado no aprendizado colaborativo.
+
+A discussão deve ser muito realista:
+1. O primeiro comentário (de preferência de um residente ou interno) pode ser uma explicação didática ou mnemônica incrível para fixar o conceito correto. (Tag: "Mnemônica" ou "Explicação")
+2. O segundo comentário pode apontar uma pegadinha sutil no enunciado que faz muita gente errar. (Tag: "Pegadinha")
+3. O terceiro comentário pode ser uma dúvida comum sobre uma das alternativas incorretas, e deve ter uma resposta (dentro de "replies") de outro médico respondendo e explicando a dúvida perfeitamente. (Tag: "Dúvida" com resposta "Explicação")
+
+Por favor, retorne APENAS um array JSON válido (sem tags markdown de código e sem texto antes ou depois) de objetos no seguinte formato exato:
+[
+  {
+    "id": 1,
+    "author": "Nome do Autor (ex: Dra. Clarice - R2 Pediatria)",
+    "avatar": "fa-user-md",
+    "content": "Texto em português usando markdown simples se necessário (**negrito**, *itálico*). Fale de forma natural, médica e muito explicativa.",
+    "timestamp": "há 2h",
+    "tag": "Mnemônica",
+    "upvotes": 15,
+    "downvotes": 0,
+    "replies": []
+  }
+]
+`;
+
+                    const msgs = [{ role: 'user', parts: [{ text: prompt }] }];
+                    const resText = await callIA(msgs);
+                    
+                    let parsed = [];
+                    try {
+                        parsed = robustJSONParse(resText);
+                    } catch(e) {
+                        console.error("Failed to parse generated forum", e, resText);
+                        const jsonMatch = resText.match(/\[\s*\{[\s\S]*\}\s*\]/);
+                        if (jsonMatch) {
+                            parsed = JSON.parse(jsonMatch[0]);
+                        } else {
+                            throw new Error("Não foi possível parsear a resposta da IA como JSON.");
+                        }
+                    }
+                    
+                    if (Array.isArray(parsed) && parsed.length > 0) {
+                        const formatted = parsed.map((c, i) => ({
+                            ...c,
+                            id: Date.now() + Math.random() + i,
+                            upvotes: c.upvotes || Math.floor(Math.random() * 15) + 5,
+                            downvotes: c.downvotes || 0,
+                            replies: (c.replies || []).map((r, j) => ({
+                                ...r,
+                                id: Date.now() + Math.random() + i + j + 100,
+                                upvotes: r.upvotes || Math.floor(Math.random() * 5) + 1,
+                                downvotes: r.downvotes || 0
+                            }))
+                        }));
+                        
+                        saveComments([...comments, ...formatted]);
+                        showAlert("✅ Discussão do fórum simulada com sucesso!");
+                    } else {
+                        showAlert("❌ Erro ao gerar discussão: formato inválido.");
+                    }
+                } catch(err) {
+                    console.error(err);
+                    showAlert("❌ Erro ao simular fórum com IA: " + err.message);
+                } finally {
+                    setIsGeneratingForum(false);
+                }
+            };
+
+            const handleAiReplyToComment = async (parentComment) => {
+                setIsAiReplyingCommentId(parentComment.id);
+                setReplyingToId(parentComment.id);
+                try {
+                    const personaInst = getPersonaInstruction(aiConfig.persona, 'chat');
+                    const prompt = `Você é o "Mentor IA PRO", o tutor médico oficial do Caderno de Erros.
+Sua personalidade de mentoria é definida pela seguinte instrução de comportamento:
+"${personaInst}"
+
+O estudante está no fórum de discussão de uma questão médica e gostaria que você respondesse diretamente ao comentário abaixo de outro usuário.
+
+Questão:
+Enunciado: ${question.question}
+Gabarito Correto: ${question.correctAlternative}
+Explicação do Professor: ${question.alternativeExplanations?.join('\n') || ''}
+
+Comentário a ser respondido:
+Autor: ${parentComment.author}
+Tag do comentário: ${parentComment.tag}
+Conteúdo: "${parentComment.content}"
+
+Por favor, escreva uma resposta direta de mentor médico em até 4 parágrafos. Siga rigorosamente a sua personalidade de mentoria (se for irônico ou arrogante, critique de forma ácida/provocativa os erros ou argumentos do comentário, mas se for amigável ou compreensivo, responda de forma acolhedora, incentivadora e compreensiva). Explique e complemente com conceitos didáticos e de alto rendimento. Use markdown se desejar.
+Retorne apenas o texto da resposta, sem JSON ou tags explicativas.`;
+
+                    const msgs = [{ role: 'user', parts: [{ text: prompt }] }];
+                    const resText = await callIA(msgs);
+                    
+                    if (resText) {
+                        const newReply = {
+                            id: Date.now() + Math.random(),
+                            author: "Mentor IA PRO",
+                            avatar: "fa-robot text-emerald-500",
+                            content: resText,
+                            timestamp: "Agora",
+                            tag: "Explicação",
+                            upvotes: 5,
+                            downvotes: 0
+                        };
+                        
+                        const updatedComments = comments.map(c => {
+                            if (c.id === parentComment.id) {
+                                return {
+                                    ...c,
+                                    replies: [...(c.replies || []), newReply]
+                                };
+                            }
+                            return c;
+                        });
+                        saveComments(updatedComments);
+                        showAlert("🤖 O Mentor IA respondeu no fórum!");
+                    }
+                } catch(err) {
+                    console.error(err);
+                    showAlert("❌ Erro ao gerar resposta do Mentor IA: " + err.message);
+                } finally {
+                    setIsAiReplyingCommentId(null);
+                    setReplyingToId(null);
+                }
+            };
+
+            const renderMarkdown = (text) => {
+                if (!text) return "";
+                let html = text
+                    .replace(/&/g, "&amp;")
+                    .replace(/</g, "&lt;")
+                    .replace(/>/g, "&gt;");
+                
+                html = html.replace(/\*\*(.*?)\*\*/g, '<strong class="font-extrabold text-zinc-900 dark:text-white">$1</strong>');
+                html = html.replace(/\*(.*?)\*/g, '<em class="italic">$1</em>');
+                html = html.replace(/`(.*?)`/g, '<code class="bg-zinc-100 dark:bg-zinc-800 text-rose-500 font-mono px-1.5 py-0.5 rounded text-xs">$1</code>');
+                html = html.replace(/^\s*>\s*(.*)$/gm, '<blockquote class="border-l-4 border-emerald-500 pl-3 py-1 my-2 bg-zinc-50 dark:bg-zinc-800/40 text-zinc-600 dark:text-zinc-400 italic">$1</blockquote>');
+                html = html.replace(/\n/g, '<br/>');
+                return { __html: html };
+            };
+
+            const tagCounts = {
+                "Todos": comments.length,
+                "Dúvida": comments.filter(c => c.tag === 'Dúvida').length,
+                "Mnemônica": comments.filter(c => c.tag === 'Mnemônica').length,
+                "Pegadinha": comments.filter(c => c.tag === 'Pegadinha').length,
+                "Explicação": comments.filter(c => c.tag === 'Explicação').length,
+                "Correção": comments.filter(c => c.tag === 'Correção').length,
+            };
+
+            const filteredComments = comments.filter(c => {
+                const matchesTag = filterTag === 'Todos' || c.tag === filterTag;
+                const matchesSearch = !searchTerm.trim() || 
+                    c.content.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                    c.author.toLowerCase().includes(searchTerm.toLowerCase());
+                return matchesTag && matchesSearch;
+            }).sort((a, b) => {
+                if (sortBy === 'useful') {
+                    const scoreA = (a.upvotes || 0) - (a.downvotes || 0);
+                    const scoreB = (b.upvotes || 0) - (b.downvotes || 0);
+                    return scoreB - scoreA;
+                }
+                if (sortBy === 'recent') return b.id - a.id;
+                if (sortBy === 'oldest') return a.id - b.id;
+                return 0;
+            });
+
+            const getTagColor = (tag) => {
+                switch(tag) {
+                    case 'Dúvida': return 'border-blue-500 text-blue-600 bg-blue-50/50 dark:bg-blue-950/30 dark:text-blue-400';
+                    case 'Mnemônica': return 'border-purple-500 text-purple-600 bg-purple-50/50 dark:bg-purple-950/30 dark:text-purple-400';
+                    case 'Pegadinha': return 'border-amber-500 text-amber-600 bg-amber-50/50 dark:bg-amber-950/30 dark:text-amber-400';
+                    case 'Explicação': return 'border-emerald-500 text-emerald-600 bg-emerald-50/50 dark:bg-emerald-950/30 dark:text-emerald-400';
+                    case 'Correção': return 'border-red-500 text-red-600 bg-red-50/50 dark:bg-red-950/30 dark:text-red-400';
+                    default: return 'border-zinc-300 text-zinc-650 bg-zinc-50 dark:bg-zinc-800 dark:text-zinc-450';
+                }
+            };
+
+            return (
+                <div className="mt-8 bg-zinc-50/50 dark:bg-zinc-900/30 rounded-[32px] border border-zinc-200 dark:border-zinc-800 p-6 sm:p-8 animate-in fade-in duration-300">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-zinc-200 dark:border-zinc-800 pb-5 mb-6">
+                        <div>
+                            <h3 className="text-xl font-black flex items-center gap-2 text-zinc-800 dark:text-white">
+                                <i className="fa-solid fa-comments text-emerald-500"></i> Fórum de Discussão da Questão
+                            </h3>
+                            <p className="text-xs font-bold text-zinc-500 dark:text-zinc-400 mt-1 uppercase tracking-wider">Troque conhecimento, compartilhe mnemônicas e tire dúvidas</p>
+                        </div>
+                        <div className="flex items-center gap-2 w-full sm:w-auto">
+                            <button 
+                                type="button"
+                                onClick={handleGenerateAiForum}
+                                disabled={isGeneratingForum}
+                                className="w-full sm:w-auto px-4 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white rounded-xl font-black text-xs uppercase tracking-widest shadow-md flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+                            >
+                                {isGeneratingForum ? <i className="fa-solid fa-circle-notch fa-spin"></i> : <i className="fa-solid fa-wand-magic-sparkles"></i>}
+                                {isGeneratingForum ? "Simulando..." : "Simular Discussão (IA)"}
+                            </button>
+                        </div>
+                    </div>
+
+                    <div className="space-y-4 mb-6">
+                        <div className="flex flex-col md:flex-row gap-3">
+                            <div className="relative flex-1">
+                                <i className="fa-solid fa-magnifying-glass absolute left-4 top-1/2 -translate-y-1/2 text-zinc-400 text-sm"></i>
+                                <input 
+                                    type="text" 
+                                    placeholder="Pesquisar nos comentários do fórum..." 
+                                    value={searchTerm}
+                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                    className="w-full pl-10 pr-4 py-2.5 bg-white dark:bg-zinc-850 border border-zinc-200 dark:border-zinc-700 rounded-xl text-xs font-bold focus:ring-2 focus:ring-emerald-500 outline-none transition-all text-zinc-900 dark:text-zinc-100"
+                                />
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                                <label className="text-[10px] font-black uppercase text-zinc-400 tracking-wider">Ordenar por:</label>
+                                <select 
+                                    value={sortBy} 
+                                    onChange={(e) => setSortBy(e.target.value)}
+                                    className="px-3 py-2.5 bg-white dark:bg-zinc-850 border border-zinc-200 dark:border-zinc-700 rounded-xl text-xs font-bold outline-none cursor-pointer focus:ring-2 focus:ring-emerald-500 text-zinc-800 dark:text-zinc-200"
+                                >
+                                    <option value="useful">Mais Úteis</option>
+                                    <option value="recent">Mais Recentes</option>
+                                    <option value="oldest">Mais Antigos</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div className="flex flex-wrap gap-1.5">
+                            {Object.entries(tagCounts).map(([tag, count]) => {
+                                if (count === 0 && tag !== 'Todos') return null;
+                                const isActive = filterTag === tag;
+                                return (
+                                    <button 
+                                        key={tag}
+                                        type="button"
+                                        onClick={() => setFilterTag(tag)}
+                                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 border ${
+                                            isActive 
+                                                ? 'bg-emerald-600 border-emerald-500 text-white shadow-sm' 
+                                                : 'bg-white dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-500 hover:border-emerald-500'
+                                        }`}
+                                    >
+                                        <span>{tag}</span>
+                                        <span className={`px-1.5 py-0.5 rounded-full text-[9px] ${isActive ? 'bg-emerald-500 text-white' : 'bg-zinc-100 dark:bg-zinc-700 text-zinc-550'}`}>{count}</span>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </div>
+
+                    <div className="space-y-4 mb-8 max-h-[500px] overflow-y-auto pr-2 planner-scroll">
+                        {filteredComments.map(c => {
+                            const isUpvoted = userVotes[`${c.id}`] === 'up';
+                            const isDownvoted = userVotes[`${c.id}`] === 'down';
+                            const netScore = (c.upvotes || 0) - (c.downvotes || 0);
+
+                            return (
+                                <div key={c.id} className={`p-4 bg-white dark:bg-zinc-800/40 rounded-2xl border-l-4 border border-zinc-200 dark:border-zinc-700/50 shadow-sm flex flex-col gap-3 transition-all ${getTagColor(c.tag).split(' ')[0]}`}>
+                                    <div className="flex justify-between items-start">
+                                        <div className="flex items-center gap-3">
+                                            <div className="w-9 h-9 rounded-xl bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-sm shadow-inner shrink-0 border border-zinc-200/50 dark:border-zinc-700/50">
+                                                <i className={`fa-solid ${c.avatar} text-zinc-600 dark:text-zinc-350`}></i>
+                                            </div>
+                                            <div>
+                                                <div className="flex items-center gap-2 flex-wrap">
+                                                    <span className="font-black text-sm text-zinc-800 dark:text-white">{c.author}</span>
+                                                    <span className={`px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider border ${getTagColor(c.tag)}`}>{c.tag}</span>
+                                                </div>
+                                                <span className="text-[10px] text-zinc-400 font-bold">{c.timestamp}</span>
+                                            </div>
+                                        </div>
+                                        
+                                        <div className="flex items-center gap-2">
+                                            {c.author === 'Você' && (
+                                                <button 
+                                                    type="button"
+                                                    onClick={() => handleDeleteComment(c.id)}
+                                                    className="w-7 h-7 flex items-center justify-center text-zinc-400 hover:text-red-500 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-850 transition-colors"
+                                                    title="Excluir meu comentário"
+                                                >
+                                                    <i className="fa-solid fa-trash-can text-xs"></i>
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    <div className="pl-0 sm:pl-12 text-sm leading-relaxed text-justify-custom text-zinc-700 dark:text-zinc-200 whitespace-pre-wrap font-medium" dangerouslySetInnerHTML={renderMarkdown(c.content)}></div>
+
+                                    <div className="pl-0 sm:pl-12 flex flex-wrap items-center justify-between gap-4 mt-1 border-t border-zinc-100 dark:border-zinc-800/50 pt-2.5">
+                                        <div className="flex items-center gap-1 bg-zinc-50 dark:bg-zinc-800/60 p-0.5 rounded-lg border border-zinc-200/50 dark:border-zinc-700/50">
+                                            <button 
+                                                type="button"
+                                                onClick={() => handleVote(c.id, 'up')}
+                                                className={`w-7 h-7 flex items-center justify-center rounded-md transition-all ${isUpvoted ? 'text-emerald-500 bg-emerald-500/10 scale-105' : 'text-zinc-400 hover:text-emerald-500 hover:bg-zinc-100 dark:hover:bg-zinc-700/50'}`}
+                                            >
+                                                <i className="fa-solid fa-caret-up text-lg"></i>
+                                            </button>
+                                            <span className={`text-xs font-black px-1 min-w-[12px] text-center ${netScore > 0 ? 'text-emerald-500' : netScore < 0 ? 'text-rose-500' : 'text-zinc-400'}`}>
+                                                {netScore}
+                                            </span>
+                                            <button 
+                                                type="button"
+                                                onClick={() => handleVote(c.id, 'down')}
+                                                className={`w-7 h-7 flex items-center justify-center rounded-md transition-all ${isDownvoted ? 'text-rose-500 bg-rose-500/10 scale-105' : 'text-zinc-400 hover:text-rose-500 hover:bg-zinc-100 dark:hover:bg-zinc-700/50'}`}
+                                            >
+                                                <i className="fa-solid fa-caret-down text-lg"></i>
+                                            </button>
+                                        </div>
+
+                                        <div className="flex items-center gap-2">
+                                            <button 
+                                                type="button"
+                                                onClick={() => {
+                                                    if (replyingToId === c.id) {
+                                                        setReplyingToId(null);
+                                                    } else {
+                                                        setReplyingToId(c.id);
+                                                        setReplyText("");
+                                                    }
+                                                }}
+                                                className="px-3 py-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg text-xs font-bold text-zinc-500 hover:text-emerald-500 transition-colors flex items-center gap-1.5"
+                                            >
+                                                <i className="fa-solid fa-reply"></i> Responder
+                                            </button>
+                                            {c.author !== 'Mentor IA PRO' && !c.replies?.some(r => r.author === 'Mentor IA PRO') && (
+                                                <button 
+                                                    type="button"
+                                                    onClick={() => handleAiReplyToComment(c)}
+                                                    disabled={isAiReplyingCommentId === c.id}
+                                                    className="px-3 py-1.5 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg text-xs font-bold text-indigo-650 dark:text-indigo-400 hover:text-indigo-700 transition-colors flex items-center gap-1.5"
+                                                >
+                                                    {isAiReplyingCommentId === c.id ? <i className="fa-solid fa-spinner fa-spin animate-pulse"></i> : <i className="fa-solid fa-robot"></i>} Mentor IA
+                                                </button>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {c.replies && c.replies.length > 0 && (
+                                        <div className="pl-2 sm:pl-12 space-y-3 mt-3 border-l-2 border-dashed border-zinc-200 dark:border-zinc-800 ml-0 sm:ml-4">
+                                            {c.replies.map(r => {
+                                                const isReplyUp = userVotes[`${r.id}`] === 'up';
+                                                const isReplyDown = userVotes[`${r.id}`] === 'down';
+
+                                                return (
+                                                    <div key={r.id} className="p-3 bg-zinc-50/50 dark:bg-zinc-900/20 rounded-xl border border-zinc-150 dark:border-zinc-800 flex flex-col gap-2 relative">
+                                                        <div className="flex justify-between items-start">
+                                                            <div className="flex items-center gap-2">
+                                                                <div className="w-7 h-7 rounded-lg bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-xs shadow-inner shrink-0 border border-zinc-200/50 dark:border-zinc-700/50">
+                                                                    <i className={`fa-solid ${r.avatar}`}></i>
+                                                                </div>
+                                                                <div>
+                                                                    <div className="flex items-center gap-2 flex-wrap">
+                                                                        <span className="font-black text-xs text-zinc-800 dark:text-white">{r.author}</span>
+                                                                        {r.author === 'Mentor IA PRO' && <span className="px-1.5 py-0.5 bg-emerald-550/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/25 rounded-md text-[8px] font-black uppercase">IA Oficial</span>}
+                                                                    </div>
+                                                                    <span className="text-[9px] text-zinc-400 font-bold">{r.timestamp}</span>
+                                                                </div>
+                                                            </div>
+                                                            {r.author === 'Você' && (
+                                                                <button 
+                                                                    type="button"
+                                                                    onClick={() => handleDeleteComment(r.id, true, c.id)}
+                                                                    className="w-6 h-6 flex items-center justify-center text-zinc-400 hover:text-red-500 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-850 transition-colors"
+                                                                >
+                                                                    <i className="fa-solid fa-trash-can text-[10px]"></i>
+                                                                </button>
+                                                            )}
+                                                        </div>
+                                                        <div className="pl-9 text-xs leading-relaxed text-justify-custom text-zinc-600 dark:text-zinc-355 whitespace-pre-wrap font-medium" dangerouslySetInnerHTML={renderMarkdown(r.content)}></div>
+                                                        
+                                                        <div className="pl-9 flex items-center justify-start gap-3 mt-1 pt-1.5 border-t border-zinc-150/40 dark:border-zinc-800/40">
+                                                            <button 
+                                                                type="button"
+                                                                onClick={() => handleVote(r.id, 'up', true, c.id)}
+                                                                className={`text-[10px] flex items-center gap-1 font-bold ${isReplyUp ? 'text-emerald-500' : 'text-zinc-400 hover:text-emerald-500'}`}
+                                                            >
+                                                                <i className="fa-solid fa-thumbs-up"></i> {r.upvotes || 0}
+                                                            </button>
+                                                            <button 
+                                                                type="button"
+                                                                onClick={() => handleVote(r.id, 'down', true, c.id)}
+                                                                className={`text-[10px] flex items-center gap-1 font-bold ${isReplyDown ? 'text-rose-500' : 'text-zinc-400 hover:text-rose-500'}`}
+                                                            >
+                                                                <i className="fa-solid fa-thumbs-down"></i> {r.downvotes || 0}
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+
+                                    {replyingToId === c.id && (
+                                        <div className="pl-0 sm:pl-12 mt-2 animate-in slide-in-from-top-2 duration-200">
+                                            <div className="flex gap-2">
+                                                <input 
+                                                    type="text" 
+                                                    placeholder={`Responder a ${c.author}...`}
+                                                    value={replyText}
+                                                    onChange={(e) => setReplyText(e.target.value)}
+                                                    onKeyDown={(e) => {
+                                                        if (e.key === 'Enter') handleAddReply(c.id);
+                                                    }}
+                                                    className="flex-1 bg-zinc-50 dark:bg-zinc-850 border border-zinc-200 dark:border-zinc-700 rounded-xl px-4 py-2 text-xs font-bold text-zinc-850 dark:text-zinc-100 outline-none focus:ring-2 focus:ring-emerald-500"
+                                                />
+                                                <button 
+                                                    type="button"
+                                                    onClick={() => handleAddReply(c.id)}
+                                                    className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 rounded-xl text-xs font-black transition-colors flex items-center justify-center"
+                                                >
+                                                    Enviar
+                                                </button>
+                                                <button 
+                                                    type="button"
+                                                    onClick={() => setReplyingToId(null)}
+                                                    className="bg-zinc-105 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-500 dark:text-zinc-400 px-3 rounded-xl text-xs font-bold transition-colors"
+                                                >
+                                                    Cancelar
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            );
+                        })}
+
+                        {filteredComments.length === 0 && (
+                            <div className="py-12 text-center opacity-30">
+                                <i className="fa-regular fa-comment-dots text-4xl mb-3 block"></i>
+                                <p className="text-xs font-bold uppercase tracking-wider">Nenhum comentário encontrado</p>
+                                <p className="text-[10px] font-medium mt-1">Seja o primeiro a postar ou simule um debate clínico com a IA acima!</p>
+                            </div>
+                        )}
+                    </div>
+
+                    <form onSubmit={handleAddComment} className="border-t border-zinc-200 dark:border-zinc-800 pt-6 space-y-4">
+                        <div className="flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center">
+                            <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-[10px] font-black uppercase text-zinc-400 tracking-wider">Publicar como:</span>
+                                <button 
+                                    type="button" 
+                                    onClick={() => setAuthorType('user')}
+                                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${authorType === 'user' ? 'bg-emerald-650/10 border-emerald-500 text-emerald-600 dark:text-emerald-450' : 'bg-white dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-500'}`}
+                                >
+                                    <i className="fa-solid fa-user mr-1"></i> Você
+                                </button>
+                                <button 
+                                    type="button" 
+                                    onClick={() => setAuthorType('anon')}
+                                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${authorType === 'anon' ? 'bg-zinc-150 border-zinc-400 text-zinc-700 dark:bg-zinc-700 dark:border-zinc-500 dark:text-zinc-350' : 'bg-white dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-500'}`}
+                                >
+                                    <i className="fa-solid fa-user-secret mr-1"></i> Anônimo
+                                </button>
+                                <button 
+                                    type="button" 
+                                    onClick={() => setAuthorType('custom')}
+                                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border ${authorType === 'custom' ? 'bg-indigo-600/10 border-indigo-500 text-indigo-650 dark:text-indigo-400' : 'bg-white dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-500'}`}
+                                >
+                                    <i className="fa-solid fa-user-doctor mr-1"></i> Nome Customizado
+                                </button>
+                                {authorType === 'custom' && (
+                                    <input 
+                                        type="text" 
+                                        placeholder="Ex: Dr. Silva" 
+                                        value={customAuthorName} 
+                                        onChange={(e) => setCustomAuthorName(e.target.value)}
+                                        className="px-2.5 py-1.5 bg-white dark:bg-zinc-850 border border-indigo-200 dark:border-indigo-900 rounded-lg text-xs font-bold outline-none focus:ring-1 focus:ring-indigo-500 w-32 text-zinc-850 dark:text-zinc-100"
+                                    />
+                                )}
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-[10px] font-black uppercase text-zinc-400 tracking-wider">Tipo:</span>
+                                <div className="flex flex-wrap gap-1">
+                                    {["Dúvida", "Mnemônica", "Pegadinha", "Explicação", "Correção"].map(tag => (
+                                        <button 
+                                            key={tag}
+                                            type="button"
+                                            onClick={() => setCommentTag(tag)}
+                                            className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all border ${
+                                                commentTag === tag 
+                                                    ? getTagColor(tag) + ' shadow-sm scale-105' 
+                                                    : 'bg-white dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700 text-zinc-550 hover:border-zinc-300'
+                                            }`}
+                                        >
+                                            {tag}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700/80 rounded-2xl overflow-hidden focus-within:ring-2 focus-within:ring-emerald-500 transition-all shadow-inner">
+                            <div className="flex flex-wrap gap-1 bg-zinc-50 dark:bg-zinc-850/50 px-3 py-2 border-b border-zinc-200 dark:border-zinc-700">
+                                <button type="button" onClick={() => insertFormatting('bold')} className="w-8 h-8 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-550 dark:text-zinc-350 text-xs flex items-center justify-center" title="Negrito"><i className="fa-solid fa-bold"></i></button>
+                                <button type="button" onClick={() => insertFormatting('italic')} className="w-8 h-8 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-550 dark:text-zinc-355 text-xs flex items-center justify-center" title="Itálico"><i className="fa-solid fa-italic"></i></button>
+                                <button type="button" onClick={() => insertFormatting('code')} className="w-8 h-8 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-550 dark:text-zinc-355 text-xs flex items-center justify-center" title="Código"><i className="fa-solid fa-code"></i></button>
+                                <button type="button" onClick={() => insertFormatting('quote')} className="w-8 h-8 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-550 dark:text-zinc-355 text-xs flex items-center justify-center" title="Citação"><i className="fa-solid fa-quote-left"></i></button>
+                                <button type="button" onClick={() => insertFormatting('list')} className="w-8 h-8 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-550 dark:text-zinc-355 text-xs flex items-center justify-center" title="Lista de Tópicos"><i className="fa-solid fa-list-ul"></i></button>
+                                <button type="button" onClick={() => insertFormatting('link')} className="w-8 h-8 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-550 dark:text-zinc-355 text-xs flex items-center justify-center" title="Link"><i className="fa-solid fa-link"></i></button>
+                                <button type="button" onClick={() => insertFormatting('mnemonic')} className="px-2.5 h-8 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-550 dark:text-zinc-355 text-xs flex items-center justify-center gap-1 font-bold" title="Template de Mnemônica"><i className="fa-solid fa-lightbulb"></i> Mnemônica</button>
+                            </div>
+
+                            <textarea 
+                                id={`forum-textarea-${question.id}`}
+                                rows="3"
+                                value={newCommentText}
+                                onChange={(e) => setNewCommentText(e.target.value)}
+                                placeholder="Comente algo didático sobre a questão... (Dica: Use markdown e nossas ferramentas)"
+                                className="w-full p-4 bg-transparent resize-y outline-none text-zinc-800 dark:text-zinc-100 text-sm font-medium"
+                                maxLength="1000"
+                            ></textarea>
+                            
+                            <div className="flex justify-between items-center bg-zinc-50 dark:bg-zinc-850 px-4 py-2 border-t border-zinc-100 dark:border-zinc-700 text-[10px] text-zinc-400 font-bold">
+                                <span>{newCommentText.length} / 1000 caracteres</span>
+                                <button 
+                                    type="submit" 
+                                    disabled={!newCommentText.trim()}
+                                    className="px-6 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-black text-[10px] uppercase tracking-wider transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                                >
+                                    Publicar Comentário
+                                </button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            );
+        };
+
         const App = () => {
             // --- ESTADO INICIAL (DB) ---
             const [db, setDb] = useState(() => {
@@ -6592,7 +7343,8 @@ Retorne a resposta refinada em formato Markdown profissional e limpo. Retorne AP
                     darkMode: true,
                     simuladoPausado: null,
                     fluxogramas: [],
-                    desafiosDiarios: []
+                    desafiosDiarios: [],
+                    comments: {}
                 };
 
                 // Forçar "Zerar" se o usuário solicitou limpeza total (v7)
@@ -6613,6 +7365,7 @@ Retorne a resposta refinada em formato Markdown profissional e limpo. Retorne AP
                     if (saved) {
                         const parsed = JSON.parse(saved);
                         if (!parsed.desafiosDiarios) parsed.desafiosDiarios = [];
+                        if (!parsed.comments) parsed.comments = {};
 
                         // Restaurar imagens e dados limpos do window.__INITIAL_STATE__
                         if (window.__INITIAL_STATE__) {
@@ -7122,6 +7875,7 @@ Retorne a resposta refinada em formato Markdown profissional e limpo. Retorne AP
             const [sidebarOpen, setSidebarOpen] = useState(true);
             const [showForm, setShowForm] = useState(false);
             const [editingId, setEditingId] = useState(null);
+            const [expandedForums, setExpandedForums] = useState({});
             const [showSettings, setShowSettings] = useState(false);
             const [lightbox, setLightbox] = useState(null);
             const [dialog, setDialog] = useState({ isOpen: false, type: 'alert', message: '', onConfirm: null });
@@ -10411,10 +11165,44 @@ Estrutura esperada:
 
                                         <p className="text-sm opacity-80 mb-6 italic whitespace-pre-wrap leading-relaxed text-justify-custom text-zinc-800 dark:text-zinc-300">"{err.question}"</p>
                                         {err.image && <img src={err.image} className="max-h-48 rounded-xl border border-zinc-200 dark:border-zinc-700 mb-6 cursor-pointer hover:opacity-90 transition-opacity shadow-sm" onClick={() => setLightbox(err.image)} alt="Anexo" />}
-                                        <div className="bg-emerald-50 dark:bg-emerald-900/20 p-5 rounded-2xl border border-emerald-100 dark:border-emerald-800/50 text-emerald-900 dark:text-emerald-300 text-sm font-bold flex gap-4 shadow-inner">
+                                        <div className="bg-emerald-50 dark:bg-emerald-900/20 p-5 rounded-2xl border border-emerald-100 dark:border-emerald-800/50 text-emerald-900 dark:text-emerald-350 text-sm font-bold flex gap-4 shadow-inner">
                                             <div className="w-8 h-8 rounded-full bg-white dark:bg-emerald-800 flex items-center justify-center shrink-0 shadow-sm"><i className="fa-solid fa-lightbulb text-amber-500"></i></div>
                                             <span className="flex-1 leading-relaxed text-justify-custom pt-1">{err.lessonLearned}</span>
                                         </div>
+
+                                        {/* Botão Fórum de Discussão */}
+                                        <div className="mt-4 pt-4 border-t border-zinc-100 dark:border-zinc-800 flex justify-between items-center">
+                                            <button 
+                                                type="button"
+                                                onClick={(e) => {
+                                                    setExpandedForums(prev => ({
+                                                        ...prev,
+                                                        [err.id]: !prev[err.id]
+                                                    }));
+                                                }}
+                                                className="px-4 py-2 hover:bg-zinc-100 dark:hover:bg-zinc-800/80 rounded-xl text-xs font-black text-zinc-550 dark:text-zinc-400 hover:text-emerald-600 transition-all flex items-center gap-2"
+                                            >
+                                                <i className="fa-solid fa-comments text-base"></i> 
+                                                {expandedForums[err.id] ? "Fechar Fórum de Discussão" : "Abrir Fórum de Discussão"}
+                                                <span className="bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded-full text-[10px] font-bold text-zinc-500 dark:text-zinc-400">
+                                                    {(db.comments?.[err.id] || []).length}
+                                                </span>
+                                            </button>
+                                        </div>
+
+                                        {expandedForums[err.id] && (
+                                            <div className="mt-4 pt-4 border-t border-zinc-100 dark:border-zinc-800 animate-in slide-in-from-top-2 duration-300">
+                                                <QuestionForum 
+                                                    question={err} 
+                                                    db={db} 
+                                                    setDb={setDb} 
+                                                    callIA={callIA} 
+                                                    aiConfig={aiConfig} 
+                                                    showAlert={showAlert} 
+                                                    getPersonaInstruction={getPersonaInstruction}
+                                                />
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                             )
@@ -10803,6 +11591,27 @@ Estrutura esperada:
                                             </div>
                                         )}
                                         {/* ----------------------------- */}
+
+                                        {/* FÓRUM DE QUESTÕES AO ERRAR OU EM REVISÃO */}
+                                        {(showCol || !!res) && (
+                                            <div className="mb-8">
+                                                {res && !res.isCorrect && res.userAns !== 'Pulo' && (
+                                                    <div className="bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/50 rounded-2xl p-4 flex items-center gap-3 mb-4 text-rose-700 dark:text-rose-400 text-xs font-black shadow-sm animate-in fade-in duration-300">
+                                                        <div className="w-8 h-8 rounded-full bg-rose-100 dark:bg-rose-900/30 flex items-center justify-center text-sm shrink-0"><i className="fa-solid fa-triangle-exclamation"></i></div>
+                                                        <span>Você errou esta questão! O Fórum de Discussão foi liberado para você entender o erro com a comunidade e o Mentor IA.</span>
+                                                    </div>
+                                                )}
+                                                <QuestionForum 
+                                                    question={q} 
+                                                    db={db} 
+                                                    setDb={setDb} 
+                                                    callIA={callIA} 
+                                                    aiConfig={aiConfig} 
+                                                    showAlert={showAlert} 
+                                                    getPersonaInstruction={getPersonaInstruction}
+                                                />
+                                            </div>
+                                        )}
 
                                         <button onClick={advanceQuestion} className="w-full bg-emerald-600 text-white font-black py-5 rounded-2xl shadow-xl shadow-emerald-600/20 hover:bg-emerald-700 active:scale-95 transition-all text-lg flex justify-center items-center gap-3">
                                             {simulado.isReviewing ? 'Voltar aos Resultados' : (simulado.curIdx < simulado.deck.length - 1 ? 'Avançar para Próxima' : 'Ver Resultados Finais')} <i className="fa-solid fa-arrow-right"></i>
