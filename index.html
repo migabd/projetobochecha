@@ -2259,45 +2259,72 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
             const nodePositions = React.useMemo(() => {
                 if (!selectedFlow?.data?.nodes) return {};
                 
+                const nodes = selectedFlow.data.nodes;
+                const edges = selectedFlow.data.edges || [];
+
+                if (nodes.length === 0) return {};
+
+                // Build adjacency list and in-degree map
                 const adj = {};
                 const inDegree = {};
-                const nodes = selectedFlow.data.nodes;
-                const edges = selectedFlow.data.edges;
-                
                 nodes.forEach(n => {
                     adj[n.id] = [];
                     inDegree[n.id] = 0;
                 });
                 edges.forEach(e => {
-                    if (adj[e.from]) adj[e.from].push(e.to);
-                    if (inDegree[e.to] !== undefined) inDegree[e.to]++;
+                    // Guard against edges pointing to non-existent nodes
+                    if (adj[e.from] !== undefined && inDegree[e.to] !== undefined) {
+                        adj[e.from].push(e.to);
+                        inDegree[e.to]++;
+                    }
                 });
 
-                let startNodes = nodes.filter(n => inDegree[n.id] === 0 || n.type === 'start').map(n => n.id);
+                // Kahn's topological BFS — each node processed exactly once
+                // This handles cycles safely: cyclic nodes are never enqueued initially
+                // and get assigned a fallback level at the end.
+                let startNodes = nodes
+                    .filter(n => inDegree[n.id] === 0 || n.type === 'start')
+                    .map(n => n.id);
                 if (startNodes.length === 0 && nodes.length > 0) {
                     startNodes = [nodes[0].id];
                 }
 
                 const levels = {};
+                const visited = new Set();
                 const queue = [];
+
                 startNodes.forEach(id => {
-                    levels[id] = 0;
-                    queue.push(id);
+                    if (!visited.has(id)) {
+                        levels[id] = 0;
+                        visited.add(id);
+                        queue.push(id);
+                    }
                 });
 
-                // BFS to assign levels
-                while (queue.length > 0) {
+                // Safety cap: prevent any possible infinite loop
+                let safetyCounter = 0;
+                const MAX_ITERATIONS = nodes.length * nodes.length + 1000;
+
+                while (queue.length > 0 && safetyCounter < MAX_ITERATIONS) {
+                    safetyCounter++;
                     const u = queue.shift();
                     const currentLevel = levels[u] || 0;
                     const neighbors = adj[u] || [];
                     neighbors.forEach(v => {
-                        if (levels[v] === undefined || levels[v] < currentLevel + 1) {
+                        if (!visited.has(v)) {
+                            visited.add(v);
                             levels[v] = currentLevel + 1;
                             queue.push(v);
+                        } else if (levels[v] < currentLevel + 1) {
+                            // Already visited but this path is longer — update level
+                            // but do NOT re-enqueue (avoids cycle infinite loop).
+                            levels[v] = currentLevel + 1;
                         }
                     });
                 }
 
+                // Any node unreachable from start nodes (disconnected / only in cycles)
+                // gets assigned level 0 as a fallback.
                 nodes.forEach(n => {
                     if (levels[n.id] === undefined) levels[n.id] = 0;
                 });
@@ -8064,7 +8091,14 @@ Retorne apenas o texto da resposta, sem JSON ou tags explicativas.`;
                 isAiExplaining: false, 
                 isGeneratingFlashcards: false, 
                 crossedAlts: [], 
-                highlightedText: '' 
+                highlightedText: '',
+                cebraspeMode: false,
+                revealMode: 'end',
+                source: '',
+                streak: 0,
+                killAnim: null,
+                isAiChatting: false,
+                aiChatMessages: []
             });
             const [simQty, setSimQty] = useState(10);
             const [simUseSpaced, setSimUseSpaced] = useState(true);
@@ -8073,6 +8107,7 @@ Retorne apenas o texto da resposta, sem JSON ou tags explicativas.`;
             const [simTimerLimit, setSimTimerLimit] = useState(90);
             const [simTimerAutoAdvance, setSimTimerAutoAdvance] = useState(false);
             const [simTimerHide, setSimTimerHide] = useState(false);
+            const [simRevealMode, setSimRevealMode] = useState('end');
 
             // --- ESTADOS DE FILTRAGEM UNIFICADOS ---
             const [listFilters, setListFilters] = useState({ subj: [], exam: 'ALL', fac: 'ALL', tag: 'ALL' });
@@ -8472,7 +8507,19 @@ Retorne apenas o texto da resposta, sem JSON ou tags explicativas.`;
                     if (p.isReviewing) {
                         return { ...p, isReviewing: false, showResults: true, aiExplanation: '', isAiExplaining: false, crossedAlts: [], highlightedText: '' };
                     } else if (p.curIdx < p.deck.length - 1) {
-                        return { ...p, curIdx: p.curIdx + 1, showAns: false, selAlt: null, timeElapsed: p.timeSpentPerQuestion[p.curIdx + 1] || 0, aiExplanation: '', isAiExplaining: false, crossedAlts: [], highlightedText: '' };
+                        const nextIdx = p.curIdx + 1;
+                        const targetRes = p.results.find(r => String(r.id) === String(p.deck[nextIdx].id));
+                        return { 
+                            ...p, 
+                            curIdx: nextIdx, 
+                            showAns: p.revealMode === 'each' && !!targetRes, 
+                            selAlt: targetRes?.userAns || null, 
+                            timeElapsed: p.timeSpentPerQuestion[nextIdx] || 0, 
+                            aiExplanation: '', 
+                            isAiExplaining: false, 
+                            crossedAlts: [], 
+                            highlightedText: '' 
+                        };
                     } else {
                         setTimeout(() => finishSimulado(), 10);
                         return p;
@@ -9905,7 +9952,7 @@ ${safeScript}
                 return () => window.removeEventListener('keydown', handleKeyDown);
             }, [summaryLightbox, filteredSummaries]);
 
-            const clearDeck = () => setSimulado({ isActive: false, deck: [], curIdx: 0, showAns: false, selAlt: null, showResults: false, isReviewing: false, timeElapsed: 0, totalTimeElapsed: 0, isTimerPaused: false, timerMode: 'free', timerLimit: 60, timerAutoAdvance: false, timerHide: false, timeSpentPerQuestion: [], results: [], aiExplanation: '', isAiExplaining: false, isGeneratingFlashcards: false, crossedAlts: [], highlightedText: '', cebraspeMode: false, source: '' });
+            const clearDeck = () => setSimulado({ isActive: false, deck: [], curIdx: 0, showAns: false, selAlt: null, showResults: false, isReviewing: false, timeElapsed: 0, totalTimeElapsed: 0, isTimerPaused: false, timerMode: 'free', timerLimit: 60, timerAutoAdvance: false, timerHide: false, timeSpentPerQuestion: [], results: [], aiExplanation: '', isAiExplaining: false, isGeneratingFlashcards: false, crossedAlts: [], highlightedText: '', cebraspeMode: false, revealMode: 'end', source: '', streak: 0, killAnim: null, isAiChatting: false, aiChatMessages: [] });
 
             const generateDeck = (isQuick = false, forceSpaced = false, useListPool = false) => {
                 let pool = isQuick ? db.errors : (useListPool ? currentPool : simPool);
@@ -9972,6 +10019,7 @@ ${safeScript}
                     crossedAlts: [], 
                     highlightedText: '', 
                     cebraspeMode: simCebraspeMode, 
+                    revealMode: isQuick ? 'end' : simRevealMode,
                     source: useListPool ? 'lista' : 'simulados' 
                 });
                 window.scrollTo(0, 0);
@@ -10010,7 +10058,12 @@ ${safeScript}
                         crossedAlts: [], 
                         highlightedText: '', 
                         cebraspeMode: simCebraspeMode, 
-                        source: useListPool ? 'lista' : 'simulados' 
+                        revealMode: 'end',
+                        source: useListPool ? 'lista' : 'simulados',
+                        streak: 0,
+                        killAnim: null,
+                        isAiChatting: false,
+                        aiChatMessages: []
                     }
                 }));
 
@@ -10106,6 +10159,8 @@ ${safeScript}
 
                 setSimulado({
                     isActive: true,
+                    showAns: false,
+                    selAlt: null,
                     showResults: false,
                     isReviewing: true,
                     curIdx: 0,
@@ -10128,7 +10183,18 @@ ${safeScript}
                     timerAutoAdvance: sim.timerAutoAdvance || false,
                     timerHide: sim.timerHide || false,
                     cebraspeMode: sim.cebraspeMode || false,
-                    source: 'simulados'
+                    revealMode: 'end',
+                    source: 'simulados',
+                    streak: 0,
+                    killAnim: null,
+                    isAiChatting: false,
+                    aiChatMessages: [],
+                    aiExplanation: '',
+                    isAiExplaining: false,
+                    isGeneratingFlashcards: false,
+                    crossedAlts: [],
+                    highlightedText: '',
+                    timeElapsed: 0
                 });
                 setActiveTab('simulados');
                 window.scrollTo(0, 0);
@@ -10196,7 +10262,8 @@ ${safeScript}
                     return {
                         ...p,
                         streak: newStreak,
-                        killAnim: (isCorrect && newStreak > 0 && simulado.isReviewing) ? killAnim : p.killAnim,
+                        showAns: p.revealMode === 'each' ? true : p.showAns,
+                        killAnim: (isCorrect && newStreak > 0 && (p.isReviewing || p.revealMode === 'each')) ? killAnim : p.killAnim,
                         results: newResults
                     };
                 });
@@ -10362,6 +10429,62 @@ ${safeScript}
                     showAlert(`✅ ${newFlashcards.length} Flashcard(s) gerados${ankiMsg}`);
                 } else {
                     showAlert("❌ Falha ao gerar flashcards com a IA. Tente novamente.");
+                }
+                setSimulado(p => ({ ...p, isGeneratingFlashcards: false }));
+            };
+
+            const handleGenerateSingleFlashcard = async (questionId) => {
+                const q = simulado.deck.find(d => d.id === questionId) || db.errors.find(e => e.id === questionId);
+                if (!q) return;
+
+                setSimulado(p => ({ ...p, isGeneratingFlashcards: true }));
+
+                let cardDeckName = "CadernoMed::Banco Geral";
+                if (q.facId || (q.tags && q.tags.includes("Módulos da faculdade"))) {
+                    cardDeckName = `CadernoMed::Faculdade${q.facId ? '::' + q.facId : ''}`;
+                } else if (q.examId || (q.tags && q.tags.includes("Provas/Concursos"))) {
+                    cardDeckName = `CadernoMed::Residência${q.examId ? '::' + q.examId : ''}`;
+                }
+
+                const prompt = `Atue como um especialista em memorização médica. Crie UM flashcard direto e curto (Frente e Verso) focado EXATAMENTE no erro desta questão.\nTema: ${q.title}\nQuestão: ${q.question}\nLição que o aluno deve fixar: ${q.lessonLearned || ''}\n\nResponda APENAS em formato JSON estrito:\n{"front": "Pergunta curta e direta?", "back": "Resposta/Conceito chave explicativo."}`;
+
+                const aiRes = await callIA([{ role: 'user', parts: [{ text: prompt }] }]);
+                let generatedCard = null;
+                if (aiRes) {
+                    try {
+                        const clean = aiRes.replace(/```json/gi, '').replace(/```/g, '').trim();
+                        const parsed = JSON.parse(clean);
+                        if (parsed.front && parsed.back) {
+                            generatedCard = {
+                                id: Date.now() + Math.random(),
+                                front: parsed.front,
+                                back: parsed.back,
+                                qId: q.id,
+                                date: new Date().toLocaleDateString('pt-PT'),
+                                deckName: cardDeckName
+                            };
+                        }
+                    } catch (e) { console.error("Erro no parse do flashcard", e); }
+                }
+
+                if (generatedCard) {
+                    setDb(p => ({ ...p, flashcards: [generatedCard, ...(p.flashcards || [])] }));
+
+                    let ankiMsg = "";
+                    try {
+                        const ankiResult = await syncFlashcardsToAnki([generatedCard]);
+                        if (ankiResult.success) {
+                            ankiMsg = " e importado para o ANKI organizados por categoria!";
+                        } else {
+                            ankiMsg = ` (Erro Anki: ${ankiResult.error}).`;
+                        }
+                    } catch (e) {
+                        ankiMsg = " (Erro inesperado Anki).";
+                    }
+
+                    showAlert(`✅ Flashcard gerado${ankiMsg}`);
+                } else {
+                    showAlert("❌ Falha ao gerar flashcard com a IA. Tente novamente.");
                 }
                 setSimulado(p => ({ ...p, isGeneratingFlashcards: false }));
             };
@@ -11217,7 +11340,11 @@ Estrutura esperada:
                 const q = db.errors.find(e => e.id === baseQ.id) || baseQ;
                 
                 const res = simulado.results.find(r => String(r.id) === String(q.id));
-                const showCol = simulado.isReviewing;
+                const showCol = simulado.isReviewing || (simulado.revealMode === 'each' && (
+                    q.type === 'discursiva' 
+                        ? simulado.showAns 
+                        : (!!res || !!simulado.selAlt || simulado.showAns)
+                ));
 
                 const jumpToQuestion = (idx) => {
                     const dq = simulado.deck[idx];
@@ -11225,7 +11352,7 @@ Estrutura esperada:
                     setSimulado(p => ({
                         ...p,
                         curIdx: idx,
-                        showAns: p.isReviewing && !!targetRes,
+                        showAns: (p.isReviewing || p.revealMode === 'each') && !!targetRes,
                         selAlt: targetRes?.userAns || null,
                         aiExplanation: '',
                         isAiExplaining: false,
@@ -11474,7 +11601,7 @@ Estrutura esperada:
                                     </div>
                                 )}
 
-                                {(!res && !simulado.isReviewing && !simulado.selAlt) && (
+                                {(!res && !simulado.isReviewing && !simulado.selAlt && !simulado.showAns) && (
                                     <button onClick={() => { setSimulado(p => ({ ...p, selAlt: 'Pulo' })); recordAnswer(q.id, false, 'Pulo'); }} className="w-full mt-6 py-4 bg-zinc-100 dark:bg-zinc-800 rounded-2xl font-black text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors shadow-inner">Não sei a resposta (Pular)</button>
                                 )}
 
@@ -11489,7 +11616,7 @@ Estrutura esperada:
 
                                         {/* --- FERRAMENTAS DE FIXAÇÃO IA --- */}
                                         {showCol && !simulado.aiExplanation && !simulado.isAiExplaining && (
-                                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 mb-8">
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3 mb-8">
                                                 <button onClick={() => handleExplainSimuladoQuestion('explain')} className="bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800/50 text-indigo-700 dark:text-indigo-400 font-black py-4 px-2 rounded-2xl hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-all flex flex-col items-center justify-center gap-2 shadow-sm text-center">
                                                     <i className="fa-solid fa-chalkboard-user text-2xl ai-glow rounded-full"></i> <span className="text-xs uppercase tracking-widest">Professor IA</span>
                                                 </button>
@@ -11513,6 +11640,18 @@ Estrutura esperada:
                                                     });
                                                 }} className="bg-sky-50 dark:bg-sky-900/20 border border-sky-200 dark:border-sky-800/50 text-sky-700 dark:text-sky-400 font-black py-4 px-2 rounded-2xl hover:bg-sky-100 dark:hover:bg-sky-900/40 transition-all flex flex-col items-center justify-center gap-2 shadow-sm text-center">
                                                     <i className="fa-solid fa-comments text-2xl"></i> <span className="text-xs uppercase tracking-widest">Bate-Papo</span>
+                                                </button>
+                                                <button 
+                                                    onClick={() => handleGenerateSingleFlashcard(q.id)} 
+                                                    disabled={simulado.isGeneratingFlashcards}
+                                                    className="bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800/50 text-indigo-700 dark:text-indigo-400 font-black py-4 px-2 rounded-2xl hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-all flex flex-col items-center justify-center gap-2 shadow-sm text-center disabled:opacity-50 disabled:cursor-not-allowed"
+                                                >
+                                                    {simulado.isGeneratingFlashcards ? (
+                                                        <i className="fa-solid fa-circle-notch fa-spin text-2xl"></i>
+                                                    ) : (
+                                                        <i className="fa-solid fa-clone text-2xl"></i>
+                                                    )}
+                                                    <span className="text-xs uppercase tracking-widest">Flashcard</span>
                                                 </button>
                                             </div>
                                         )}
@@ -11593,7 +11732,7 @@ Estrutura esperada:
                                         {/* ----------------------------- */}
 
                                         {/* FÓRUM DE QUESTÕES AO ERRAR OU EM REVISÃO */}
-                                        {(showCol || !!res) && (
+                                        {showCol && (
                                             <div className="mb-8">
                                                 {res && !res.isCorrect && res.userAns !== 'Pulo' && (
                                                     <div className="bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/50 rounded-2xl p-4 flex items-center gap-3 mb-4 text-rose-700 dark:text-rose-400 text-xs font-black shadow-sm animate-in fade-in duration-300">
@@ -12165,6 +12304,39 @@ Estrutura esperada:
                                         </div>
                                         <div className={`w-8 h-8 rounded-full flex items-center justify-center shadow-sm transition-all ${simCebraspeMode ? 'bg-rose-600 text-white scale-110' : 'bg-zinc-300 dark:bg-zinc-700 text-transparent'}`}><i className="fa-solid fa-check"></i></div>
                                     </button>
+
+                                    {/* REVEAL MODE - Feedback imediato ou ao final */}
+                                    <div className="grid grid-cols-2 gap-3">
+                                        {[
+                                            { id: 'end', label: 'Modo Simulado', desc: 'Gabarito revelado ao final', icon: 'fa-solid fa-eye-slash', color: 'indigo' },
+                                            { id: 'each', label: 'Modo Aprendizado', desc: 'Feedback imediato por questão', icon: 'fa-solid fa-bolt', color: 'amber' }
+                                        ].map(mode => (
+                                            <button
+                                                key={mode.id}
+                                                type="button"
+                                                onClick={() => setSimRevealMode(mode.id)}
+                                                className={`p-4 rounded-2xl border-2 text-left transition-all flex flex-col gap-1 ${
+                                                    simRevealMode === mode.id
+                                                        ? mode.color === 'amber'
+                                                            ? 'bg-amber-50 border-amber-500 dark:bg-amber-900/20 dark:border-amber-500 shadow-md'
+                                                            : 'bg-indigo-50 border-indigo-500 dark:bg-indigo-900/20 dark:border-indigo-600 shadow-md'
+                                                        : 'bg-white dark:bg-zinc-900 border-zinc-100 dark:border-zinc-800'
+                                                }`}
+                                            >
+                                                <i className={`${mode.icon} text-lg ${
+                                                    simRevealMode === mode.id
+                                                        ? mode.color === 'amber' ? 'text-amber-500' : 'text-indigo-600'
+                                                        : 'text-zinc-400'
+                                                }`}></i>
+                                                <span className={`font-black text-sm block ${
+                                                    simRevealMode === mode.id
+                                                        ? mode.color === 'amber' ? 'text-amber-800 dark:text-amber-400' : 'text-indigo-800 dark:text-indigo-400'
+                                                        : 'text-zinc-600 dark:text-zinc-400'
+                                                }`}>{mode.label}</span>
+                                                <span className="text-[10px] font-bold text-zinc-500 leading-tight">{mode.desc}</span>
+                                            </button>
+                                        ))}
+                                    </div>
                                 </div>
 
                                 {/* CONFIGURAÇÃO DO CRONÔMETRO DE ALTO DESEMPENHO */}
