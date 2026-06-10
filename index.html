@@ -4579,7 +4579,7 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
         };
 
         // --- ABA DESAFIO CLÍNICO DIÁRIO ---
-        const DesafioDiarioTab = React.memo(({ db, setDb, callIA, aiConfig, availableModels, setActiveTab, onActiveChallengeChange }) => {
+        const DesafioDiarioTab = React.memo(({ db, setDb, callIA, aiConfig, availableModels, setActiveTab, onActiveChallengeChange, notionConfig, generateAndSendToNotion }) => {
             const [viewMode, setViewMode] = useState('dashboard');
             const [activeChallenge, setActiveChallenge] = useState(null);
             const [answer, setAnswer] = useState('');
@@ -5099,6 +5099,17 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
                         setActiveChallenge(updatedChallenge);
                     }
                     showLocalToast("Desafio avaliado com sucesso!", "success");
+
+                    // --- INTEGRAÇÃO NOTION: Enviar resumo de fisiopatologia se nota < 7 ---
+                    if (score < 7.0 && notionConfig?.enabled && notionConfig?.token && notionConfig?.dbId && notionConfig?.proxyUrl && generateAndSendToNotion) {
+                        showLocalToast("📚 Gerando resumo de fisiopatologia para o Notion...", "success");
+                        generateAndSendToNotion(updatedChallenge, evaluationResult)
+                            .then(() => showLocalToast("✅ Resumo de fisiopatologia enviado ao Notion!", "success"))
+                            .catch(err => {
+                                console.error("[Notion] Erro:", err);
+                                showLocalToast("❌ Falha ao enviar ao Notion: " + err.message, "error");
+                            });
+                    }
                 } catch (err) {
                     console.error("Erro na avaliação:", err);
                     setError("Erro ao avaliar: " + err.message);
@@ -7930,6 +7941,26 @@ Retorne apenas o texto da resposta, sem JSON ou tags explicativas.`;
                 localStorage.setItem('gemini_persona', aiConfig.persona);
             }, [aiConfig]);
 
+            // --- ESTADOS DA INTEGRAÇÃO NOTION ---
+            const [notionConfig, setNotionConfig] = useState({
+                token: localStorage.getItem('notion_token') || '',
+                dbId: localStorage.getItem('notion_db_id') || '',
+                proxyUrl: localStorage.getItem('notion_proxy_url') || '',
+                enabled: localStorage.getItem('notion_enabled') === 'true'
+            });
+
+            useEffect(() => {
+                if (notionConfig.token) localStorage.setItem('notion_token', notionConfig.token);
+                else localStorage.removeItem('notion_token');
+                if (notionConfig.dbId) localStorage.setItem('notion_db_id', notionConfig.dbId);
+                else localStorage.removeItem('notion_db_id');
+                if (notionConfig.proxyUrl) localStorage.setItem('notion_proxy_url', notionConfig.proxyUrl);
+                else localStorage.removeItem('notion_proxy_url');
+                localStorage.setItem('notion_enabled', notionConfig.enabled ? 'true' : 'false');
+            }, [notionConfig]);
+
+            const [notionSetupTab, setNotionSetupTab] = useState(1);
+
             const getPersonaInstruction = (persona, contextType = 'chat') => {
                 const personas = {
                     amigavel: {
@@ -9064,7 +9095,11 @@ ${safeScript}
                         'gemini_available_models',
                         'gemini_persona',
                         'forum_custom_author',
-                        'forum_user_votes'
+                        'forum_user_votes',
+                        'notion_token',
+                        'notion_db_id',
+                        'notion_proxy_url',
+                        'notion_enabled'
                     ];
                     keys.forEach(k => localStorage.removeItem(k));
 
@@ -9223,6 +9258,203 @@ ${safeScript}
                         }
                         return `[ERRO_API] ${e.message}`;
                     }
+                }
+            };
+
+            // ==========================================
+            // INTEGRAÇÃO NOTION — RESUMO DE FISIOPATOLOGIA
+            // ==========================================
+            const generateAndSendToNotion = async (challenge, evaluationResult) => {
+                if (!notionConfig.enabled || !notionConfig.token || !notionConfig.dbId || !notionConfig.proxyUrl) return;
+
+                const figureDescriptions = (challenge.figures || []).map((f, i) =>
+                    `Imagem ${i + 1} (${f.label}): ${f.caption || 'Sem legenda disponível'}`
+                ).join('\n');
+
+                const summaryPrompt = `Você é um Professor de Medicina de Elite especializado em Fisiopatologia. O estudante tirou nota ${evaluationResult.score.toFixed(1)}/10.0 em um desafio clínico e precisa de um resumo profundo e personalizado para estudar.
+
+CASO CLÍNICO DO DESAFIO:
+${challenge.caseReport}
+
+ESPECIALIDADE: ${challenge.specialty}
+
+IMAGENS DO CASO:
+${figureDescriptions || 'Nenhuma imagem disponível'}
+
+GABARITO DO CASO:
+- Diagnóstico Final: ${challenge.gabarito?.diagnostico_final || 'Não disponível'}
+- Pontos de Anamnese: ${challenge.gabarito?.pontos_anamnese || 'Não disponível'}
+- Pontos de Exame Físico: ${challenge.gabarito?.pontos_exame_fisico || 'Não disponível'}
+- Pontos de Raciocínio: ${challenge.gabarito?.pontos_raciocinio || 'Não disponível'}
+- Pontos de Conduta: ${challenge.gabarito?.pontos_conduta || 'Não disponível'}
+
+RESPOSTA DO ALUNO:
+${challenge.answer || 'Resposta não disponível'}
+
+AVALIAÇÃO:
+- Nota Final: ${evaluationResult.score.toFixed(1)}
+- Classificação: ${evaluationResult.classification}
+- D1 (Anamnese): ${evaluationResult.grades.d1} | D2 (Exame Físico): ${evaluationResult.grades.d2} | D3 (Raciocínio): ${evaluationResult.grades.d3} | D4 (Conduta): ${evaluationResult.grades.d4} | D5 (Comunicação): ${evaluationResult.grades.d5}
+- Comentário do Mentor: ${evaluationResult.comment}
+
+INSTRUÇÕES:
+Gere um resumo PROFUNDO e PERSONALIZADO para este caso clínico específico. O resumo deve ser em português brasileiro e seguir EXATAMENTE esta estrutura JSON:
+
+{
+  "titulo": "Fisiopatologia: [Nome da Doença Principal]",
+  "doenca": "[Nome da doença principal]",
+  "secoes": [
+    {
+      "heading": "📋 Caso Clínico Resumido",
+      "content": "[Resumo objetivo do caso clínico em 3-4 parágrafos, destacando os achados mais relevantes da anamnese, exame físico e exames complementares]"
+    },
+    {
+      "heading": "🔬 Fisiopatologia Profunda",
+      "content": "[Explicação detalhada dos mecanismos fisiopatológicos da doença: cascatas moleculares/celulares, alterações teciduais, mediadores inflamatórios, etc. Mínimo 4 parágrafos densos e técnicos]"
+    },
+    {
+      "heading": "🩺 Correlação Clínica — Por que o paciente apresentou esses achados?",
+      "content": "[Para CADA sinal e sintoma apresentado no caso, explicar qual mecanismo fisiopatológico o causou. Ex: 'A dispneia ocorre porque...' Mínimo 3 parágrafos]"
+    },
+    {
+      "heading": "🖼️ Análise das Imagens do Caso",
+      "content": "[Para CADA imagem/exame do caso: descrever detalhadamente os achados visíveis, o que representam do ponto de vista anatômico/patológico, e como se correlacionam com o diagnóstico. Se houver radiografia, TC, ECG etc., explicar cada achado técnico]"
+    },
+    {
+      "heading": "💊 Justificativa Fisiopatológica do Tratamento",
+      "content": "[Explicar POR QUE o tratamento indicado no gabarito é o correto do ponto de vista fisiopatológico. Qual mecanismo de ação do fármaco? Como ele interrompe a cascata patológica? Por que NÃO usar outras opções?]"
+    },
+    {
+      "heading": "⚠️ Análise dos Meus Erros",
+      "content": "[Analisar especificamente onde o aluno errou na resposta, comparando com o gabarito. Quais conceitos fisiopatológicos ele não dominou? O que deveria ter escrito diferente? Dicas práticas para não errar novamente]"
+    }
+  ]
+}
+
+Retorne APENAS o JSON válido, sem markdown ou texto extra.`;
+
+                try {
+                    const selectedModel = challenge.desafioDiarioModel || aiConfig.model || 'gemini-2.0-flash';
+                    const responseText = await callIA([
+                        { role: 'user', parts: [{ text: summaryPrompt }] }
+                    ], selectedModel);
+
+                    if (!responseText || responseText.startsWith('[ERRO')) {
+                        throw new Error('A IA não conseguiu gerar o resumo de fisiopatologia.');
+                    }
+
+                    const jsonString = responseText.replace(/```json|```/g, '').trim();
+                    const match = jsonString.match(/\{[\s\S]*\}/);
+                    if (!match) throw new Error('Resposta da IA não contém JSON válido.');
+
+                    let summaryData;
+                    try { summaryData = JSON.parse(match[0]); }
+                    catch (e) { summaryData = robustJSONParse(match[0]); }
+
+                    // --- Converter resumo em blocos Notion ---
+                    const notionChildren = [];
+
+                    // Callout de contexto
+                    notionChildren.push({
+                        object: 'block', type: 'callout',
+                        callout: {
+                            rich_text: [{ type: 'text', text: { content: `Nota: ${evaluationResult.score.toFixed(1)}/10 (${evaluationResult.classification}) — Especialidade: ${challenge.specialty} — ${new Date().toLocaleDateString('pt-BR')}` } }],
+                            icon: { type: 'emoji', emoji: '🧠' },
+                            color: evaluationResult.score < 4 ? 'red_background' : 'orange_background'
+                        }
+                    });
+
+                    notionChildren.push({ object: 'block', type: 'divider', divider: {} });
+
+                    // Seções do resumo
+                    for (const secao of (summaryData.secoes || [])) {
+                        // Heading
+                        notionChildren.push({
+                            object: 'block', type: 'heading_2',
+                            heading_2: { rich_text: [{ type: 'text', text: { content: secao.heading } }] }
+                        });
+
+                        // Content — quebrar em parágrafos (limite de 2000 chars por bloco Notion)
+                        const paragraphs = (secao.content || '').split('\n').filter(p => p.trim());
+                        for (const para of paragraphs) {
+                            // Notion API limita rich_text a 2000 chars
+                            const chunks = [];
+                            for (let i = 0; i < para.length; i += 1900) {
+                                chunks.push(para.substring(i, i + 1900));
+                            }
+                            for (const chunk of chunks) {
+                                notionChildren.push({
+                                    object: 'block', type: 'paragraph',
+                                    paragraph: { rich_text: [{ type: 'text', text: { content: chunk } }] }
+                                });
+                            }
+                        }
+
+                        // Inserir imagens após a seção de análise de imagens
+                        if (secao.heading.includes('Imagem') || secao.heading.includes('imagem') || secao.heading.includes('🖼')) {
+                            for (const fig of (challenge.figures || [])) {
+                                const imageUrl = fig.url;
+                                if (imageUrl && !imageUrl.startsWith('data:')) {
+                                    notionChildren.push({
+                                        object: 'block', type: 'image',
+                                        image: {
+                                            type: 'external',
+                                            external: { url: imageUrl },
+                                            caption: [{ type: 'text', text: { content: `${fig.label}${fig.caption ? ' — ' + fig.caption.substring(0, 200) : ''}` } }]
+                                        }
+                                    });
+                                }
+                            }
+                        }
+
+                        notionChildren.push({ object: 'block', type: 'divider', divider: {} });
+                    }
+
+                    // Rodapé com citação do artigo original
+                    if (challenge.citation) {
+                        notionChildren.push({
+                            object: 'block', type: 'quote',
+                            quote: { rich_text: [{ type: 'text', text: { content: `📖 Fonte: ${challenge.citation}` } }] }
+                        });
+                    }
+
+                    // --- Enviar ao Notion via proxy ---
+                    // Notion limita a 100 blocos por requisição
+                    const childrenToSend = notionChildren.slice(0, 100);
+
+                    const notionBody = {
+                        parent: { database_id: notionConfig.dbId },
+                        properties: {
+                            'Nome': { title: [{ text: { content: summaryData.titulo || `Fisiopatologia — ${challenge.specialty}` } }] },
+                            'Doença': { rich_text: [{ text: { content: (summaryData.doenca || challenge.gabarito?.diagnostico_final || challenge.specialty || '').substring(0, 200) } }] },
+                            'Especialidade': { select: { name: challenge.specialty || 'Geral' } },
+                            'Nota': { number: evaluationResult.score },
+                            'Data': { date: { start: new Date().toISOString().split('T')[0] } }
+                        },
+                        children: childrenToSend
+                    };
+
+                    const proxyUrl = notionConfig.proxyUrl.replace(/\/$/, '');
+                    const notionRes = await fetch(proxyUrl, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${notionConfig.token}`,
+                            'Notion-Version': '2022-06-28'
+                        },
+                        body: JSON.stringify(notionBody)
+                    });
+
+                    if (!notionRes.ok) {
+                        const errData = await notionRes.json().catch(() => ({}));
+                        throw new Error(errData.message || `Erro ${notionRes.status} ao criar página no Notion.`);
+                    }
+
+                    console.log('[Notion] Resumo de fisiopatologia enviado com sucesso!');
+                    return true;
+                } catch (err) {
+                    console.error('[Notion] Erro ao gerar/enviar resumo:', err);
+                    throw err;
                 }
             };
 
@@ -15495,7 +15727,7 @@ ${(obj.questoesAnalisadas || []).map(q => `### ${q.identificacao}
                     case 'resumos_html': return renderResumosHtmlTab();
                     case 'analise_reversa': return renderReverseAnalysisTab();
                     case 'fluxogramas': return <FluxogramasTab fluxogramas={db.fluxogramas} setDb={setDb} callIA={callIA} extractTextFromPDF={window.extractTextFromPDF || extractTextFromPDF} aiConfig={aiConfig} setAiConfig={setAiConfig} availableModels={availableModels} />;
-                    case 'desafio_diario': return <DesafioDiarioTab db={db} setDb={setDb} callIA={callIA} aiConfig={aiConfig} availableModels={availableModels} setActiveTab={setActiveTab} onActiveChallengeChange={setActiveChallengeInfo} />;
+                    case 'desafio_diario': return <DesafioDiarioTab db={db} setDb={setDb} callIA={callIA} aiConfig={aiConfig} availableModels={availableModels} setActiveTab={setActiveTab} onActiveChallengeChange={setActiveChallengeInfo} notionConfig={notionConfig} generateAndSendToNotion={generateAndSendToNotion} />;
                     default: return renderErrorList();
                 }
             };
@@ -15660,6 +15892,288 @@ ${(obj.questoesAnalisadas || []).map(q => `### ${q.identificacao}
                                         </div>
 
                                         <button onClick={testIA} disabled={isAiLoading} className="w-full py-4 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 rounded-2xl font-black text-sm shadow-sm hover:bg-emerald-200 dark:hover:bg-emerald-900/50 active:scale-95 transition-all disabled:opacity-50"><i className="fa-solid fa-wifi mr-2"></i> Testar Conexão com IA</button>
+                                    </section>
+
+                                    <section className="bg-violet-50 dark:bg-violet-900/10 p-6 rounded-3xl border border-violet-100 dark:border-violet-900/30 shadow-inner">
+                                        <div className="flex justify-between items-center mb-4">
+                                            <h3 className="text-xs font-black uppercase text-violet-600 dark:text-violet-400 tracking-widest"><i className="fa-solid fa-paper-plane mr-2"></i> Integração Notion</h3>
+                                            <label className="flex items-center gap-2 cursor-pointer select-none">
+                                                <span className={`text-[10px] font-black uppercase tracking-widest ${notionConfig.enabled ? 'text-violet-600 dark:text-violet-400' : 'text-zinc-400'}`}>{notionConfig.enabled ? 'Ativo' : 'Inativo'}</span>
+                                                <div
+                                                    onClick={() => setNotionConfig(p => ({ ...p, enabled: !p.enabled }))}
+                                                    className={`relative w-11 h-6 rounded-full transition-all cursor-pointer ${notionConfig.enabled ? 'bg-violet-500' : 'bg-zinc-300 dark:bg-zinc-700'}`}
+                                                >
+                                                    <div className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow-md transition-all ${notionConfig.enabled ? 'left-[22px]' : 'left-0.5'}`}></div>
+                                                </div>
+                                            </label>
+                                        </div>
+
+                                        <div className="bg-white/50 dark:bg-black/20 p-3 rounded-xl border border-violet-100/50 dark:border-violet-900/30 text-[10px] font-bold text-violet-600 dark:text-violet-400 leading-relaxed italic mb-4">
+                                            <i className="fa-solid fa-circle-info mr-1"></i> Quando você tira <strong>nota abaixo de 7</strong> no Desafio Clínico, a IA gera um resumo profundo de fisiopatologia com correlação clínica e envia direto para o seu Notion.
+                                        </div>
+
+                                        <div className="space-y-3">
+                                            <div>
+                                                <label className="block text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase mb-1">Token da Integração Notion</label>
+                                                <input type="password" autoComplete="new-password" value={notionConfig.token} onChange={e => setNotionConfig(p => ({ ...p, token: e.target.value }))} placeholder="ntn_xxxxxxxxxxxx ou secret_xxxxxxxxxxxx" className="w-full p-3 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl outline-none text-xs font-mono focus:border-violet-500 transition-colors" />
+                                            </div>
+                                            <div>
+                                                <label className="block text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase mb-1">Database ID do Notion</label>
+                                                <input type="text" value={notionConfig.dbId} onChange={e => setNotionConfig(p => ({ ...p, dbId: e.target.value }))} placeholder="32 caracteres hex (da URL do database)" className="w-full p-3 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl outline-none text-xs font-mono focus:border-violet-500 transition-colors" />
+                                            </div>
+                                            <div>
+                                                <label className="block text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase mb-1">URL do Proxy (Cloudflare Worker)</label>
+                                                <input type="text" value={notionConfig.proxyUrl} onChange={e => setNotionConfig(p => ({ ...p, proxyUrl: e.target.value }))} placeholder="https://notion-proxy.seuuser.workers.dev" className="w-full p-3 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl outline-none text-xs font-mono focus:border-violet-500 transition-colors" />
+                                            </div>
+
+                                            <button
+                                                onClick={async () => {
+                                                    if (!notionConfig.token || !notionConfig.proxyUrl) {
+                                                        showAlert("⚠️ Preencha o Token e a URL do Proxy para testar.");
+                                                        return;
+                                                    }
+                                                    try {
+                                                        const testUrl = notionConfig.proxyUrl.replace(/\/$/, '');
+                                                        const res = await fetch(testUrl, {
+                                                            method: 'POST',
+                                                            headers: {
+                                                                'Content-Type': 'application/json',
+                                                                'Authorization': `Bearer ${notionConfig.token}`,
+                                                                'Notion-Version': '2022-06-28'
+                                                            },
+                                                            body: JSON.stringify({
+                                                                parent: { database_id: notionConfig.dbId || 'test' },
+                                                                properties: {}
+                                                            })
+                                                        });
+                                                        if (res.status === 401) {
+                                                            showAlert("❌ Token inválido. Verifique seu Internal Integration Token do Notion.");
+                                                        } else if (res.status === 404) {
+                                                            showAlert("⚠️ Proxy respondeu, mas o Database ID pode estar incorreto ou a integração não foi conectada ao banco de dados. Verifique as conexões no Notion.");
+                                                        } else if (res.status === 400) {
+                                                            showAlert("✅ Conexão com o Notion estabelecida com sucesso! O proxy está funcionando. (Erro 400 é esperado pois não enviamos dados completos no teste)");
+                                                        } else if (res.ok) {
+                                                            showAlert("✅ Conexão com o Notion está funcionando perfeitamente!");
+                                                        } else {
+                                                            const errData = await res.json().catch(() => ({}));
+                                                            showAlert(`⚠️ Resposta ${res.status}: ${errData.message || 'Erro desconhecido'}`);
+                                                        }
+                                                    } catch (err) {
+                                                        showAlert("❌ Não foi possível conectar ao proxy: " + err.message + ". Verifique se a URL está correta e o Worker está ativo.");
+                                                    }
+                                                }}
+                                                className="w-full py-3 bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-400 rounded-2xl font-black text-sm shadow-sm hover:bg-violet-200 dark:hover:bg-violet-900/50 active:scale-95 transition-all flex items-center justify-center gap-2"
+                                            >
+                                                <i className="fa-solid fa-plug"></i> Testar Conexão com Notion
+                                            </button>
+
+                                            {/* Guia Visual de Configuração Passo a Passo */}
+                                            <div className="mt-4 border-t border-violet-100 dark:border-violet-900/30 pt-4">
+                                                <div className="flex gap-1 bg-violet-100/50 dark:bg-black/30 p-1 rounded-xl mb-3">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setNotionSetupTab(1)}
+                                                        className={`flex-1 py-1.5 text-[9px] font-black uppercase tracking-wider rounded-lg transition-all ${notionSetupTab === 1 ? 'bg-white dark:bg-zinc-800 text-violet-600 dark:text-violet-400 shadow-sm' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
+                                                    >
+                                                        Passo 1: Token
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setNotionSetupTab(2)}
+                                                        className={`flex-1 py-1.5 text-[9px] font-black uppercase tracking-wider rounded-lg transition-all ${notionSetupTab === 2 ? 'bg-white dark:bg-zinc-800 text-violet-600 dark:text-violet-400 shadow-sm' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
+                                                    >
+                                                        Passo 2: Banco 💎
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setNotionSetupTab(3)}
+                                                        className={`flex-1 py-1.5 text-[9px] font-black uppercase tracking-wider rounded-lg transition-all ${notionSetupTab === 3 ? 'bg-white dark:bg-zinc-800 text-violet-600 dark:text-violet-400 shadow-sm' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
+                                                    >
+                                                        Passo 3: Proxy 🌐
+                                                    </button>
+                                                </div>
+
+                                                <div className="space-y-3 text-[11px] text-zinc-600 dark:text-zinc-400 leading-relaxed bg-white/60 dark:bg-black/20 p-4 rounded-2xl border border-violet-100/50 dark:border-violet-900/30">
+                                                    {notionSetupTab === 1 && (
+                                                        <div className="space-y-2" style={{ animation: 'fadeIn 0.2s ease-out' }}>
+                                                            <h4 className="font-black text-violet-600 dark:text-violet-400 uppercase text-[10px] flex items-center gap-1">
+                                                                <i className="fa-solid fa-key"></i> 1. Criar Integração no Notion
+                                                            </h4>
+                                                            <p>Para o app conversar com o seu Notion, você precisa criar uma chave de integração.</p>
+                                                            <ol className="list-decimal list-inside space-y-1 pl-1 text-[10.5px]">
+                                                                <li>Acesse <a href="https://www.notion.so/my-integrations" target="_blank" rel="noopener noreferrer" className="text-violet-500 hover:underline font-bold inline-flex items-center gap-0.5">notion.so/my-integrations <i className="fa-solid fa-arrow-up-right-from-square text-[8px]"></i></a></li>
+                                                                <li>Clique em <strong>"+ Nova Integração"</strong> (New integration)</li>
+                                                                <li>Dê o nome de <code>Caderno IA PRO</code> e escolha seu espaço de trabalho (Workspace)</li>
+                                                                <li>Nas capacidades (Capabilities), certifique-se de que <strong>"Read"</strong>, <strong>"Insert"</strong> e <strong>"Update"</strong> estejam marcadas</li>
+                                                                <li>Salva e copie o <strong>"Internal Integration Token"</strong> gerado</li>
+                                                                <li>Cole no campo <strong>"Token da Integração"</strong> acima!</li>
+                                                            </ol>
+                                                        </div>
+                                                    )}
+
+                                                    {notionSetupTab === 2 && (
+                                                        <div className="space-y-3" style={{ animation: 'fadeIn 0.2s ease-out' }}>
+                                                            <h4 className="font-black text-violet-600 dark:text-violet-400 uppercase text-[10px] flex items-center gap-1">
+                                                                <i className="fa-solid fa-table"></i> 2. Criar Banco de Dados no Notion
+                                                            </h4>
+                                                            <p>Crie uma nova página e adicione um <strong>Banco de Dados (Tabela)</strong> com estas colunas exatas (sensível a maiúsculas/minúsculas e acentos):</p>
+                                                            
+                                                            {/* Mockup da Tabela Notion */}
+                                                            <div className="overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-850 bg-white dark:bg-zinc-950 font-sans shadow-inner my-2">
+                                                                <table className="w-full text-left border-collapse text-[10px]">
+                                                                    <thead>
+                                                                        <tr className="bg-zinc-50 dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 text-zinc-500 dark:text-zinc-400 font-semibold select-none">
+                                                                            <th className="p-2 border-r border-zinc-200 dark:border-zinc-805 min-w-[120px]">
+                                                                                <span className="inline-flex items-center gap-1.5"><i className="fa-solid fa-font text-zinc-400 text-[9px]"></i> Nome <span className="text-[7.5px] bg-zinc-200/60 dark:bg-zinc-800 px-1 rounded text-zinc-600 dark:text-zinc-300 font-mono font-normal">Título</span></span>
+                                                                            </th>
+                                                                            <th className="p-2 border-r border-zinc-200 dark:border-zinc-805 min-w-[100px]">
+                                                                                <span className="inline-flex items-center gap-1.5"><i className="fa-solid fa-align-left text-zinc-400 text-[9px]"></i> Doença <span className="text-[7.5px] bg-zinc-200/60 dark:bg-zinc-800 px-1 rounded text-zinc-600 dark:text-zinc-300 font-mono font-normal">Texto</span></span>
+                                                                            </th>
+                                                                            <th className="p-2 border-r border-zinc-200 dark:border-zinc-805 min-w-[110px]">
+                                                                                <span className="inline-flex items-center gap-1.5"><i className="fa-solid fa-chevron-down text-zinc-400 text-[9px]"></i> Especialidade <span className="text-[7.5px] bg-zinc-200/60 dark:bg-zinc-800 px-1 rounded text-zinc-600 dark:text-zinc-300 font-mono font-normal">Seleção</span></span>
+                                                                            </th>
+                                                                            <th className="p-2 border-r border-zinc-200 dark:border-zinc-805 min-w-[70px]">
+                                                                                <span className="inline-flex items-center gap-1.5"><i className="fa-solid fa-hashtag text-zinc-400 text-[9px]"></i> Nota <span className="text-[7.5px] bg-zinc-200/60 dark:bg-zinc-800 px-1 rounded text-zinc-600 dark:text-zinc-300 font-mono font-normal">Número</span></span>
+                                                                            </th>
+                                                                            <th className="p-2 min-w-[95px]">
+                                                                                <span className="inline-flex items-center gap-1.5"><i className="fa-regular fa-calendar text-zinc-400 text-[9px]"></i> Data <span className="text-[7.5px] bg-zinc-200/60 dark:bg-zinc-800 px-1 rounded text-zinc-600 dark:text-zinc-300 font-mono font-normal">Data</span></span>
+                                                                            </th>
+                                                                        </tr>
+                                                                    </thead>
+                                                                    <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800 text-zinc-700 dark:text-zinc-300">
+                                                                        <tr className="hover:bg-zinc-50/50 dark:hover:bg-zinc-900/30">
+                                                                            <td className="p-2 border-r border-zinc-200 dark:border-zinc-800 font-semibold text-violet-600 dark:text-violet-400 truncate max-w-[120px]">Fisiopatologia: Apendicite Aguda...</td>
+                                                                            <td className="p-2 border-r border-zinc-200 dark:border-zinc-800 truncate max-w-[100px]">Apendicite Aguda</td>
+                                                                            <td className="p-2 border-r border-zinc-200 dark:border-zinc-800">
+                                                                                <span className="px-1.5 py-0.5 rounded-full bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300 text-[8.5px] font-bold">Cirurgia Geral</span>
+                                                                            </td>
+                                                                            <td className="p-2 border-r border-zinc-200 dark:border-zinc-800 font-mono font-bold text-red-500">6.0</td>
+                                                                            <td className="p-2 font-mono text-[9px] text-zinc-500 dark:text-zinc-400">2026/06/10</td>
+                                                                        </tr>
+                                                                    </tbody>
+                                                                </table>
+                                                            </div>
+
+                                                            <div className="space-y-2.5 text-[10.5px]">
+                                                                <div className="bg-amber-500/10 dark:bg-amber-500/5 border border-amber-500/20 rounded-xl p-2.5 text-amber-700 dark:text-amber-400 text-[10px] font-medium leading-normal">
+                                                                    <i className="fa-solid fa-triangle-exclamation mr-1 text-amber-500"></i>
+                                                                    <strong>ATENÇÃO:</strong> Digite os nomes exatos das colunas (inclusive acentos). O tipo da coluna no Notion deve ser o indicado abaixo do nome (ex: Título, Texto, Seleção, etc.).
+                                                                </div>
+                                                                <div>
+                                                                    <span className="font-bold text-zinc-700 dark:text-zinc-300">🔌 Conectar a Integração ao Banco de Dados:</span>
+                                                                    <p className="mt-0.5">Abra seu Banco de Dados no Notion → clique nos <code>⋯</code> (canto superior direito) → <strong>Adicionar conexões</strong> (Add connections) → procure por <code>Caderno IA PRO</code> e conecte-o.</p>
+                                                                </div>
+                                                                <div>
+                                                                    <span className="font-bold text-zinc-700 dark:text-zinc-300">🔑 Onde pegar o Database ID:</span>
+                                                                    <p className="mt-0.5">Abra o Banco de Dados no navegador. O ID está na URL da página, entre o último `/` e o ponto de interrogação `?`:</p>
+                                                                    <div className="bg-zinc-900 text-zinc-305 p-2.5 rounded-xl font-mono text-[9px] overflow-x-auto border border-zinc-800 mt-1.5 select-all leading-normal whitespace-nowrap">
+                                                                        <span className="text-zinc-500">https://www.notion.so/seu_workspace/</span>
+                                                                        <span className="text-amber-400 border border-dashed border-amber-500/50 bg-amber-500/10 px-1 py-0.5 rounded font-black inline-block animate-pulse">
+                                                                            8f972b217a804791b8d28a50616b23f8
+                                                                        </span>
+                                                                        <span className="text-zinc-500">?v=3c5d6e7f...</span>
+                                                                    </div>
+                                                                    <p className="mt-1 text-[9.5px] italic text-zinc-500">Copie apenas essa sequência de 32 caracteres (marcada em amarelo) e cole no campo correspondente acima.</p>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    )}
+
+                                                    {notionSetupTab === 3 && (
+                                                        <div className="space-y-3" style={{ animation: 'fadeIn 0.2s ease-out' }}>
+                                                            <h4 className="font-black text-violet-600 dark:text-violet-400 uppercase text-[10px] flex items-center gap-1">
+                                                                <i className="fa-solid fa-cloud"></i> 3. Criar Proxy CORS (Cloudflare Worker)
+                                                            </h4>
+                                                            <p>O Notion bloqueia requisições vindas de navegadores por segurança (CORS). Precisamos de um intermediário gratuito na Cloudflare.</p>
+                                                            <ol className="list-decimal list-inside space-y-1 pl-1 text-[10.5px]">
+                                                                <li>Acesse <a href="https://dash.cloudflare.com" target="_blank" rel="noopener noreferrer" className="text-violet-500 hover:underline font-bold inline-flex items-center gap-0.5">dash.cloudflare.com <i className="fa-solid fa-arrow-up-right-from-square text-[8px]"></i></a> e crie uma conta grátis.</li>
+                                                                <li>Vá em <strong>"Workers & Pages"</strong> → <strong>"Create Application"</strong> → <strong>"Create Worker"</strong>.</li>
+                                                                <li>Dê o nome <code>notion-proxy</code> e clique em <strong>Deploy</strong>.</li>
+                                                                <li>Clique em <strong>"Edit Code"</strong>, apague tudo o que estiver lá e cole o código abaixo:</li>
+                                                            </ol>
+
+                                                            <div className="relative">
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        navigator.clipboard.writeText(`export default {
+  async fetch(request) {
+    if (request.method === 'OPTIONS') {
+      return new Response(null, {
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'POST, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type, Authorization, Notion-Version',
+        }
+      });
+    }
+    const body = await request.text();
+    const notionRes = await fetch('https://api.notion.com/v1/pages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': request.headers.get('Authorization'),
+        'Notion-Version': '2022-06-28',
+      },
+      body
+    });
+    const data = await notionRes.text();
+    return new Response(data, {
+      status: notionRes.status,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+      }
+    });
+  }
+};`);
+                                                                        showAlert("✅ Código do Worker copiado com sucesso!");
+                                                                    }}
+                                                                    className="absolute top-2 right-2 px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white rounded-lg text-[9px] font-black uppercase tracking-wider transition-all flex items-center gap-1 shadow-md z-10"
+                                                                >
+                                                                    <i className="fa-regular fa-copy"></i> Copiar Código
+                                                                </button>
+                                                                <pre className="bg-zinc-900 text-emerald-400 p-3 pt-9 rounded-xl text-[9.5px] overflow-x-auto leading-relaxed select-all whitespace-pre-wrap max-h-[150px] border border-zinc-800 font-mono shadow-inner">
+{`export default {
+  async fetch(request) {
+    if (request.method === 'OPTIONS') {
+      return new Response(null, {
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'POST, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type, Authorization, Notion-Version',
+        }
+      });
+    }
+    const body = await request.text();
+    const notionRes = await fetch('https://api.notion.com/v1/pages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': request.headers.get('Authorization'),
+        'Notion-Version': '2022-06-28',
+      },
+      body
+    });
+    const data = await notionRes.text();
+    return new Response(data, {
+      status: notionRes.status,
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*',
+      }
+    });
+  }
+};`}
+                                                                </pre>
+                                                            </div>
+                                                            <p className="text-[10.5px]">5. Clique em <strong>"Deploy"</strong> no canto superior direito.</p>
+                                                            <p className="text-[10.5px]">6. Copie a URL do seu Worker (ela se parece com <code>https://notion-proxy.seu-usuario.workers.dev</code>) e cole no campo <strong>"URL do Proxy"</strong> acima!</p>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
                                     </section>
 
                                     <section className="bg-indigo-50 dark:bg-indigo-900/10 p-6 rounded-3xl border border-indigo-100 dark:border-indigo-900/30 shadow-inner">
