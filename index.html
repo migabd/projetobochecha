@@ -9488,46 +9488,58 @@ Gere um resumo PROFUNDO e PERSONALIZADO para este caso clínico. O resumo deve s
                                         const urlParts = imageUrl.split('/');
                                         const fileName = urlParts[urlParts.length - 1];
 
-                                        let finalImageUrl = imageUrl;
+                                        let finalImageUrl = null;
                                         
-                                        // Tentar fazer o upload da imagem base64 (se disponível) para o Catbox através do Worker
+                                        // Tentar fazer upload da imagem base64 via Worker
                                         if (fig.dataUrl) {
                                             try {
-                                                console.log('[Notion] Fazendo upload de imagem para o Catbox via Worker...', fileName);
+                                                console.log('[Notion] 📤 Upload de imagem via Worker...', fileName);
                                                 const uploadRes = await fetch(`${cleanProxyUrl}/upload-image`, {
                                                     method: 'POST',
                                                     headers: { 'Content-Type': 'application/json' },
                                                     body: JSON.stringify({ image: fig.dataUrl, filename: fileName })
                                                 });
+                                                const uploadText = await uploadRes.text();
+                                                console.log('[Notion] 📥 Worker respondeu:', uploadRes.status, uploadText.substring(0, 300));
                                                 if (uploadRes.ok) {
-                                                    const uploadData = await uploadRes.json();
-                                                    if (uploadData.url) {
-                                                        finalImageUrl = uploadData.url;
-                                                        console.log('[Notion] Upload com sucesso! URL:', finalImageUrl);
+                                                    try {
+                                                        const uploadData = JSON.parse(uploadText);
+                                                        if (uploadData.url && uploadData.url.startsWith('http')) {
+                                                            finalImageUrl = uploadData.url;
+                                                            console.log('[Notion] ✅ Upload OK! URL:', finalImageUrl);
+                                                        }
+                                                    } catch (e) {
+                                                        console.warn('[Notion] ⚠️ Resposta não-JSON:', uploadText.substring(0, 200));
                                                     }
                                                 } else {
-                                                    const errText = await uploadRes.text();
-                                                    console.warn('[Notion] Resposta de falha do upload:', errText);
+                                                    console.warn('[Notion] ❌ Worker erro:', uploadRes.status);
                                                 }
                                             } catch (upErr) {
-                                                console.warn('[Notion] Erro ao tentar upload de imagem:', upErr);
+                                                console.warn('[Notion] ❌ Erro de rede:', upErr.message);
                                             }
+                                        } else {
+                                            console.warn('[Notion] ⚠️ Sem dataUrl para:', fileName);
                                         }
 
-                                        // Se falhar o upload do dataUrl, usa o fallback legado /image/...
-                                        if (finalImageUrl === imageUrl) {
-                                            const path = imageUrl.replace(/^https?:\/\/europepmc\.org\/articles\//, '');
-                                            finalImageUrl = `${cleanProxyUrl}/image/${path}`;
+                                        if (finalImageUrl) {
+                                            notionChildren.push({
+                                                object: 'block', type: 'image',
+                                                image: {
+                                                    type: 'external',
+                                                    external: { url: finalImageUrl },
+                                                    caption: [{ type: 'text', text: { content: captionText } }]
+                                                }
+                                            });
+                                        } else {
+                                            notionChildren.push({
+                                                object: 'block', type: 'callout',
+                                                callout: {
+                                                    rich_text: [{ type: 'text', text: { content: `📷 ${fig.label || 'Imagem'}: Upload falhou. Ver original: ${imageUrl}` } }],
+                                                    icon: { type: 'emoji', emoji: '🖼️' },
+                                                    color: 'gray_background'
+                                                }
+                                            });
                                         }
-
-                                        notionChildren.push({
-                                            object: 'block', type: 'image',
-                                            image: {
-                                                type: 'external',
-                                                external: { url: finalImageUrl },
-                                                caption: [{ type: 'text', text: { content: captionText } }]
-                                            }
-                                        });
                                     } catch (imgErr) {
                                         console.warn('[Notion] Erro ao adicionar imagem:', imgErr);
                                     }
@@ -16241,111 +16253,45 @@ ${(obj.questoesAnalisadas || []).map(q => `### ${q.identificacao}
   async fetch(request) {
     const urlObj = new URL(request.url);
     const pathName = urlObj.pathname;
-
-    // OPTIONS preflight request
-    if (request.method === 'OPTIONS') {
-      return new Response(null, {
-        headers: {
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type, Authorization, Notion-Version',
-        }
-      });
-    }
-
-    // Proxy de Upload de Imagem (base64 -> Catbox)
+    const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, GET, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Authorization, Notion-Version' };
+    if (request.method === 'OPTIONS') return new Response(null, { headers: cors });
     if (request.method === 'POST' && pathName === '/upload-image') {
       try {
         const { image, filename } = await request.json();
-        if (!image) {
-          return new Response(JSON.stringify({ error: 'Nenhuma imagem fornecida' }), {
-            status: 400,
-            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-          });
+        if (!image) return new Response(JSON.stringify({ error: 'No image' }), { status: 400, headers: { 'Content-Type': 'application/json', ...cors } });
+        const b64 = image.replace(/^data:image\\/\\w+;base64,/, '');
+        const bin = atob(b64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        const mime = filename.endsWith('.png') ? 'image/png' : 'image/jpeg';
+        const blob = new Blob([bytes], { type: mime });
+        const fd = new FormData();
+        fd.append('file', blob, filename);
+        const tRes = await fetch('https://telegra.ph/upload', { method: 'POST', body: fd });
+        const tData = await tRes.json();
+        if (Array.isArray(tData) && tData[0]?.src) {
+          return new Response(JSON.stringify({ url: 'https://telegra.ph' + tData[0].src }), { status: 200, headers: { 'Content-Type': 'application/json', ...cors } });
         }
-
-        const mimeType = filename.endsWith('.png') ? 'image/png' : 'image/jpeg';
-        const base64Data = image.replace(/^data:image\\/\\w+;base64,/, '');
-        
-        // Converter base64 para binário usando Uint8Array e charCodeAt
-        const byteCharacters = atob(base64Data);
-        const byteNumbers = new Array(byteCharacters.length);
-        for (let i = 0; i < byteCharacters.length; i++) {
-          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        const fd2 = new FormData();
+        fd2.append('file', blob, filename);
+        const zRes = await fetch('https://0x0.st', { method: 'POST', body: fd2 });
+        const zUrl = (await zRes.text()).trim();
+        if (zUrl.startsWith('http')) {
+          return new Response(JSON.stringify({ url: zUrl }), { status: 200, headers: { 'Content-Type': 'application/json', ...cors } });
         }
-        const byteArray = new Uint8Array(byteNumbers);
-        const blob = new Blob([byteArray], { type: mimeType });
-
-        // Enviar para o Catbox
-        const formData = new FormData();
-        formData.append('reqtype', 'fileupload');
-        formData.append('fileToUpload', blob, filename);
-
-        const catboxRes = await fetch('https://catbox.moe/user/api.php', {
-          method: 'POST',
-          body: formData
-        });
-
-        const catboxUrl = await catboxRes.text();
-        const urlStr = catboxUrl.trim();
-        
-        if (urlStr.startsWith('https://files.catbox.moe/')) {
-          return new Response(JSON.stringify({ url: urlStr }), {
-            status: 200,
-            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-          });
-        } else {
-          return new Response(JSON.stringify({ error: 'Falha no Catbox: ' + urlStr }), {
-            status: 500,
-            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-          });
-        }
+        return new Response(JSON.stringify({ error: 'All hosts failed' }), { status: 500, headers: { 'Content-Type': 'application/json', ...cors } });
       } catch (err) {
-        return new Response(JSON.stringify({ error: 'Erro no upload: ' + err.message }), {
-          status: 500,
-          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-        });
+        return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { 'Content-Type': 'application/json', ...cors } });
       }
     }
-
-    // Se for uma requisição GET para /image/...
-    if (request.method === 'GET' && pathName.startsWith('/image/')) {
-      const remainingPath = pathName.substring(7); // remove '/image/'
-      const targetUrl = \`https://europepmc.org/articles/\${remainingPath}\`;
-      const weservUrl = \`https://images.weserv.nl/?url=\${encodeURIComponent(targetUrl)}\`;
-      
-      try {
-        const imageResponse = await fetch(weservUrl);
-        const headers = new Headers(imageResponse.headers);
-        headers.set('Access-Control-Allow-Origin', '*');
-        return new Response(imageResponse.body, {
-          status: imageResponse.status,
-          headers
-        });
-      } catch (err) {
-        return new Response('Erro ao buscar imagem: ' + err.message, { status: 500 });
-      }
-    }
-
-    // Encaminha requisição POST para a API do Notion
     const body = await request.text();
     const notionRes = await fetch('https://api.notion.com/v1/pages', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': request.headers.get('Authorization'),
-        'Notion-Version': '2022-06-28',
-      },
+      headers: { 'Content-Type': 'application/json', 'Authorization': request.headers.get('Authorization'), 'Notion-Version': '2022-06-28' },
       body
     });
     const data = await notionRes.text();
-    return new Response(data, {
-      status: notionRes.status,
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
-      }
-    });
+    return new Response(data, { status: notionRes.status, headers: { 'Content-Type': 'application/json', ...cors } });
   }
 };`);
                                                                         showAlert("✅ Código do Worker copiado com sucesso!");
@@ -16359,111 +16305,45 @@ ${(obj.questoesAnalisadas || []).map(q => `### ${q.identificacao}
   async fetch(request) {
     const urlObj = new URL(request.url);
     const pathName = urlObj.pathname;
-
-    // OPTIONS preflight request
-    if (request.method === 'OPTIONS') {
-      return new Response(null, {
-        headers: {
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type, Authorization, Notion-Version',
-        }
-      });
-    }
-
-    // Proxy de Upload de Imagem (base64 -> Catbox)
+    const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, GET, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Authorization, Notion-Version' };
+    if (request.method === 'OPTIONS') return new Response(null, { headers: cors });
     if (request.method === 'POST' && pathName === '/upload-image') {
       try {
         const { image, filename } = await request.json();
-        if (!image) {
-          return new Response(JSON.stringify({ error: 'Nenhuma imagem fornecida' }), {
-            status: 400,
-            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-          });
+        if (!image) return new Response(JSON.stringify({ error: 'No image' }), { status: 400, headers: { 'Content-Type': 'application/json', ...cors } });
+        const b64 = image.replace(/^data:image\/\w+;base64,/, '');
+        const bin = atob(b64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        const mime = filename.endsWith('.png') ? 'image/png' : 'image/jpeg';
+        const blob = new Blob([bytes], { type: mime });
+        const fd = new FormData();
+        fd.append('file', blob, filename);
+        const tRes = await fetch('https://telegra.ph/upload', { method: 'POST', body: fd });
+        const tData = await tRes.json();
+        if (Array.isArray(tData) && tData[0]?.src) {
+          return new Response(JSON.stringify({ url: 'https://telegra.ph' + tData[0].src }), { status: 200, headers: { 'Content-Type': 'application/json', ...cors } });
         }
-
-        const mimeType = filename.endsWith('.png') ? 'image/png' : 'image/jpeg';
-        const base64Data = image.replace(/^data:image\\/\\w+;base64,/, '');
-        
-        // Converter base64 para binário usando Uint8Array e charCodeAt
-        const byteCharacters = atob(base64Data);
-        const byteNumbers = new Array(byteCharacters.length);
-        for (let i = 0; i < byteCharacters.length; i++) {
-          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        const fd2 = new FormData();
+        fd2.append('file', blob, filename);
+        const zRes = await fetch('https://0x0.st', { method: 'POST', body: fd2 });
+        const zUrl = (await zRes.text()).trim();
+        if (zUrl.startsWith('http')) {
+          return new Response(JSON.stringify({ url: zUrl }), { status: 200, headers: { 'Content-Type': 'application/json', ...cors } });
         }
-        const byteArray = new Uint8Array(byteNumbers);
-        const blob = new Blob([byteArray], { type: mimeType });
-
-        // Enviar para o Catbox
-        const formData = new FormData();
-        formData.append('reqtype', 'fileupload');
-        formData.append('fileToUpload', blob, filename);
-
-        const catboxRes = await fetch('https://catbox.moe/user/api.php', {
-          method: 'POST',
-          body: formData
-        });
-
-        const catboxUrl = await catboxRes.text();
-        const urlStr = catboxUrl.trim();
-        
-        if (urlStr.startsWith('https://files.catbox.moe/')) {
-          return new Response(JSON.stringify({ url: urlStr }), {
-            status: 200,
-            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-          });
-        } else {
-          return new Response(JSON.stringify({ error: 'Falha no Catbox: ' + urlStr }), {
-            status: 500,
-            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-          });
-        }
+        return new Response(JSON.stringify({ error: 'All hosts failed' }), { status: 500, headers: { 'Content-Type': 'application/json', ...cors } });
       } catch (err) {
-        return new Response(JSON.stringify({ error: 'Erro no upload: ' + err.message }), {
-          status: 500,
-          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
-        });
+        return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { 'Content-Type': 'application/json', ...cors } });
       }
     }
-
-    // Se for uma requisição GET para /image/...
-    if (request.method === 'GET' && pathName.startsWith('/image/')) {
-      const remainingPath = pathName.substring(7); // remove '/image/'
-      const targetUrl = \`https://europepmc.org/articles/\${remainingPath}\`;
-      const weservUrl = \`https://images.weserv.nl/?url=\${encodeURIComponent(targetUrl)}\`;
-      
-      try {
-        const imageResponse = await fetch(weservUrl);
-        const headers = new Headers(imageResponse.headers);
-        headers.set('Access-Control-Allow-Origin', '*');
-        return new Response(imageResponse.body, {
-          status: imageResponse.status,
-          headers
-        });
-      } catch (err) {
-        return new Response('Erro ao buscar imagem: ' + err.message, { status: 500 });
-      }
-    }
-
-    // Encaminha requisição POST para a API do Notion
     const body = await request.text();
     const notionRes = await fetch('https://api.notion.com/v1/pages', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': request.headers.get('Authorization'),
-        'Notion-Version': '2022-06-28',
-      },
+      headers: { 'Content-Type': 'application/json', 'Authorization': request.headers.get('Authorization'), 'Notion-Version': '2022-06-28' },
       body
     });
     const data = await notionRes.text();
-    return new Response(data, {
-      status: notionRes.status,
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*',
-      }
-    });
+    return new Response(data, { status: notionRes.status, headers: { 'Content-Type': 'application/json', ...cors } });
   }
 };`}
                                                                 </pre>
