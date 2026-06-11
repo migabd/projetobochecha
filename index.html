@@ -9466,14 +9466,15 @@ Gere um resumo PROFUNDO e PERSONALIZADO para este caso clínico. O resumo deve s
                         }
 
                         // Inserir imagens após a seção de análise de imagens
-                        // (Usamos o proxy images.weserv.nl para contornar o bloqueio de hotlink do EuropePMC e exibir a imagem no Notion)
+                        // (Usamos o próprio Cloudflare Worker do usuário para servir a imagem e contornar a proteção contra hotlink do EuropePMC)
                         if (secao.heading && (secao.heading.includes('Imagem') || secao.heading.includes('imagem') || secao.heading.includes('🖼'))) {
                             for (const fig of (challenge.figures || [])) {
                                 const imageUrl = fig.url;
                                 if (imageUrl && !imageUrl.startsWith('data:')) {
                                     try {
                                         const captionText = `${fig.label || 'Imagem'}${fig.caption ? ' — ' + fig.caption.substring(0, 200) : ''}`;
-                                        const proxiedUrl = `https://images.weserv.nl/?url=${encodeURIComponent(imageUrl)}`;
+                                        const cleanProxyUrl = notionConfig.proxyUrl.endsWith('/') ? notionConfig.proxyUrl.slice(0, -1) : notionConfig.proxyUrl;
+                                        const proxiedUrl = `${cleanProxyUrl}?url=${encodeURIComponent(imageUrl)}`;
                                         notionChildren.push({
                                             object: 'block', type: 'image',
                                             image: {
@@ -16193,15 +16194,40 @@ ${(obj.questoesAnalisadas || []).map(q => `### ${q.identificacao}
                                                                     onClick={() => {
                                                                         navigator.clipboard.writeText(`export default {
   async fetch(request) {
+    const urlObj = new URL(request.url);
+
+    // Se for uma requisição GET com parâmetro ?url=..., age como proxy de imagem
+    if (request.method === 'GET' && urlObj.searchParams.has('url')) {
+      const targetUrl = urlObj.searchParams.get('url');
+      try {
+        const imageResponse = await fetch(targetUrl, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Referer': 'https://europepmc.org/'
+          }
+        });
+        const headers = new Headers(imageResponse.headers);
+        headers.set('Access-Control-Allow-Origin', '*');
+        return new Response(imageResponse.body, {
+          status: imageResponse.status,
+          headers
+        });
+      } catch (err) {
+        return new Response('Erro ao buscar imagem: ' + err.message, { status: 500 });
+      }
+    }
+
     if (request.method === 'OPTIONS') {
       return new Response(null, {
         headers: {
           'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Methods': 'POST, OPTIONS',
+          'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
           'Access-Control-Allow-Headers': 'Content-Type, Authorization, Notion-Version',
         }
       });
     }
+
+    // Encaminha requisição POST para a API do Notion
     const body = await request.text();
     const notionRes = await fetch('https://api.notion.com/v1/pages', {
       method: 'POST',
@@ -16231,15 +16257,40 @@ ${(obj.questoesAnalisadas || []).map(q => `### ${q.identificacao}
                                                                 <pre className="bg-zinc-900 text-emerald-400 p-3 pt-9 rounded-xl text-[9.5px] overflow-x-auto leading-relaxed select-all whitespace-pre-wrap max-h-[150px] border border-zinc-800 font-mono shadow-inner">
 {`export default {
   async fetch(request) {
+    const urlObj = new URL(request.url);
+
+    // Se for uma requisição GET com parâmetro ?url=..., age como proxy de imagem
+    if (request.method === 'GET' && urlObj.searchParams.has('url')) {
+      const targetUrl = urlObj.searchParams.get('url');
+      try {
+        const imageResponse = await fetch(targetUrl, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Referer': 'https://europepmc.org/'
+          }
+        });
+        const headers = new Headers(imageResponse.headers);
+        headers.set('Access-Control-Allow-Origin', '*');
+        return new Response(imageResponse.body, {
+          status: imageResponse.status,
+          headers
+        });
+      } catch (err) {
+        return new Response('Erro ao buscar imagem: ' + err.message, { status: 500 });
+      }
+    }
+
     if (request.method === 'OPTIONS') {
       return new Response(null, {
         headers: {
           'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Methods': 'POST, OPTIONS',
+          'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
           'Access-Control-Allow-Headers': 'Content-Type, Authorization, Notion-Version',
         }
       });
     }
+
+    // Encaminha requisição POST para a API do Notion
     const body = await request.text();
     const notionRes = await fetch('https://api.notion.com/v1/pages', {
       method: 'POST',
