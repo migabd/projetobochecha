@@ -16258,28 +16258,86 @@ ${(obj.questoesAnalisadas || []).map(q => `### ${q.identificacao}
     if (request.method === 'POST' && pathName === '/upload-image') {
       try {
         const { image, filename } = await request.json();
-        if (!image) return new Response(JSON.stringify({ error: 'No image' }), { status: 400, headers: { 'Content-Type': 'application/json', ...cors } });
-        const b64 = image.replace(/^data:image\\/\\w+;base64,/, '');
+        if (!image) return new Response(JSON.stringify({ error: 'No image provided' }), { status: 400, headers: { 'Content-Type': 'application/json', ...cors } });
+        const b64 = image.includes(',') ? image.split(',')[1] : image;
         const bin = atob(b64);
         const bytes = new Uint8Array(bin.length);
         for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
         const mime = filename.endsWith('.png') ? 'image/png' : 'image/jpeg';
         const blob = new Blob([bytes], { type: mime });
-        const fd = new FormData();
-        fd.append('file', blob, filename);
-        const tRes = await fetch('https://telegra.ph/upload', { method: 'POST', body: fd });
-        const tData = await tRes.json();
-        if (Array.isArray(tData) && tData[0]?.src) {
-          return new Response(JSON.stringify({ url: 'https://telegra.ph' + tData[0].src }), { status: 200, headers: { 'Content-Type': 'application/json', ...cors } });
+        const userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
+        let uploadedUrl = null;
+        const uploadErrors = [];
+
+        // 1. Tentar Telegra.ph (permanente)
+        try {
+          const fd = new FormData();
+          fd.append('file', blob, filename);
+          const res = await fetch('https://telegra.ph/upload', { method: 'POST', body: fd, headers: { 'User-Agent': userAgent } });
+          const text = await res.text();
+          if (res.ok) {
+            const data = JSON.parse(text);
+            if (Array.isArray(data) && data[0]?.src) uploadedUrl = 'https://telegra.ph' + data[0].src;
+            else uploadErrors.push('Telegra.ph: Formato invalido (' + text.substring(0, 50) + ')');
+          } else {
+            uploadErrors.push('Telegra.ph: Status ' + res.status + ' (' + text.substring(0, 50) + ')');
+          }
+        } catch (err) {
+          uploadErrors.push('Telegra.ph: ' + err.message);
         }
-        const fd2 = new FormData();
-        fd2.append('file', blob, filename);
-        const zRes = await fetch('https://0x0.st', { method: 'POST', body: fd2 });
-        const zUrl = (await zRes.text()).trim();
-        if (zUrl.startsWith('http')) {
-          return new Response(JSON.stringify({ url: zUrl }), { status: 200, headers: { 'Content-Type': 'application/json', ...cors } });
+
+        // 2. Tentar Catbox.moe (permanente)
+        if (!uploadedUrl) {
+          try {
+            const fd = new FormData();
+            fd.append('reqtype', 'fileupload');
+            fd.append('fileToUpload', blob, filename);
+            const res = await fetch('https://catbox.moe/user/api.php', { method: 'POST', body: fd, headers: { 'User-Agent': userAgent } });
+            const text = (await res.text()).trim();
+            if (res.ok && text.startsWith('http')) uploadedUrl = text;
+            else uploadErrors.push('Catbox: Status ' + res.status + ' (' + text.substring(0, 50) + ')');
+          } catch (err) {
+            uploadErrors.push('Catbox: ' + err.message);
+          }
         }
-        return new Response(JSON.stringify({ error: 'All hosts failed' }), { status: 500, headers: { 'Content-Type': 'application/json', ...cors } });
+
+        // 3. Tentar Uguu.se (temporario 3h, otimo fallback)
+        if (!uploadedUrl) {
+          try {
+            const fd = new FormData();
+            fd.append('files[]', blob, filename);
+            const res = await fetch('https://uguu.se/upload', { method: 'POST', body: fd, headers: { 'User-Agent': userAgent } });
+            const text = await res.text();
+            if (res.ok) {
+              const data = JSON.parse(text);
+              if (data.success && data.files?.[0]?.url) uploadedUrl = data.files[0].url;
+              else uploadErrors.push('Uguu.se: Formato invalido (' + text.substring(0, 50) + ')');
+            } else {
+              uploadErrors.push('Uguu.se: Status ' + res.status + ' (' + text.substring(0, 50) + ')');
+            }
+          } catch (err) {
+            uploadErrors.push('Uguu.se: ' + err.message);
+          }
+        }
+
+        // 4. Tentar 0x0.st
+        if (!uploadedUrl) {
+          try {
+            const fd = new FormData();
+            fd.append('file', blob, filename);
+            const res = await fetch('https://0x0.st', { method: 'POST', body: fd, headers: { 'User-Agent': userAgent } });
+            const text = (await res.text()).trim();
+            if (res.ok && text.startsWith('http')) uploadedUrl = text;
+            else uploadErrors.push('0x0.st: Status ' + res.status + ' (' + text.substring(0, 50) + ')');
+          } catch (err) {
+            uploadErrors.push('0x0.st: ' + err.message);
+          }
+        }
+
+        if (uploadedUrl) {
+          return new Response(JSON.stringify({ url: uploadedUrl }), { status: 200, headers: { 'Content-Type': 'application/json', ...cors } });
+        }
+        return new Response(JSON.stringify({ error: 'All hosts failed', details: uploadErrors }), { status: 500, headers: { 'Content-Type': 'application/json', ...cors } });
       } catch (err) {
         return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { 'Content-Type': 'application/json', ...cors } });
       }
@@ -16293,7 +16351,7 @@ ${(obj.questoesAnalisadas || []).map(q => `### ${q.identificacao}
     const data = await notionRes.text();
     return new Response(data, { status: notionRes.status, headers: { 'Content-Type': 'application/json', ...cors } });
   }
-};`);
+}`);
                                                                         showAlert("✅ Código do Worker copiado com sucesso!");
                                                                     }}
                                                                     className="absolute top-2 right-2 px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white rounded-lg text-[9px] font-black uppercase tracking-wider transition-all flex items-center gap-1 shadow-md z-10"
@@ -16310,28 +16368,86 @@ ${(obj.questoesAnalisadas || []).map(q => `### ${q.identificacao}
     if (request.method === 'POST' && pathName === '/upload-image') {
       try {
         const { image, filename } = await request.json();
-        if (!image) return new Response(JSON.stringify({ error: 'No image' }), { status: 400, headers: { 'Content-Type': 'application/json', ...cors } });
-        const b64 = image.replace(/^data:image\/\w+;base64,/, '');
+        if (!image) return new Response(JSON.stringify({ error: 'No image provided' }), { status: 400, headers: { 'Content-Type': 'application/json', ...cors } });
+        const b64 = image.includes(',') ? image.split(',')[1] : image;
         const bin = atob(b64);
         const bytes = new Uint8Array(bin.length);
         for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
         const mime = filename.endsWith('.png') ? 'image/png' : 'image/jpeg';
         const blob = new Blob([bytes], { type: mime });
-        const fd = new FormData();
-        fd.append('file', blob, filename);
-        const tRes = await fetch('https://telegra.ph/upload', { method: 'POST', body: fd });
-        const tData = await tRes.json();
-        if (Array.isArray(tData) && tData[0]?.src) {
-          return new Response(JSON.stringify({ url: 'https://telegra.ph' + tData[0].src }), { status: 200, headers: { 'Content-Type': 'application/json', ...cors } });
+        const userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
+        let uploadedUrl = null;
+        const uploadErrors = [];
+
+        // 1. Tentar Telegra.ph (permanente)
+        try {
+          const fd = new FormData();
+          fd.append('file', blob, filename);
+          const res = await fetch('https://telegra.ph/upload', { method: 'POST', body: fd, headers: { 'User-Agent': userAgent } });
+          const text = await res.text();
+          if (res.ok) {
+            const data = JSON.parse(text);
+            if (Array.isArray(data) && data[0]?.src) uploadedUrl = 'https://telegra.ph' + data[0].src;
+            else uploadErrors.push('Telegra.ph: Formato invalido (' + text.substring(0, 50) + ')');
+          } else {
+            uploadErrors.push('Telegra.ph: Status ' + res.status + ' (' + text.substring(0, 50) + ')');
+          }
+        } catch (err) {
+          uploadErrors.push('Telegra.ph: ' + err.message);
         }
-        const fd2 = new FormData();
-        fd2.append('file', blob, filename);
-        const zRes = await fetch('https://0x0.st', { method: 'POST', body: fd2 });
-        const zUrl = (await zRes.text()).trim();
-        if (zUrl.startsWith('http')) {
-          return new Response(JSON.stringify({ url: zUrl }), { status: 200, headers: { 'Content-Type': 'application/json', ...cors } });
+
+        // 2. Tentar Catbox.moe (permanente)
+        if (!uploadedUrl) {
+          try {
+            const fd = new FormData();
+            fd.append('reqtype', 'fileupload');
+            fd.append('fileToUpload', blob, filename);
+            const res = await fetch('https://catbox.moe/user/api.php', { method: 'POST', body: fd, headers: { 'User-Agent': userAgent } });
+            const text = (await res.text()).trim();
+            if (res.ok && text.startsWith('http')) uploadedUrl = text;
+            else uploadErrors.push('Catbox: Status ' + res.status + ' (' + text.substring(0, 50) + ')');
+          } catch (err) {
+            uploadErrors.push('Catbox: ' + err.message);
+          }
         }
-        return new Response(JSON.stringify({ error: 'All hosts failed' }), { status: 500, headers: { 'Content-Type': 'application/json', ...cors } });
+
+        // 3. Tentar Uguu.se (temporario 3h, otimo fallback)
+        if (!uploadedUrl) {
+          try {
+            const fd = new FormData();
+            fd.append('files[]', blob, filename);
+            const res = await fetch('https://uguu.se/upload', { method: 'POST', body: fd, headers: { 'User-Agent': userAgent } });
+            const text = await res.text();
+            if (res.ok) {
+              const data = JSON.parse(text);
+              if (data.success && data.files?.[0]?.url) uploadedUrl = data.files[0].url;
+              else uploadErrors.push('Uguu.se: Formato invalido (' + text.substring(0, 50) + ')');
+            } else {
+              uploadErrors.push('Uguu.se: Status ' + res.status + ' (' + text.substring(0, 50) + ')');
+            }
+          } catch (err) {
+            uploadErrors.push('Uguu.se: ' + err.message);
+          }
+        }
+
+        // 4. Tentar 0x0.st
+        if (!uploadedUrl) {
+          try {
+            const fd = new FormData();
+            fd.append('file', blob, filename);
+            const res = await fetch('https://0x0.st', { method: 'POST', body: fd, headers: { 'User-Agent': userAgent } });
+            const text = (await res.text()).trim();
+            if (res.ok && text.startsWith('http')) uploadedUrl = text;
+            else uploadErrors.push('0x0.st: Status ' + res.status + ' (' + text.substring(0, 50) + ')');
+          } catch (err) {
+            uploadErrors.push('0x0.st: ' + err.message);
+          }
+        }
+
+        if (uploadedUrl) {
+          return new Response(JSON.stringify({ url: uploadedUrl }), { status: 200, headers: { 'Content-Type': 'application/json', ...cors } });
+        }
+        return new Response(JSON.stringify({ error: 'All hosts failed', details: uploadErrors }), { status: 500, headers: { 'Content-Type': 'application/json', ...cors } });
       } catch (err) {
         return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: { 'Content-Type': 'application/json', ...cors } });
       }
@@ -16345,7 +16461,7 @@ ${(obj.questoesAnalisadas || []).map(q => `### ${q.identificacao}
     const data = await notionRes.text();
     return new Response(data, { status: notionRes.status, headers: { 'Content-Type': 'application/json', ...cors } });
   }
-};`}
+}`}
                                                                 </pre>
                                                             </div>
                                                             <p className="text-[10.5px]">5. Clique em <strong>"Deploy"</strong> no canto superior direito.</p>
