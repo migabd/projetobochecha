@@ -9288,7 +9288,18 @@ ${safeScript}
                     throw new Error('Configuração do Notion incompleta. Verifique Token, Database ID e URL do Proxy nas Configurações.');
                 }
 
-                const figureDescriptions = (challenge.figures || []).map((f, i) =>
+                // Garantir que todas as figuras tenham dataUrls carregadas do ZIP do EuropePMC antes de prosseguir
+                let challengeFigures = challenge.figures || [];
+                if (challenge.pmcid && challengeFigures.length > 0 && !challengeFigures.every(f => f.dataUrl)) {
+                    try {
+                        console.log('[Notion] Figuras incompletas no BD local. Baixando ZIP do EuropePMC para carregar dataUrls no voo...');
+                        challengeFigures = await fetchFigureDataUrls(challenge.pmcid, challengeFigures);
+                    } catch (zipErr) {
+                        console.warn('[Notion] Erro ao buscar ZIP de imagens no voo:', zipErr);
+                    }
+                }
+
+                const figureDescriptions = challengeFigures.map((f, i) =>
                     `Imagem ${i + 1} (${f.label}): ${f.caption || 'Sem legenda disponível'}`
                 ).join('\n');
 
@@ -9468,7 +9479,7 @@ Gere um resumo PROFUNDO e PERSONALIZADO para este caso clínico. O resumo deve s
                         // Inserir imagens após a seção de análise de imagens
                         // (Tenta fazer upload da imagem base64 para o Catbox via Worker; se falhar, usa o proxy limpo do EuropePMC)
                         if (secao.heading && (secao.heading.includes('Imagem') || secao.heading.includes('imagem') || secao.heading.includes('🖼'))) {
-                            for (const fig of (challenge.figures || [])) {
+                            for (const fig of challengeFigures) {
                                 const imageUrl = fig.url;
                                 if (imageUrl && !imageUrl.startsWith('data:')) {
                                     try {
