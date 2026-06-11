@@ -9474,7 +9474,8 @@ Gere um resumo PROFUNDO e PERSONALIZADO para este caso clínico. O resumo deve s
                                     try {
                                         const captionText = `${fig.label || 'Imagem'}${fig.caption ? ' — ' + fig.caption.substring(0, 200) : ''}`;
                                         const cleanProxyUrl = notionConfig.proxyUrl.endsWith('/') ? notionConfig.proxyUrl.slice(0, -1) : notionConfig.proxyUrl;
-                                        const proxiedUrl = `${cleanProxyUrl}?url=${encodeURIComponent(imageUrl)}`;
+                                        const path = imageUrl.replace(/^https?:\/\/europepmc\.org\/articles\//, '');
+                                        const proxiedUrl = `${cleanProxyUrl}/image/${path}`;
                                         notionChildren.push({
                                             object: 'block', type: 'image',
                                             image: {
@@ -16195,17 +16196,16 @@ ${(obj.questoesAnalisadas || []).map(q => `### ${q.identificacao}
                                                                         navigator.clipboard.writeText(`export default {
   async fetch(request) {
     const urlObj = new URL(request.url);
+    const pathName = urlObj.pathname;
 
-    // Se for uma requisição GET com parâmetro ?url=..., age como proxy de imagem
-    if (request.method === 'GET' && urlObj.searchParams.has('url')) {
-      const targetUrl = urlObj.searchParams.get('url');
+    // Se for uma requisição GET para /image/...
+    if (request.method === 'GET' && pathName.startsWith('/image/')) {
+      const remainingPath = pathName.substring(7); // remove '/image/'
+      const targetUrl = \`https://europepmc.org/articles/\${remainingPath}\`;
+      const weservUrl = \`https://images.weserv.nl/?url=\${encodeURIComponent(targetUrl)}\`;
+      
       try {
-        const imageResponse = await fetch(targetUrl, {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Referer': 'https://europepmc.org/'
-          }
-        });
+        const imageResponse = await fetch(weservUrl);
         const headers = new Headers(imageResponse.headers);
         headers.set('Access-Control-Allow-Origin', '*');
         return new Response(imageResponse.body, {
@@ -16258,17 +16258,16 @@ ${(obj.questoesAnalisadas || []).map(q => `### ${q.identificacao}
 {`export default {
   async fetch(request) {
     const urlObj = new URL(request.url);
+    const pathName = urlObj.pathname;
 
-    // Se for uma requisição GET com parâmetro ?url=..., age como proxy de imagem
-    if (request.method === 'GET' && urlObj.searchParams.has('url')) {
-      const targetUrl = urlObj.searchParams.get('url');
+    // Se for uma requisição GET para /image/...
+    if (request.method === 'GET' && pathName.startsWith('/image/')) {
+      const remainingPath = pathName.substring(7); // remove '/image/'
+      const targetUrl = \`https://europepmc.org/articles/\${remainingPath}\`;
+      const weservUrl = \`https://images.weserv.nl/?url=\${encodeURIComponent(targetUrl)}\`;
+      
       try {
-        const imageResponse = await fetch(targetUrl, {
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Referer': 'https://europepmc.org/'
-          }
-        });
+        const imageResponse = await fetch(weservUrl);
         const headers = new Headers(imageResponse.headers);
         headers.set('Access-Control-Allow-Origin', '*');
         return new Response(imageResponse.body, {
