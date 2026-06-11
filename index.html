@@ -9465,24 +9465,25 @@ Gere um resumo PROFUNDO e PERSONALIZADO para este caso clínico. O resumo deve s
                             }
                         }
 
-                        // Inserir links das imagens após a seção de análise de imagens
-                        // (Imagens externas do EuropePMC não carregam no Notion por proteção hotlink — usamos links clicáveis)
+                        // Inserir imagens após a seção de análise de imagens
+                        // (Usamos o proxy images.weserv.nl para contornar o bloqueio de hotlink do EuropePMC e exibir a imagem no Notion)
                         if (secao.heading && (secao.heading.includes('Imagem') || secao.heading.includes('imagem') || secao.heading.includes('🖼'))) {
                             for (const fig of (challenge.figures || [])) {
                                 const imageUrl = fig.url;
                                 if (imageUrl && !imageUrl.startsWith('data:')) {
                                     try {
-                                        const captionText = `🔗 ${fig.label || 'Imagem'}${fig.caption ? ' — ' + fig.caption.substring(0, 200) : ''}`;
-                                        // Usar bookmark (link card) em vez de image block
+                                        const captionText = `${fig.label || 'Imagem'}${fig.caption ? ' — ' + fig.caption.substring(0, 200) : ''}`;
+                                        const proxiedUrl = `https://images.weserv.nl/?url=${encodeURIComponent(imageUrl)}`;
                                         notionChildren.push({
-                                            object: 'block', type: 'bookmark',
-                                            bookmark: {
-                                                url: imageUrl,
+                                            object: 'block', type: 'image',
+                                            image: {
+                                                type: 'external',
+                                                external: { url: proxiedUrl },
                                                 caption: [{ type: 'text', text: { content: captionText } }]
                                             }
                                         });
                                     } catch (imgErr) {
-                                        console.warn('[Notion] Erro ao adicionar link de imagem:', imgErr);
+                                        console.warn('[Notion] Erro ao adicionar imagem:', imgErr);
                                     }
                                 }
                             }
