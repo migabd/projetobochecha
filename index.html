@@ -9466,7 +9466,7 @@ Gere um resumo PROFUNDO e PERSONALIZADO para este caso clínico. O resumo deve s
                         }
 
                         // Inserir imagens após a seção de análise de imagens
-                        // (Usamos o próprio Cloudflare Worker do usuário para servir a imagem e contornar a proteção contra hotlink do EuropePMC)
+                        // (Tenta fazer upload da imagem base64 para o Catbox via Worker; se falhar, usa o proxy limpo do EuropePMC)
                         if (secao.heading && (secao.heading.includes('Imagem') || secao.heading.includes('imagem') || secao.heading.includes('🖼'))) {
                             for (const fig of (challenge.figures || [])) {
                                 const imageUrl = fig.url;
@@ -9474,13 +9474,46 @@ Gere um resumo PROFUNDO e PERSONALIZADO para este caso clínico. O resumo deve s
                                     try {
                                         const captionText = `${fig.label || 'Imagem'}${fig.caption ? ' — ' + fig.caption.substring(0, 200) : ''}`;
                                         const cleanProxyUrl = notionConfig.proxyUrl.endsWith('/') ? notionConfig.proxyUrl.slice(0, -1) : notionConfig.proxyUrl;
-                                        const path = imageUrl.replace(/^https?:\/\/europepmc\.org\/articles\//, '');
-                                        const proxiedUrl = `${cleanProxyUrl}/image/${path}`;
+                                        const urlParts = imageUrl.split('/');
+                                        const fileName = urlParts[urlParts.length - 1];
+
+                                        let finalImageUrl = imageUrl;
+                                        
+                                        // Tentar fazer o upload da imagem base64 (se disponível) para o Catbox através do Worker
+                                        if (fig.dataUrl) {
+                                            try {
+                                                console.log('[Notion] Fazendo upload de imagem para o Catbox via Worker...', fileName);
+                                                const uploadRes = await fetch(`${cleanProxyUrl}/upload-image`, {
+                                                    method: 'POST',
+                                                    headers: { 'Content-Type': 'application/json' },
+                                                    body: JSON.stringify({ image: fig.dataUrl, filename: fileName })
+                                                });
+                                                if (uploadRes.ok) {
+                                                    const uploadData = await uploadRes.json();
+                                                    if (uploadData.url) {
+                                                        finalImageUrl = uploadData.url;
+                                                        console.log('[Notion] Upload com sucesso! URL:', finalImageUrl);
+                                                    }
+                                                } else {
+                                                    const errText = await uploadRes.text();
+                                                    console.warn('[Notion] Resposta de falha do upload:', errText);
+                                                }
+                                            } catch (upErr) {
+                                                console.warn('[Notion] Erro ao tentar upload de imagem:', upErr);
+                                            }
+                                        }
+
+                                        // Se falhar o upload do dataUrl, usa o fallback legado /image/...
+                                        if (finalImageUrl === imageUrl) {
+                                            const path = imageUrl.replace(/^https?:\/\/europepmc\.org\/articles\//, '');
+                                            finalImageUrl = `${cleanProxyUrl}/image/${path}`;
+                                        }
+
                                         notionChildren.push({
                                             object: 'block', type: 'image',
                                             image: {
                                                 type: 'external',
-                                                external: { url: proxiedUrl },
+                                                external: { url: finalImageUrl },
                                                 caption: [{ type: 'text', text: { content: captionText } }]
                                             }
                                         });
@@ -16198,6 +16231,72 @@ ${(obj.questoesAnalisadas || []).map(q => `### ${q.identificacao}
     const urlObj = new URL(request.url);
     const pathName = urlObj.pathname;
 
+    // OPTIONS preflight request
+    if (request.method === 'OPTIONS') {
+      return new Response(null, {
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type, Authorization, Notion-Version',
+        }
+      });
+    }
+
+    // Proxy de Upload de Imagem (base64 -> Catbox)
+    if (request.method === 'POST' && pathName === '/upload-image') {
+      try {
+        const { image, filename } = await request.json();
+        if (!image) {
+          return new Response(JSON.stringify({ error: 'Nenhuma imagem fornecida' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+          });
+        }
+
+        const mimeType = filename.endsWith('.png') ? 'image/png' : 'image/jpeg';
+        const base64Data = image.replace(/^data:image\\/\\w+;base64,/, '');
+        
+        // Converter base64 para binário usando Uint8Array e charCodeAt
+        const byteCharacters = atob(base64Data);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: mimeType });
+
+        // Enviar para o Catbox
+        const formData = new FormData();
+        formData.append('reqtype', 'fileupload');
+        formData.append('fileToUpload', blob, filename);
+
+        const catboxRes = await fetch('https://catbox.moe/user/api.php', {
+          method: 'POST',
+          body: formData
+        });
+
+        const catboxUrl = await catboxRes.text();
+        const urlStr = catboxUrl.trim();
+        
+        if (urlStr.startsWith('https://files.catbox.moe/')) {
+          return new Response(JSON.stringify({ url: urlStr }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+          });
+        } else {
+          return new Response(JSON.stringify({ error: 'Falha no Catbox: ' + urlStr }), {
+            status: 500,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+          });
+        }
+      } catch (err) {
+        return new Response(JSON.stringify({ error: 'Erro no upload: ' + err.message }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        });
+      }
+    }
+
     // Se for uma requisição GET para /image/...
     if (request.method === 'GET' && pathName.startsWith('/image/')) {
       const remainingPath = pathName.substring(7); // remove '/image/'
@@ -16215,16 +16314,6 @@ ${(obj.questoesAnalisadas || []).map(q => `### ${q.identificacao}
       } catch (err) {
         return new Response('Erro ao buscar imagem: ' + err.message, { status: 500 });
       }
-    }
-
-    if (request.method === 'OPTIONS') {
-      return new Response(null, {
-        headers: {
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type, Authorization, Notion-Version',
-        }
-      });
     }
 
     // Encaminha requisição POST para a API do Notion
@@ -16260,6 +16349,72 @@ ${(obj.questoesAnalisadas || []).map(q => `### ${q.identificacao}
     const urlObj = new URL(request.url);
     const pathName = urlObj.pathname;
 
+    // OPTIONS preflight request
+    if (request.method === 'OPTIONS') {
+      return new Response(null, {
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type, Authorization, Notion-Version',
+        }
+      });
+    }
+
+    // Proxy de Upload de Imagem (base64 -> Catbox)
+    if (request.method === 'POST' && pathName === '/upload-image') {
+      try {
+        const { image, filename } = await request.json();
+        if (!image) {
+          return new Response(JSON.stringify({ error: 'Nenhuma imagem fornecida' }), {
+            status: 400,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+          });
+        }
+
+        const mimeType = filename.endsWith('.png') ? 'image/png' : 'image/jpeg';
+        const base64Data = image.replace(/^data:image\\/\\w+;base64,/, '');
+        
+        // Converter base64 para binário usando Uint8Array e charCodeAt
+        const byteCharacters = atob(base64Data);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: mimeType });
+
+        // Enviar para o Catbox
+        const formData = new FormData();
+        formData.append('reqtype', 'fileupload');
+        formData.append('fileToUpload', blob, filename);
+
+        const catboxRes = await fetch('https://catbox.moe/user/api.php', {
+          method: 'POST',
+          body: formData
+        });
+
+        const catboxUrl = await catboxRes.text();
+        const urlStr = catboxUrl.trim();
+        
+        if (urlStr.startsWith('https://files.catbox.moe/')) {
+          return new Response(JSON.stringify({ url: urlStr }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+          });
+        } else {
+          return new Response(JSON.stringify({ error: 'Falha no Catbox: ' + urlStr }), {
+            status: 500,
+            headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+          });
+        }
+      } catch (err) {
+        return new Response(JSON.stringify({ error: 'Erro no upload: ' + err.message }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' }
+        });
+      }
+    }
+
     // Se for uma requisição GET para /image/...
     if (request.method === 'GET' && pathName.startsWith('/image/')) {
       const remainingPath = pathName.substring(7); // remove '/image/'
@@ -16277,16 +16432,6 @@ ${(obj.questoesAnalisadas || []).map(q => `### ${q.identificacao}
       } catch (err) {
         return new Response('Erro ao buscar imagem: ' + err.message, { status: 500 });
       }
-    }
-
-    if (request.method === 'OPTIONS') {
-      return new Response(null, {
-        headers: {
-          'Access-Control-Allow-Origin': '*',
-          'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type, Authorization, Notion-Version',
-        }
-      });
     }
 
     // Encaminha requisição POST para a API do Notion
