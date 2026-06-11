@@ -9282,7 +9282,11 @@ ${safeScript}
             // INTEGRAÇÃO NOTION — RESUMO DE FISIOPATOLOGIA
             // ==========================================
             const generateAndSendToNotion = async (challenge, evaluationResult) => {
-                if (!notionConfig.enabled || !notionConfig.token || !notionConfig.dbId || !notionConfig.proxyUrl) return;
+                console.log('[Notion] Iniciando geração de resumo...', { enabled: notionConfig.enabled, hasToken: !!notionConfig.token, hasDbId: !!notionConfig.dbId, hasProxy: !!notionConfig.proxyUrl });
+                if (!notionConfig.enabled || !notionConfig.token || !notionConfig.dbId || !notionConfig.proxyUrl) {
+                    console.warn('[Notion] Configuração incompleta, abortando.', notionConfig);
+                    throw new Error('Configuração do Notion incompleta. Verifique Token, Database ID e URL do Proxy nas Configurações.');
+                }
 
                 const figureDescriptions = (challenge.figures || []).map((f, i) =>
                     `Imagem ${i + 1} (${f.label}): ${f.caption || 'Sem legenda disponível'}`
@@ -9315,7 +9319,7 @@ AVALIAÇÃO:
 - Comentário do Mentor: ${evaluationResult.comment}
 
 INSTRUÇÕES:
-Gere um resumo PROFUNDO e PERSONALIZADO para este caso clínico específico. O resumo deve ser em português brasileiro e seguir EXATAMENTE esta estrutura JSON:
+Gere um resumo PROFUNDO e PERSONALIZADO para este caso clínico. O resumo deve ser em português brasileiro. Responda com um objeto JSON puro (sem blocos de código) com esta estrutura:
 
 {
   "titulo": "Fisiopatologia: [Nome da Doença Principal]",
@@ -9323,52 +9327,102 @@ Gere um resumo PROFUNDO e PERSONALIZADO para este caso clínico específico. O r
   "secoes": [
     {
       "heading": "📋 Caso Clínico Resumido",
-      "content": "[Resumo objetivo do caso clínico em 3-4 parágrafos, destacando os achados mais relevantes da anamnese, exame físico e exames complementares]"
+      "content": "Resumo objetivo do caso clínico em 3-4 parágrafos"
     },
     {
       "heading": "🔬 Fisiopatologia Profunda",
-      "content": "[Explicação detalhada dos mecanismos fisiopatológicos da doença: cascatas moleculares/celulares, alterações teciduais, mediadores inflamatórios, etc. Mínimo 4 parágrafos densos e técnicos]"
+      "content": "Explicação detalhada dos mecanismos fisiopatológicos. Mínimo 4 parágrafos densos"
     },
     {
-      "heading": "🩺 Correlação Clínica — Por que o paciente apresentou esses achados?",
-      "content": "[Para CADA sinal e sintoma apresentado no caso, explicar qual mecanismo fisiopatológico o causou. Ex: 'A dispneia ocorre porque...' Mínimo 3 parágrafos]"
+      "heading": "🩺 Correlação Clínica",
+      "content": "Para CADA sinal/sintoma, explicar o mecanismo fisiopatológico que o causou"
     },
     {
       "heading": "🖼️ Análise das Imagens do Caso",
-      "content": "[Para CADA imagem/exame do caso: descrever detalhadamente os achados visíveis, o que representam do ponto de vista anatômico/patológico, e como se correlacionam com o diagnóstico. Se houver radiografia, TC, ECG etc., explicar cada achado técnico]"
+      "content": "Descrever detalhadamente os achados visíveis em cada imagem/exame"
     },
     {
       "heading": "💊 Justificativa Fisiopatológica do Tratamento",
-      "content": "[Explicar POR QUE o tratamento indicado no gabarito é o correto do ponto de vista fisiopatológico. Qual mecanismo de ação do fármaco? Como ele interrompe a cascata patológica? Por que NÃO usar outras opções?]"
+      "content": "POR QUE o tratamento indicado é o correto do ponto de vista fisiopatológico"
     },
     {
       "heading": "⚠️ Análise dos Meus Erros",
-      "content": "[Analisar especificamente onde o aluno errou na resposta, comparando com o gabarito. Quais conceitos fisiopatológicos ele não dominou? O que deveria ter escrito diferente? Dicas práticas para não errar novamente]"
+      "content": "Onde o aluno errou, quais conceitos não dominou, dicas práticas"
     }
   ]
-}
-
-Retorne APENAS o JSON válido, sem markdown ou texto extra.`;
+}`;
 
                 try {
+                    // --- ETAPA 1: Gerar resumo via IA ---
+                    console.log('[Notion] Etapa 1: Chamando IA para gerar resumo...');
                     const selectedModel = challenge.desafioDiarioModel || aiConfig.model || 'gemini-2.0-flash';
-                    const responseText = await callIA([
-                        { role: 'user', parts: [{ text: summaryPrompt }] }
-                    ], selectedModel);
 
-                    if (!responseText || responseText.startsWith('[ERRO')) {
-                        throw new Error('A IA não conseguiu gerar o resumo de fisiopatologia.');
+                    // Chamada dedicada com mais tokens para o resumo longo
+                    const apiKey = aiConfig.key || "";
+                    const iaResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${apiKey}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            contents: [{ role: 'user', parts: [{ text: summaryPrompt }] }],
+                            generationConfig: {
+                                maxOutputTokens: 16384,
+                                responseMimeType: "application/json"
+                            }
+                        })
+                    });
+
+                    const iaData = await iaResponse.json();
+                    if (!iaResponse.ok) {
+                        console.error('[Notion] Erro na API Gemini:', iaData);
+                        throw new Error(`Erro da IA (${iaResponse.status}): ${iaData.error?.message || 'Falha ao gerar resumo'}`);
                     }
 
+                    const parts = iaData.candidates?.[0]?.content?.parts || [];
+                    let responseText = '';
+                    for (const part of parts) {
+                        if (part.text && !part.thought) responseText += part.text;
+                    }
+                    if (!responseText) {
+                        responseText = parts.map(p => p.text || '').join('');
+                    }
+
+                    console.log('[Notion] Resposta da IA recebida, tamanho:', responseText?.length, 'Preview:', responseText?.substring(0, 300));
+
+                    if (!responseText) {
+                        throw new Error('A IA retornou resposta vazia. Tente novamente.');
+                    }
+
+                    // --- ETAPA 2: Parsear JSON ---
+                    console.log('[Notion] Etapa 2: Parseando JSON...');
                     const jsonString = responseText.replace(/```json|```/g, '').trim();
                     const match = jsonString.match(/\{[\s\S]*\}/);
-                    if (!match) throw new Error('Resposta da IA não contém JSON válido.');
+                    if (!match) {
+                        console.error('[Notion] JSON não encontrado na resposta:', jsonString.substring(0, 500));
+                        throw new Error('Resposta da IA não contém JSON válido. Tente novamente.');
+                    }
 
                     let summaryData;
-                    try { summaryData = JSON.parse(match[0]); }
-                    catch (e) { summaryData = robustJSONParse(match[0]); }
+                    try {
+                        summaryData = JSON.parse(match[0]);
+                    } catch (parseErr) {
+                        console.warn('[Notion] JSON.parse falhou, tentando robustJSONParse...', parseErr.message);
+                        try {
+                            summaryData = robustJSONParse(match[0]);
+                        } catch (robustErr) {
+                            console.error('[Notion] robustJSONParse também falhou:', robustErr.message);
+                            throw new Error('Não foi possível interpretar o JSON do resumo. Tente novamente.');
+                        }
+                    }
 
-                    // --- Converter resumo em blocos Notion ---
+                    if (!summaryData || !summaryData.secoes || summaryData.secoes.length === 0) {
+                        console.error('[Notion] JSON parseado mas sem seções:', summaryData);
+                        throw new Error('O resumo gerado não contém seções. Tente novamente.');
+                    }
+
+                    console.log('[Notion] JSON parseado com sucesso:', summaryData.titulo, `(${summaryData.secoes.length} seções)`);
+
+                    // --- ETAPA 3: Converter resumo em blocos Notion ---
+                    console.log('[Notion] Etapa 3: Convertendo para blocos Notion...');
                     const notionChildren = [];
 
                     // Callout de contexto
@@ -9384,17 +9438,21 @@ Retorne APENAS o JSON válido, sem markdown ou texto extra.`;
                     notionChildren.push({ object: 'block', type: 'divider', divider: {} });
 
                     // Seções do resumo
-                    for (const secao of (summaryData.secoes || [])) {
-                        // Heading
+                    for (const secao of summaryData.secoes) {
+                        // Heading — truncar a 100 chars (limite Notion para headings)
+                        const headingText = (secao.heading || 'Seção').substring(0, 100);
                         notionChildren.push({
                             object: 'block', type: 'heading_2',
-                            heading_2: { rich_text: [{ type: 'text', text: { content: secao.heading } }] }
+                            heading_2: { rich_text: [{ type: 'text', text: { content: headingText } }] }
                         });
 
                         // Content — quebrar em parágrafos (limite de 2000 chars por bloco Notion)
-                        const paragraphs = (secao.content || '').split('\n').filter(p => p.trim());
-                        for (const para of paragraphs) {
-                            // Notion API limita rich_text a 2000 chars
+                        const contentText = secao.content || '';
+                        const paragraphs = contentText.split('\n').filter(p => p.trim());
+                        // Se o conteúdo não tem quebras de linha, tratar como parágrafo único
+                        const paraList = paragraphs.length > 0 ? paragraphs : (contentText.trim() ? [contentText.trim()] : []);
+
+                        for (const para of paraList) {
                             const chunks = [];
                             for (let i = 0; i < para.length; i += 1900) {
                                 chunks.push(para.substring(i, i + 1900));
@@ -9408,18 +9466,23 @@ Retorne APENAS o JSON válido, sem markdown ou texto extra.`;
                         }
 
                         // Inserir imagens após a seção de análise de imagens
-                        if (secao.heading.includes('Imagem') || secao.heading.includes('imagem') || secao.heading.includes('🖼')) {
+                        if (secao.heading && (secao.heading.includes('Imagem') || secao.heading.includes('imagem') || secao.heading.includes('🖼'))) {
                             for (const fig of (challenge.figures || [])) {
                                 const imageUrl = fig.url;
                                 if (imageUrl && !imageUrl.startsWith('data:')) {
-                                    notionChildren.push({
-                                        object: 'block', type: 'image',
-                                        image: {
-                                            type: 'external',
-                                            external: { url: imageUrl },
-                                            caption: [{ type: 'text', text: { content: `${fig.label}${fig.caption ? ' — ' + fig.caption.substring(0, 200) : ''}` } }]
-                                        }
-                                    });
+                                    try {
+                                        const captionText = `${fig.label || 'Imagem'}${fig.caption ? ' — ' + fig.caption.substring(0, 200) : ''}`;
+                                        notionChildren.push({
+                                            object: 'block', type: 'image',
+                                            image: {
+                                                type: 'external',
+                                                external: { url: imageUrl },
+                                                caption: [{ type: 'text', text: { content: captionText } }]
+                                            }
+                                        });
+                                    } catch (imgErr) {
+                                        console.warn('[Notion] Erro ao adicionar imagem:', imgErr);
+                                    }
                                 }
                             }
                         }
@@ -9431,27 +9494,30 @@ Retorne APENAS o JSON válido, sem markdown ou texto extra.`;
                     if (challenge.citation) {
                         notionChildren.push({
                             object: 'block', type: 'quote',
-                            quote: { rich_text: [{ type: 'text', text: { content: `📖 Fonte: ${challenge.citation}` } }] }
+                            quote: { rich_text: [{ type: 'text', text: { content: `📖 Fonte: ${challenge.citation}`.substring(0, 2000) } }] }
                         });
                     }
 
-                    // --- Enviar ao Notion via proxy ---
+                    // --- ETAPA 4: Enviar ao Notion via proxy ---
                     // Notion limita a 100 blocos por requisição
                     const childrenToSend = notionChildren.slice(0, 100);
+                    console.log('[Notion] Etapa 4: Enviando ao Notion...', `(${childrenToSend.length} blocos)`);
 
                     const notionBody = {
                         parent: { database_id: notionConfig.dbId },
                         properties: {
-                            'Nome': { title: [{ text: { content: summaryData.titulo || `Fisiopatologia — ${challenge.specialty}` } }] },
+                            'Nome': { title: [{ text: { content: (summaryData.titulo || `Fisiopatologia — ${challenge.specialty}`).substring(0, 200) } }] },
                             'Doença': { rich_text: [{ text: { content: (summaryData.doenca || challenge.gabarito?.diagnostico_final || challenge.specialty || '').substring(0, 200) } }] },
-                            'Especialidade': { select: { name: challenge.specialty || 'Geral' } },
-                            'Nota': { number: evaluationResult.score },
+                            'Especialidade': { select: { name: (challenge.specialty || 'Geral').substring(0, 100) } },
+                            'Nota': { number: parseFloat(evaluationResult.score) || 0 },
                             'Data': { date: { start: new Date().toISOString().split('T')[0] } }
                         },
                         children: childrenToSend
                     };
 
                     const proxyUrl = notionConfig.proxyUrl.replace(/\/$/, '');
+                    console.log('[Notion] Proxy URL:', proxyUrl);
+
                     const notionRes = await fetch(proxyUrl, {
                         method: 'POST',
                         headers: {
@@ -9462,15 +9528,25 @@ Retorne APENAS o JSON válido, sem markdown ou texto extra.`;
                         body: JSON.stringify(notionBody)
                     });
 
+                    const responseBody = await notionRes.text();
+                    console.log('[Notion] Resposta do proxy:', notionRes.status, responseBody.substring(0, 500));
+
                     if (!notionRes.ok) {
-                        const errData = await notionRes.json().catch(() => ({}));
-                        throw new Error(errData.message || `Erro ${notionRes.status} ao criar página no Notion.`);
+                        let errMsg = `Erro ${notionRes.status}`;
+                        try {
+                            const errData = JSON.parse(responseBody);
+                            errMsg = errData.message || errData.error?.message || errData.object || errMsg;
+                            if (errData.code) errMsg += ` (${errData.code})`;
+                        } catch (e) {
+                            errMsg += ': ' + responseBody.substring(0, 200);
+                        }
+                        throw new Error(`Notion API: ${errMsg}`);
                     }
 
-                    console.log('[Notion] Resumo de fisiopatologia enviado com sucesso!');
+                    console.log('[Notion] ✅ Resumo de fisiopatologia enviado com sucesso!');
                     return true;
                 } catch (err) {
-                    console.error('[Notion] Erro ao gerar/enviar resumo:', err);
+                    console.error('[Notion] ❌ Erro ao gerar/enviar resumo:', err);
                     throw err;
                 }
             };
