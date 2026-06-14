@@ -1234,6 +1234,55 @@ const FluxogramasTab = React.memo(({ fluxogramas = [], setDb, callIA, extractTex
                 const flowDesc = flowToSimulate.description || '';
                 const flowNodes = (flowToSimulate.data?.nodes || []).map(n => `- [${n.type.toUpperCase()}] ${n.label}: ${n.description}`).join('\n');
                 
+                // --- GERADOR DE DIVERSIDADE CLÍNICA E DEMOGRÁFICA ---
+                const titleLower = flowTitle.toLowerCase();
+                let randomGender = '';
+                let randomAge = '';
+                let randomSetting = '';
+                let randomVariation = '';
+
+                const genders = ['masculino', 'feminino'];
+                const agesPediatric = ['recém-nascido (0-28 dias)', 'lactente (1-12 meses)', 'criança pequena (1-4 anos)', 'escolar (5-11 anos)', 'adolescente (12-17 anos)'];
+                const agesAdult = ['jovem adulto (18-35 anos)', 'adulto de meia-idade (36-59 anos)', 'idoso (60-74 anos)', 'idoso muito idoso (75+ anos)'];
+                const agesGeriatric = ['idoso (60-74 anos)', 'idoso muito idoso (75-85 anos)', 'idoso frágil (>85 anos)'];
+                const settingsList = ['Pronto-Socorro / Emergência', 'Unidade Básica de Saúde (UBS) / Atenção Primária', 'Ambulatório de Especialidades', 'Consultório Médico Privado', 'Visita Domiciliar'];
+                const variationsList = [
+                    'apresentação típica e clássica da patologia',
+                    'apresentação atípica ou sintomas iniciais atípicos/mascarados/sutis',
+                    'presença de comorbidades relevantes (ex: diabetes mellitus, hipertensão arterial, doença renal crônica, tabagismo ou DPOC)',
+                    'histórico socioepidemiológico específico ou com restrições socioeconômicas no manejo',
+                    'paciente ansioso, pouco cooperativo ou com barreiras de comunicação/compreensão'
+                ];
+
+                if (titleLower.includes('pediat') || titleLower.includes('criança') || titleLower.includes('infantil') || titleLower.includes('lactente') || titleLower.includes('bebê') || titleLower.includes('recém-nascido') || titleLower.includes('neonat') || titleLower.includes('escolar')) {
+                    randomAge = agesPediatric[Math.floor(Math.random() * agesPediatric.length)];
+                    randomGender = genders[Math.floor(Math.random() * genders.length)];
+                } else if (titleLower.includes('gestante') || titleLower.includes('pré-natal') || titleLower.includes('gravidez') || titleLower.includes('obstetríc') || titleLower.includes('parto') || titleLower.includes('puerpér') || titleLower.includes('pós-parto')) {
+                    randomAge = 'mulher em idade fértil / gestante';
+                    randomGender = 'feminino';
+                } else if (titleLower.includes('idoso') || titleLower.includes('geriátric')) {
+                    randomAge = agesGeriatric[Math.floor(Math.random() * agesGeriatric.length)];
+                    randomGender = genders[Math.floor(Math.random() * genders.length)];
+                } else {
+                    randomAge = agesAdult[Math.floor(Math.random() * agesAdult.length)];
+                    randomGender = genders[Math.floor(Math.random() * genders.length)];
+                }
+
+                randomSetting = settingsList[Math.floor(Math.random() * settingsList.length)];
+                randomVariation = variationsList[Math.floor(Math.random() * variationsList.length)];
+                const randomSeedVal = Math.random().toString(36).substring(7);
+
+                const diversityBlock = `
+ATENÇÃO — DIRETRIZ DE DIVERSIDADE DA SIMULAÇÃO:
+Para garantir que cada simulação seja única e evite repetições, você DEVE construir obrigatoriamente um caso com as seguintes características demográficas e clínicas específicas:
+- Sexo do paciente: ${randomGender}
+- Idade/Faixa etária: ${randomAge}
+- Local/Contexto de atendimento inicial: ${randomSetting}
+- Detalhe/Variação clínica: ${randomVariation}
+- Semente de Variabilidade: ${randomSeedVal}
+
+Desenvolva os sintomas, a anamnese e os achados físicos iniciais com base estritamente nessas características, mantendo a compatibilidade integral com a referência médica do fluxograma.`;
+
                 // Build a block with past case summaries so the AI avoids repeating them
                 const pastReviews = (flowToSimulate.aiReviews || []);
                 const pastCasesBlock = pastReviews.length > 0
@@ -1250,8 +1299,9 @@ Sua missão é conduzir uma simulação clínica interativa (Caso Clínico) onde
 
 ${guidelineContext}
 ${pastCasesBlock}
+${diversityBlock}
 INSTRUÇÕES IMPORTANTES DA SIMULAÇÃO:
-1. Crie uma apresentação inicial do paciente (caso clínico INÉDITO, realista, compatível com a diretriz e DIFERENTE de todos os casos anteriores listados acima). Varie: idade, sexo, queixa principal, contexto de chegada (emergência, UBS, ambulatório, consultório), comorbidades e detalhes socioepidemiológicos. O caso DEVE ser 100% compatível com a referência.
+1. Crie uma apresentação inicial do paciente (caso clínico INÉDITO, realista, compatível com a diretriz e DIFERENTE de todos os casos anteriores listados acima). O caso DEVE ser 100% compatível com a referência e usar a demografia/variação da diretriz de diversidade acima.
 2. NUNCA diga o diagnóstico, o nome das condutas corretas ou o caminho ideal diretamente. O estudante deve investigar e tomar as decisões.
 3. Se o estudante solicitar anamnese, exame físico ou exames complementares (como hemograma, imagem, etc.), responda com os dados clínicos exatos (invente dados realistas e compatíveis com a diretriz). Seja extremamente clínico e detalhado nas descrições!
 4. Mantenha as respostas curtas e objetivas, agindo como a equipe de enfermagem ou o próprio paciente, estimulando o raciocínio socrático.
@@ -1267,7 +1317,7 @@ Responda APENAS com a introdução do paciente e pergunte qual é a primeira con
                 try {
                     const responseText = await callIA([
                         { role: 'user', parts: [{ text: initialPrompt }] }
-                    ], simulationModel);
+                    ], simulationModel, { temperature: 1.0 });
                     
                     const cleanResponse = responseText.replace(/\[ERRO_\w+\] /, '');
                     
@@ -9171,12 +9221,12 @@ ${safeScript}
             // MOTOR DE INTELIGÊNCIA ARTIFICIAL E OCR
             // ==========================================
 
-            const callIA = async (msgs, forceModel = null) => {
+            const callIA = async (msgs, forceModel = null, customConfig = {}) => {
                 const apiKey = aiConfig.key || "";
                 let model = forceModel || aiConfig.model || (availableModels && availableModels[0]) || "gemini-1.5-flash";
                 let retries = 5; let delay = 1000;
 
-                const generationConfig = { maxOutputTokens: 8192 };
+                const generationConfig = { maxOutputTokens: 8192, ...customConfig };
                 try {
                     // JSON mode NÃO é compatível com requisições que contêm imagens (inlineData)
                     const hasImage = msgs.some(m => m.parts && m.parts.some(p => p.inlineData));
@@ -14231,8 +14281,8 @@ Estrutura esperada:
 
                                 const visionNote = elaboradorState.fileData
                                     ? (isPdf
-                                        ? 'NOTA DE VISÃO: Analise cuidadosamente o material de entrada fornecido (tanto o texto extraído quanto as imagens das páginas do PDF anexadas). É OBRIGATÓRIO que você elabore questões baseadas nestes dados. Se houver elementos visuais importantes (como diagramas, fluxogramas de conduta, tabelas, critérios de pontuação, exames de imagem ou ECGs) nas imagens das páginas, crie questões sobre eles.'
-                                        : 'NOTA DE VISÃO: Analise cuidadosamente a imagem fornecida (como um ECG, exame de imagem RX/TC ou foto clínica) e baseie o caso clínico e as alternativas nos achados visuais desta imagem.')
+                                        ? 'NOTA DE VISÃO E CONTEÚDO: Analise cuidadosamente o material de entrada fornecido (tanto o texto extraído quanto as imagens das páginas do PDF anexadas). Use as informações e diagramas/tabelas/ECGs fornecidos como base de conhecimento científico para criar as questões. Entretanto, é terminantemente PROIBIDO criar questões que dependam de visualizar uma imagem ou que digam "veja a figura". Descreva textualmente quaisquer achados necessários (ex: "o ECG mostra ritmo de fibrilação atrial..."). Nenhuma questão gerada conterá imagens.'
+                                        : 'NOTA DE VISÃO E CONTEÚDO: Analise a imagem fornecida (como um ECG, raio-x, tomografia) apenas para extrair a informação clínica necessária. Traduza qualquer achado visual em descrição textual no enunciado do caso clínico (ex: "Tomografia computadorizada de tórax revela consolidação com broncogramas aéreos..."). A questão gerada deve ser puramente em texto, sem anexar ou referenciar imagens diretamente.')
                                     : '';
 
                                 const batchPrompt = `Atue como o examinador médico mais carrasco, impiedoso e exigente do mundo, padrão de excelência extrema de nível UTI.
@@ -14242,9 +14292,11 @@ Tema/Foco opcional: ${focus || 'Baseado estritamente no documento ou imagem anex
 
 ${visionNote}
 
-REGRAS DE CONTEÚDO E FIDELIDADE (CRÍTICO):
+REGRAS DE CONTEÚDO E FORMATO (CRÍTICO):
 1. É TERMINANTEMENTE PROIBIDO inventar, deduzir ou utilizar diretrizes médicas, condutas, parâmetros, medicamentos ou doses externos que NÃO estejam explicitamente descritos ou ilustrados no material fornecido (PDF ou imagem).
 2. Baseie todas as perguntas, alternativas corretas e erradas e justificativas UNICAMENTE nos dados contidos no PDF/imagem fornecidos. Se o PDF diz uma conduta específica, use EXATAMENTE ela. Não assuma nada fora do documento!
+3. REQUISITO DE TEXTO PURO: NUNCA inclua links de imagens, referências a figuras nas questões, ou propriedades de imagens. As questões devem ser totalmente descritivas e baseadas em texto.
+4. REQUISITO DE 5 ALTERNATIVAS BEM CONSTRUÍDAS: O campo "alternatives" deve conter EXATAMENTE 5 strings de alternativas (A, B, C, D e E) que sejam extremamente bem estruturadas, com distratores altamente plausíveis (erros clínicos típicos, diagnósticos diferenciais comuns), evitando opções óbvias, absurdas ou redundantes. O campo "alternativeExplanations" deve conter EXATAMENTE 5 justificativas clínicas detalhadas correspondentes a cada alternativa.
 
 INSTRUÇÃO CRÍTICA DE VARIEDADE (Seed: ${Date.now()}-lote${batchIndex}): É OBRIGATÓRIO que as questões sejam COMPLETAMENTE NOVAS e INÉDITAS. Explore ângulos clínicos inusitados, rodapés de livro, complicações raras, exceções à regra e cenários diagnósticos confusos. Fuja do óbvio!
 ${allGenerated.length > 0 ? `\nTemas JÁ usados nesta sessão (NÃO repita): ${allGenerated.map(q => q.title).join(', ')}` : ''}
@@ -14253,12 +14305,23 @@ IMPORTANTE: Retorne APENAS um array JSON válido com EXATAMENTE ${batchQty} obje
 [
   {
     "title": "Tema curto da questão (Ex: Sepse Pediátrica)",
-    "question": "Enunciado clinicamente denso...",
-    "alternatives": ["A) ...", "B) ..."],
-    "alternativeExplanations": ["Exp A", "Exp B"],
+    "question": "Enunciado clinicamente denso e puramente descritivo em texto...",
+    "alternatives": [
+      "A) [Texto completo e desafiador da alternativa A]",
+      "B) [Texto completo e desafiador da alternativa B]",
+      "C) [Texto completo e desafiador da alternativa C]",
+      "D) [Texto completo e desafiador da alternativa D]",
+      "E) [Texto completo e desafiador da alternativa E]"
+    ],
+    "alternativeExplanations": [
+      "[Justificativa clínica detalhada da alternativa A]",
+      "[Justificativa clínica detalhada da alternativa B]",
+      "[Justificativa clínica detalhada da alternativa C]",
+      "[Justificativa clínica detalhada da alternativa D]",
+      "[Justificativa clínica detalhada da alternativa E]"
+    ],
     "correctAlternative": "A",
-    "lessonLearned": "O detalhe matador desta questão.",
-    "imagePage": 3 // Opcional: Se a questão for baseada ou fizer referência direta a um elemento visual (fluxograma, tabela, imagem, ECG) de uma página específica do PDF, informe o número da página correspondente aqui como um número inteiro. Caso contrário, use null ou omita.
+    "lessonLearned": "O detalhe matador desta questão."
   }
 ]`;
 
@@ -14299,19 +14362,37 @@ IMPORTANTE: Retorne APENAS um array JSON válido com EXATAMENTE ${batchQty} obje
                                     batchGenerated = batchGenerated.slice(0, batchQty);
                                 }
 
-                                // Associar as imagens das páginas correspondentes, se fornecidas pela IA
+                                // Sanitização para garantir exatamente 5 alternativas bem construídas e sem imagens
                                 batchGenerated = batchGenerated.map(q => {
-                                    let imgB64 = null;
-                                    if (q.imagePage) {
-                                        const pageNum = Number(q.imagePage);
-                                        const foundImg = extractedImages.find(img => img.page === pageNum);
-                                        if (foundImg) {
-                                            imgB64 = `data:image/jpeg;base64,${foundImg.b64}`;
+                                    let alts = Array.isArray(q.alternatives) ? q.alternatives : [];
+                                    if (alts.length < 5) {
+                                        const prefixes = ['A', 'B', 'C', 'D', 'E'];
+                                        while (alts.length < 5) {
+                                            alts.push(`${prefixes[alts.length]}) [Alternativa gerada automaticamente]`);
                                         }
+                                    } else if (alts.length > 5) {
+                                        alts = alts.slice(0, 5);
                                     }
+
+                                    let exps = Array.isArray(q.alternativeExplanations) ? q.alternativeExplanations : [];
+                                    if (exps.length < 5) {
+                                        while (exps.length < 5) {
+                                            exps.push(`Justificativa automática.`);
+                                        }
+                                    } else if (exps.length > 5) {
+                                        exps = exps.slice(0, 5);
+                                    }
+
+                                    let cleanQuestion = q.question || '';
+                                    cleanQuestion = cleanQuestion.replace(/conforme a imagem|veja a figura|de acordo com a imagem/gi, 'conforme os dados apresentados');
+
                                     return {
                                         ...q,
-                                        image: imgB64 || null,
+                                        question: cleanQuestion,
+                                        alternatives: alts,
+                                        alternativeExplanations: exps,
+                                        image: null,
+                                        imagePage: null,
                                         tags: [...(q.tags || []), ...(elaboradorState.settings.customTag ? [elaboradorState.settings.customTag] : [])]
                                     };
                                 });
@@ -14377,6 +14458,10 @@ Você deve retornar EXATAMENTE ${selectedPool.length} questões. Não adicione q
 
 Mantenha o mesmo nível de dificuldade e o mesmo núcleo de conhecimento clínico. Mude a estrutura do enunciado e das alternativas de acordo com o formato solicitado.
 
+REGRAS DE FORMATO E CONTEÚDO:
+1. REQUISITO DE TEXTO PURO: NUNCA inclua links de imagens, referências a figuras nas questões, ou propriedades de imagens. As questões devem ser totalmente descritivas e baseadas em texto.
+2. REQUISITO DE 5 ALTERNATIVAS BEM CONSTRUÍDAS: Para questões de Múltipla Escolha, o campo "alternatives" deve conter EXATAMENTE 5 strings de alternativas (A, B, C, D e E) e o campo "alternativeExplanations" deve conter EXATAMENTE 5 justificativas correspondentes.
+
 Aqui estão as questões originais:
 ${questionsJSON}
 
@@ -14384,9 +14469,21 @@ IMPORTANTE: Retorne APENAS um objeto JSON válido representando o novo array de 
 [
   {
     "title": "Mesmo tema",
-    "question": "Novo enunciado adaptado",
-    "alternatives": ["A) ...", "B) ..."],
-    "alternativeExplanations": ["Exp A", "Exp B"],
+    "question": "Novo enunciado adaptado (sem referências a imagens)",
+    "alternatives": [
+      "A) ...",
+      "B) ...",
+      "C) ...",
+      "D) ...",
+      "E) ..."
+    ],
+    "alternativeExplanations": [
+      "Explicação A",
+      "Explicação B",
+      "Explicação C",
+      "Explicação D",
+      "Explicação E"
+    ],
     "correctAlternative": "A",
     "lessonLearned": "Lição de ouro extraída."
   }
@@ -14398,10 +14495,39 @@ IMPORTANTE: Retorne APENAS um objeto JSON válido representando o novo array de 
                                 if (!match) throw new Error("JSON não encontrado na resposta");
                                 let generated = robustJSONParse(match[0]);
                                 if (Array.isArray(generated)) {
-                                    generated = generated.slice(0, qty).map(q => ({
-                                        ...q,
-                                        tags: [...(q.tags || []), ...(elaboradorState.settings.customTag ? [elaboradorState.settings.customTag] : [])]
-                                     }));
+                                    generated = generated.slice(0, qty).map(q => {
+                                        let alts = Array.isArray(q.alternatives) ? q.alternatives : [];
+                                        if (alts.length < 5) {
+                                            const prefixes = ['A', 'B', 'C', 'D', 'E'];
+                                            while (alts.length < 5) {
+                                                alts.push(`${prefixes[alts.length]}) [Alternativa gerada automaticamente]`);
+                                            }
+                                        } else if (alts.length > 5) {
+                                            alts = alts.slice(0, 5);
+                                        }
+
+                                        let exps = Array.isArray(q.alternativeExplanations) ? q.alternativeExplanations : [];
+                                        if (exps.length < 5) {
+                                            while (exps.length < 5) {
+                                                exps.push(`Justificativa automática.`);
+                                            }
+                                        } else if (exps.length > 5) {
+                                            exps = exps.slice(0, 5);
+                                        }
+
+                                        let cleanQuestion = q.question || '';
+                                        cleanQuestion = cleanQuestion.replace(/conforme a imagem|veja a figura|de acordo com a imagem/gi, 'conforme os dados apresentados');
+
+                                        return {
+                                            ...q,
+                                            question: cleanQuestion,
+                                            alternatives: alts,
+                                            alternativeExplanations: exps,
+                                            image: null,
+                                            imagePage: null,
+                                            tags: [...(q.tags || []), ...(elaboradorState.settings.customTag ? [elaboradorState.settings.customTag] : [])]
+                                        };
+                                    });
                                 }
                                 setElaboradorState(p => ({ ...p, questions: generated, status: 'done', isConverting: false }));
                                 showAlert(`✅ ${generated.length} questões convertidas com sucesso!`);
