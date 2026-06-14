@@ -809,6 +809,50 @@ const FluxogramasTab = React.memo(({ fluxogramas = [], setDb, callIA, extractTex
             const [isRecognitionActive, setIsRecognitionActive] = React.useState(false);
             const [isVoiceSynthesizing, setIsVoiceSynthesizing] = React.useState(false);
             const [gradingScorecard, setGradingScorecard] = React.useState(null);
+            
+            // New Advanced Voice Tools States
+            const [voiceVolume, setVoiceVolume] = React.useState(1.0);
+            const [voiceRate, setVoiceRate] = React.useState(0.95);
+            const [voicePitch, setVoicePitch] = React.useState(1.0);
+            const [selectedVoiceName, setSelectedVoiceName] = React.useState('');
+            const [voiceEngine, setVoiceEngine] = React.useState(() => localStorage.getItem('flowchart_voice_engine') || 'cloud');
+            const [silenceThreshold, setSilenceThreshold] = React.useState(1800);
+            const [availableVoices, setAvailableVoices] = React.useState([]);
+            const [currentSpeechSentence, setCurrentSpeechSentence] = React.useState('');
+            const [speechMicLevel, setSpeechMicLevel] = React.useState(0);
+            const [showVoiceConfig, setShowVoiceConfig] = React.useState(false);
+
+            const simulationModeRef = React.useRef('voice');
+            const cloudAudioRef = React.useRef(null);
+            const micStreamRef = React.useRef(null);
+            const audioContextRef = React.useRef(null);
+            const animationFrameRef = React.useRef(null);
+
+            // Sync simulationMode ref to avoid stale closures
+            React.useEffect(() => {
+                simulationModeRef.current = simulationMode;
+            }, [simulationMode]);
+
+            // Sync voiceEngine storage
+            React.useEffect(() => {
+                localStorage.setItem('flowchart_voice_engine', voiceEngine);
+            }, [voiceEngine]);
+
+            // Fetch available voices on load
+            React.useEffect(() => {
+                if (!window.speechSynthesis) return;
+                const updateVoices = () => {
+                    const voices = window.speechSynthesis.getVoices();
+                    setAvailableVoices(voices);
+                };
+                updateVoices();
+                window.speechSynthesis.onvoiceschanged = updateVoices;
+                return () => {
+                    if (window.speechSynthesis) {
+                        window.speechSynthesis.onvoiceschanged = null;
+                    }
+                };
+            }, []);
             const [showTranscriptId, setShowTranscriptId] = React.useState(null);
             const [isEvaluating, setIsEvaluating] = React.useState(false);
             const [chatInputText, setChatInputText] = React.useState('');
@@ -912,6 +956,12 @@ const FluxogramasTab = React.memo(({ fluxogramas = [], setDb, callIA, extractTex
                 const voices = window.speechSynthesis.getVoices();
                 if (!voices.length) return null;
 
+                // User custom selection targets a specific voice name
+                if (selectedVoiceName) {
+                    const selected = voices.find(v => v.name === selectedVoiceName);
+                    if (selected) return selected;
+                }
+
                 // Priority 1: Microsoft Neural PT-BR (Edge) — "Microsoft Francisca Online (Natural)"
                 // These are the highest-quality voices available in any browser
                 const msNeuralPt = voices.find(v =>
@@ -983,12 +1033,8 @@ const FluxogramasTab = React.memo(({ fluxogramas = [], setDb, callIA, extractTex
             };
 
             const speakText = (text) => {
-                if (!window.speechSynthesis) return;
-
                 // Cancel any ongoing speech
-                window.speechSynthesis.cancel();
-                ttsQueueRef.current = [];
-                ttsActiveRef.current = false;
+                stopSpeaking();
 
                 // Clean markdown, brackets, and expand medical terms
                 let clean = text
@@ -1006,8 +1052,59 @@ const FluxogramasTab = React.memo(({ fluxogramas = [], setDb, callIA, extractTex
 
                 ttsQueueRef.current = [...chunks];
                 setIsVoiceSynthesizing(true);
+                ttsActiveRef.current = true;
 
-                const speakNext = () => {
+                // ----------------------------------------------------
+                // CLOUD TTS ENGINE
+                // ----------------------------------------------------
+                const speakNextCloud = () => {
+                    const chunk = ttsQueueRef.current.shift();
+                    if (!chunk) {
+                        setIsVoiceSynthesizing(false);
+                        ttsActiveRef.current = false;
+                        setCurrentSpeechSentence('');
+                        
+                        // Autonomous listening trigger:
+                        if (simulationModeRef.current === 'voice') {
+                            setTimeout(() => {
+                                startSpeechRecognition();
+                            }, 300);
+                        }
+                        return;
+                    }
+
+                    setCurrentSpeechSentence(chunk);
+                    const url = `https://translate.google.com/translate_tts?ie=UTF-8&tl=pt-BR&client=tw-ob&q=${encodeURIComponent(chunk)}`;
+                    const audio = new Audio(url);
+                    audio.playbackRate = voiceRate;
+                    audio.volume = voiceVolume;
+                    audio.onended = () => {
+                        setTimeout(speakNextCloud, 80);
+                    };
+                    audio.onerror = (e) => {
+                        console.warn("Cloud voice error, falling back to browser voice...", e);
+                        ttsQueueRef.current.unshift(chunk);
+                        speakNextBrowser();
+                    };
+                    cloudAudioRef.current = audio;
+                    audio.play().catch(err => {
+                        console.warn("Could not play cloud voice:", err);
+                        ttsQueueRef.current.unshift(chunk);
+                        speakNextBrowser();
+                    });
+                };
+
+                // ----------------------------------------------------
+                // BROWSER / SYSTEM TTS ENGINE
+                // ----------------------------------------------------
+                const speakNextBrowser = () => {
+                    if (!window.speechSynthesis) {
+                        setIsVoiceSynthesizing(false);
+                        ttsActiveRef.current = false;
+                        setCurrentSpeechSentence('');
+                        return;
+                    }
+
                     // Chrome keep-alive: pause/resume to prevent the browser from suspending TTS
                     if (window.speechSynthesis.paused) {
                         window.speechSynthesis.resume();
@@ -1015,11 +1112,20 @@ const FluxogramasTab = React.memo(({ fluxogramas = [], setDb, callIA, extractTex
 
                     const chunk = ttsQueueRef.current.shift();
                     if (!chunk) {
-                        // Queue exhausted
                         setIsVoiceSynthesizing(false);
                         ttsActiveRef.current = false;
+                        setCurrentSpeechSentence('');
+                        
+                        // Autonomous listening trigger:
+                        if (simulationModeRef.current === 'voice') {
+                            setTimeout(() => {
+                                startSpeechRecognition();
+                            }, 300);
+                        }
                         return;
                     }
+
+                    setCurrentSpeechSentence(chunk);
 
                     const utterance = new SpeechSynthesisUtterance(chunk);
                     utterance.lang = 'pt-BR';
@@ -1027,30 +1133,43 @@ const FluxogramasTab = React.memo(({ fluxogramas = [], setDb, callIA, extractTex
                     const voice = pickBestVoice();
                     if (voice) utterance.voice = voice;
 
-                    // Natural, clear clinical mentor voice
-                    utterance.rate = 0.92;   // Slightly slower → clearer, authoritative
-                    utterance.pitch = 1.05;  // Slightly warmer than robotic default of 1.0
-                    utterance.volume = 1.0;
+                    utterance.rate = voiceRate;
+                    utterance.pitch = voicePitch;
+                    utterance.volume = voiceVolume;
 
                     utterance.onend = () => {
                         if (ttsQueueRef.current.length > 0) {
-                            // Small natural pause between sentences
-                            setTimeout(speakNext, 80);
+                            setTimeout(speakNextBrowser, 80);
                         } else {
                             setIsVoiceSynthesizing(false);
                             ttsActiveRef.current = false;
+                            setCurrentSpeechSentence('');
+                            
+                            // Autonomous listening trigger:
+                            if (simulationModeRef.current === 'voice') {
+                                setTimeout(() => {
+                                    startSpeechRecognition();
+                                }, 300);
+                            }
                         }
                     };
                     utterance.onerror = (e) => {
-                        // 'interrupted' errors are expected when cancel() is called
                         if (e.error !== 'interrupted' && e.error !== 'canceled') {
                             console.warn('TTS error:', e.error);
                         }
                         if (ttsQueueRef.current.length > 0) {
-                            setTimeout(speakNext, 100);
+                            setTimeout(speakNextBrowser, 100);
                         } else {
                             setIsVoiceSynthesizing(false);
                             ttsActiveRef.current = false;
+                            setCurrentSpeechSentence('');
+                            
+                            // Autonomous listening trigger:
+                            if (simulationModeRef.current === 'voice') {
+                                setTimeout(() => {
+                                    startSpeechRecognition();
+                                }, 300);
+                            }
                         }
                     };
 
@@ -1058,25 +1177,38 @@ const FluxogramasTab = React.memo(({ fluxogramas = [], setDb, callIA, extractTex
                     window.speechSynthesis.speak(utterance);
                 };
 
-                // Voices may not be loaded yet on first call — wait if needed
-                const voices = window.speechSynthesis.getVoices();
-                if (voices.length === 0) {
-                    window.speechSynthesis.onvoiceschanged = () => {
-                        window.speechSynthesis.onvoiceschanged = null;
-                        speakNext();
-                    };
+                // Trigger the correct voice engine
+                if (voiceEngine === 'cloud') {
+                    speakNextCloud();
                 } else {
-                    speakNext();
+                    const voices = window.speechSynthesis.getVoices();
+                    if (voices.length === 0) {
+                        window.speechSynthesis.onvoiceschanged = () => {
+                            window.speechSynthesis.onvoiceschanged = null;
+                            speakNextBrowser();
+                        };
+                    } else {
+                        speakNextBrowser();
+                    }
                 }
             };
 
             const stopSpeaking = () => {
                 ttsQueueRef.current = [];
                 ttsActiveRef.current = false;
-                if (window.speechSynthesis) {
-                    window.speechSynthesis.cancel();
-                    setIsVoiceSynthesizing(false);
+                setCurrentSpeechSentence('');
+                if (cloudAudioRef.current) {
+                    try { cloudAudioRef.current.pause(); } catch (e) {}
+                    cloudAudioRef.current = null;
                 }
+                if (window.speechSynthesis) {
+                    try { window.speechSynthesis.cancel(); } catch(e) {}
+                }
+                setIsVoiceSynthesizing(false);
+            };
+
+            const handleTestVoice = () => {
+                speakText("Olá! Teste de áudio ativado. O som do seu mentor clínico está configurado e funcionando perfeitamente.");
             };
             
             // Speech Recognition
@@ -1084,6 +1216,56 @@ const FluxogramasTab = React.memo(({ fluxogramas = [], setDb, callIA, extractTex
             const recognitionSilenceTimerRef = React.useRef(null);
             const recognitionAccumulatedRef = React.useRef('');
             
+            const startMicLevelMeter = async () => {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    micStreamRef.current = stream;
+                    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+                    const audioContext = new AudioContextClass();
+                    audioContextRef.current = audioContext;
+                    const source = audioContext.createMediaStreamSource(stream);
+                    const analyser = audioContext.createAnalyser();
+                    analyser.fftSize = 64;
+                    source.connect(analyser);
+                    
+                    const bufferLength = analyser.frequencyBinCount;
+                    const dataArray = new Uint8Array(bufferLength);
+                    
+                    const updateMeter = () => {
+                        if (!analyser) return;
+                        analyser.getByteFrequencyData(dataArray);
+                        let values = 0;
+                        for (let i = 0; i < bufferLength; i++) {
+                            values += dataArray[i];
+                        }
+                        const average = values / bufferLength;
+                        setSpeechMicLevel(average);
+                        animationFrameRef.current = requestAnimationFrame(updateMeter);
+                    };
+                    updateMeter();
+                } catch (err) {
+                    console.warn("Could not start mic level meter:", err);
+                }
+            };
+            
+            const stopMicLevelMeter = () => {
+                if (animationFrameRef.current) {
+                    cancelAnimationFrame(animationFrameRef.current);
+                    animationFrameRef.current = null;
+                }
+                if (audioContextRef.current) {
+                    try { audioContextRef.current.close(); } catch(e) {}
+                    audioContextRef.current = null;
+                }
+                if (micStreamRef.current) {
+                    micStreamRef.current.getTracks().forEach(track => {
+                        try { track.stop(); } catch(e) {}
+                    });
+                    micStreamRef.current = null;
+                }
+                setSpeechMicLevel(0);
+            };
+
             const startSpeechRecognition = () => {
                 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
                 if (!SpeechRecognition) {
@@ -1106,6 +1288,7 @@ const FluxogramasTab = React.memo(({ fluxogramas = [], setDb, callIA, extractTex
                 rec.onstart = () => {
                     setIsRecognitionActive(true);
                     stopSpeaking(); // user speaks, stop AI synthesis
+                    startMicLevelMeter();
                 };
                 
                 rec.onresult = (event) => {
@@ -1138,7 +1321,7 @@ const FluxogramasTab = React.memo(({ fluxogramas = [], setDb, callIA, extractTex
                         recognitionAccumulatedRef.current += (recognitionAccumulatedRef.current ? ' ' : '') + finalText.trim();
                         setInterimTranscript(recognitionAccumulatedRef.current);
                         
-                        // Aguarda 1,8 s de silêncio após a última palavra antes de enviar
+                        // Aguarda o silêncio dinâmico configurado antes de enviar
                         if (recognitionSilenceTimerRef.current) clearTimeout(recognitionSilenceTimerRef.current);
                         recognitionSilenceTimerRef.current = setTimeout(() => {
                             const toSend = recognitionAccumulatedRef.current.trim();
@@ -1147,7 +1330,7 @@ const FluxogramasTab = React.memo(({ fluxogramas = [], setDb, callIA, extractTex
                             if (toSend) {
                                 handleSendReviewChatMessage(toSend);
                             }
-                        }, 1800);
+                        }, silenceThreshold);
                     }
                 };
                 
@@ -1156,6 +1339,7 @@ const FluxogramasTab = React.memo(({ fluxogramas = [], setDb, callIA, extractTex
                     console.error("Erro no reconhecimento de voz:", e);
                     setIsRecognitionActive(false);
                     setInterimTranscript('');
+                    stopMicLevelMeter();
                     
                     if (e.error === 'not-allowed') {
                         alert("⚠️ Acesso ao microfone negado ou bloqueado pelo navegador!\n\nNota importante: Como você abriu o arquivo index.html diretamente clicando duas vezes nele (protocolo file://), os navegadores modernos bloqueiam o microfone por razões de segurança corporativa.\n\nPara usar comandos de voz, você pode:\n1. Utilizar a extensão 'Live Server' no VS Code para abrir o arquivo localmente.\n2. Executar o comando 'npx serve' na pasta do arquivo.\n3. Utilizar o campo de digitação convencional.");
@@ -1164,6 +1348,7 @@ const FluxogramasTab = React.memo(({ fluxogramas = [], setDb, callIA, extractTex
                 
                 rec.onend = () => {
                     setInterimTranscript('');
+                    stopMicLevelMeter();
                     // Se o microfone ainda está marcado como ativo (não foi o usuário quem parou),
                     // reinicia automaticamente para manter a escuta contínua
                     if (recognitionRef.current && recognitionRef.current._keepAlive) {
@@ -1187,6 +1372,7 @@ const FluxogramasTab = React.memo(({ fluxogramas = [], setDb, callIA, extractTex
                     try { recognitionRef.current.stop(); } catch (e) {}
                     setIsRecognitionActive(false);
                 }
+                stopMicLevelMeter();
             };
             
             // Cleanup speech APIs on component unmount or flowchart change
@@ -3542,7 +3728,18 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                 {simulationMode === 'voice' ? (
                                     <div className={`flex flex-col items-center justify-center py-2 space-y-3 border rounded-2xl p-4 shadow-inner ${flowchartLightMode ? 'bg-zinc-50 border-zinc-200 shadow-zinc-100/50' : 'bg-zinc-950 border-zinc-900'}`}>
                                         
-                                        {/* VISUALIZER DYNAMIC WAVE */}
+                                        {/* LEGENDS / SUBTITLES OVERLAY */}
+                                        {isVoiceSynthesizing && currentSpeechSentence && (
+                                            <div className={`text-center px-4 py-2.5 rounded-2xl text-[11px] font-bold max-w-[90%] mx-auto shadow-md leading-relaxed animate-in fade-in ${
+                                                flowchartLightMode 
+                                                    ? 'bg-indigo-55 border border-indigo-200 text-indigo-850' 
+                                                    : 'bg-indigo-950/40 border border-indigo-500/20 text-indigo-300'
+                                            }`}>
+                                                <i className="fa-solid fa-volume-high mr-1 text-[10px] animate-pulse"></i> "{currentSpeechSentence}"
+                                            </div>
+                                        )}
+
+                                        {/* VISUALIZER DYNAMIC WAVE / AUDIO LEVEL EQUALIZER */}
                                         {isVoiceSynthesizing ? (
                                             <div className="flex items-center justify-center gap-1.5 h-8">
                                                 <span className="w-1.5 bg-indigo-500 rounded-full animate-bar1"></span>
@@ -3552,29 +3749,54 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                                 <span className="w-1.5 bg-indigo-400 rounded-full animate-bar5"></span>
                                             </div>
                                         ) : isRecognitionActive ? (
-                                            <div className="flex items-center justify-center gap-1.5 h-8">
-                                                <span className="w-1.5 bg-rose-500 rounded-full animate-bar1"></span>
-                                                <span className="w-1.5 bg-red-500 rounded-full animate-bar2"></span>
-                                                <span className="w-1.5 bg-rose-400 rounded-full animate-bar3"></span>
-                                                <span className="w-1.5 bg-orange-400 rounded-full animate-bar4"></span>
-                                                <span className="w-1.5 bg-red-400 rounded-full animate-bar5"></span>
+                                            /* REAL AUDIO DYNAMIC FREQUENCY METER */
+                                            <div className="flex items-center gap-1 h-8 pt-1 justify-center">
+                                                {[...Array(12)].map((_, i) => {
+                                                    const active = speechMicLevel > (i * 10);
+                                                    return (
+                                                        <div 
+                                                            key={i} 
+                                                            className={`w-1.5 rounded-full transition-all duration-75 ${
+                                                                active 
+                                                                    ? (i < 7 ? 'bg-emerald-500' : (i < 10 ? 'bg-amber-500' : 'bg-rose-500')) 
+                                                                    : (flowchartLightMode ? 'bg-zinc-200' : 'bg-zinc-800')
+                                                            }`}
+                                                            style={{
+                                                                height: active ? `${Math.min(10 + (speechMicLevel / 6) * (1 + Math.sin(i * 0.8)), 32)}px` : '6px'
+                                                            }}
+                                                        />
+                                                    );
+                                                })}
                                             </div>
                                         ) : (
                                             <div className="flex items-center justify-center gap-1 h-1.5 w-16 bg-zinc-800 rounded-full"></div>
                                         )}
                                         
                                         <p className="text-[10px] font-black uppercase text-zinc-500 tracking-wider">
-                                            {isVoiceSynthesizing ? "IA Falando (Gemini Live)..." : isRecognitionActive ? "Gravando... Fale agora!" : "Aguardando sua resposta por voz"}
+                                            {isVoiceSynthesizing ? "IA Falando..." : isRecognitionActive ? "Gravando... Fale agora!" : "Aguardando sua resposta por voz"}
                                         </p>
                                         
                                         {isRecognitionActive && (
-                                            <p className="text-xs text-rose-500 dark:text-rose-400 font-bold text-center px-6 py-1 max-w-[280px] line-clamp-2 min-h-[1.5rem] select-none italic">
+                                            <p className="text-xs text-rose-500 dark:text-rose-455 font-bold text-center px-6 py-1 max-w-[280px] line-clamp-2 min-h-[1.5rem] select-none italic leading-snug">
                                                 {interimTranscript ? `"${interimTranscript}"` : "Sua fala aparecerá aqui em tempo real..."}
                                             </p>
                                         )}
                                         
-                                        {/* BIG MIC BUTTON */}
+                                        {/* BIG MIC BUTTON & TOOLS BAR */}
                                         <div className="flex items-center gap-4">
+                                            <button 
+                                                type="button"
+                                                onClick={() => setShowVoiceConfig(!showVoiceConfig)} 
+                                                className={`w-10 h-10 rounded-full border flex items-center justify-center transition-all active:scale-90 ${
+                                                    showVoiceConfig 
+                                                        ? 'bg-indigo-600 border-indigo-500 text-white shadow-md' 
+                                                        : (flowchartLightMode ? 'bg-white border-zinc-200 text-zinc-650 hover:bg-zinc-100' : 'bg-zinc-800/80 border-zinc-700 text-zinc-400 hover:text-white')
+                                                }`}
+                                                title="Configurações de Áudio e Voz"
+                                            >
+                                                <i className="fa-solid fa-sliders text-xs"></i>
+                                            </button>
+
                                             <button 
                                                 onClick={isRecognitionActive ? stopSpeechRecognition : startSpeechRecognition} 
                                                 disabled={isEvaluating}
@@ -3584,12 +3806,184 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                                 <i className={`fa-solid ${isRecognitionActive ? 'fa-microphone-lines text-xl animate-bounce' : 'fa-microphone text-xl'}`}></i>
                                             </button>
                                             
-                                            {isVoiceSynthesizing && (
+                                            {isVoiceSynthesizing ? (
                                                 <button onClick={stopSpeaking} className="w-10 h-10 rounded-full bg-zinc-850 hover:bg-zinc-800 text-rose-400 border border-zinc-800 flex items-center justify-center transition-colors shadow-md active:scale-90" title="Pausar voz da IA">
                                                     <i className="fa-solid fa-volume-xmark text-xs"></i>
                                                 </button>
+                                            ) : (
+                                                <div className="w-10" /> /* Spacer alignment helper */
                                             )}
                                         </div>
+
+                                        {/* VOICE CONFIG PANEL (TOOLS) */}
+                                        {showVoiceConfig && (
+                                            <div className={`w-full p-5 rounded-2xl border text-left space-y-4 animate-in slide-in-from-top-4 duration-200 mt-2 ${
+                                                flowchartLightMode 
+                                                    ? 'bg-white border-zinc-200 shadow-sm' 
+                                                    : 'bg-zinc-900/95 border-zinc-800 shadow-2xl'
+                                            }`}>
+                                                <h4 className={`text-xs font-black uppercase tracking-wider flex items-center gap-1.5 ${flowchartLightMode ? 'text-zinc-800' : 'text-white'}`}>
+                                                    <i className="fa-solid fa-gears text-indigo-500"></i> Ferramentas e Configurações de Voz
+                                                </h4>
+                                                
+                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                    {/* ENGINE SELECTION */}
+                                                    <div className="space-y-1.5">
+                                                        <label className="text-[10px] font-black uppercase text-zinc-500 tracking-wider">Mecanismo de Voz (TTS)</label>
+                                                        <div className={`flex p-0.5 rounded-xl border ${flowchartLightMode ? 'bg-zinc-100 border-zinc-200' : 'bg-zinc-950 border-zinc-850'}`}>
+                                                            <button 
+                                                                type="button"
+                                                                onClick={() => setVoiceEngine('cloud')}
+                                                                className={`flex-1 py-1.5 rounded-lg text-[9px] font-black transition-all ${
+                                                                    voiceEngine === 'cloud' 
+                                                                        ? 'bg-indigo-600 text-white shadow-sm' 
+                                                                        : 'text-zinc-500 hover:text-zinc-400'
+                                                                }`}
+                                                            >
+                                                                ☁️ Nuvem (Natural)
+                                                            </button>
+                                                            <button 
+                                                                type="button"
+                                                                onClick={() => setVoiceEngine('system')}
+                                                                className={`flex-1 py-1.5 rounded-lg text-[9px] font-black transition-all ${
+                                                                    voiceEngine === 'system' 
+                                                                        ? 'bg-indigo-600 text-white shadow-sm' 
+                                                                        : 'text-zinc-500 hover:text-zinc-400'
+                                                                }`}
+                                                            >
+                                                                🖥️ Sistema (Offline)
+                                                            </button>
+                                                        </div>
+                                                    </div>
+
+                                                    {/* SILENCE DETECTION AUTO-SEND TIMEOUT */}
+                                                    <div className="space-y-1.5">
+                                                        <div className="flex justify-between items-center">
+                                                            <label className="text-[10px] font-black uppercase text-zinc-500 tracking-wider">Silêncio de Envio</label>
+                                                            <span className="text-[10px] font-black text-indigo-500">{(silenceThreshold / 1000).toFixed(1)}s</span>
+                                                        </div>
+                                                        <input 
+                                                            type="range" 
+                                                            min="1000" 
+                                                            max="4000" 
+                                                            step="200"
+                                                            value={silenceThreshold}
+                                                            onChange={(e) => setSilenceThreshold(Number(e.target.value))}
+                                                            className="w-full accent-indigo-600 cursor-pointer"
+                                                        />
+                                                        <span className="text-[8px] font-semibold text-zinc-500 block leading-none">Atraso antes de enviar sua resposta ao parar de falar.</span>
+                                                    </div>
+
+                                                    {/* SPEED SLIDER */}
+                                                    <div className="space-y-1.5">
+                                                        <div className="flex justify-between items-center">
+                                                            <label className="text-[10px] font-black uppercase text-zinc-500 tracking-wider">Velocidade da Voz</label>
+                                                            <span className="text-[10px] font-black text-indigo-500">{voiceRate}x</span>
+                                                        </div>
+                                                        <input 
+                                                            type="range" 
+                                                            min="0.6" 
+                                                            max="1.5" 
+                                                            step="0.05"
+                                                            value={voiceRate}
+                                                            onChange={(e) => setVoiceRate(Number(e.target.value))}
+                                                            className="w-full accent-indigo-600 cursor-pointer"
+                                                        />
+                                                    </div>
+
+                                                    {/* PITCH SLIDER */}
+                                                    <div className="space-y-1.5">
+                                                        <div className="flex justify-between items-center">
+                                                            <label className="text-[10px] font-black uppercase text-zinc-500 tracking-wider">Tom da Voz (Pitch)</label>
+                                                            <span className="text-[10px] font-black text-indigo-500">{voicePitch}</span>
+                                                        </div>
+                                                        <input 
+                                                            type="range" 
+                                                            disabled={voiceEngine === 'cloud'}
+                                                            min="0.5" 
+                                                            max="1.5" 
+                                                            step="0.05"
+                                                            value={voicePitch}
+                                                            onChange={(e) => setVoicePitch(Number(e.target.value))}
+                                                            className="w-full accent-indigo-600 cursor-pointer disabled:opacity-40"
+                                                        />
+                                                    </div>
+
+                                                    {/* VOLUME SLIDER */}
+                                                    <div className="space-y-1.5">
+                                                        <div className="flex justify-between items-center">
+                                                            <label className="text-[10px] font-black uppercase text-zinc-500 tracking-wider">Volume</label>
+                                                            <span className="text-[10px] font-black text-indigo-500">{Math.round(voiceVolume * 100)}%</span>
+                                                        </div>
+                                                        <input 
+                                                            type="range" 
+                                                            min="0" 
+                                                            max="1" 
+                                                            step="0.05"
+                                                            value={voiceVolume}
+                                                            onChange={(e) => setVoiceVolume(Number(e.target.value))}
+                                                            className="w-full accent-indigo-600 cursor-pointer"
+                                                        />
+                                                    </div>
+
+                                                    {/* BROWSER VOICE SELECTOR (Visible only if system selected) */}
+                                                    {voiceEngine === 'system' && (
+                                                        <div className="space-y-1.5 md:col-span-2">
+                                                            <label className="text-[10px] font-black uppercase text-zinc-500 tracking-wider block">Selecione a Voz do Sistema</label>
+                                                            <select 
+                                                                value={selectedVoiceName}
+                                                                onChange={(e) => setSelectedVoiceName(e.target.value)}
+                                                                className={`w-full p-2.5 border rounded-xl outline-none text-[11px] font-bold ${
+                                                                    flowchartLightMode 
+                                                                        ? 'bg-zinc-100 border-zinc-200 text-zinc-800' 
+                                                                        : 'bg-zinc-950 border-zinc-850 text-white'
+                                                                }`}
+                                                            >
+                                                                <option value="">Voz Padrão Otimizada</option>
+                                                                {availableVoices.filter(v => v.lang.startsWith('pt')).map(v => (
+                                                                    <option key={v.name} value={v.name}>{v.name} ({v.lang})</option>
+                                                                ))}
+                                                            </select>
+                                                        </div>
+                                                    )}
+                                                </div>
+
+                                                <div className="flex gap-2 pt-2.5 border-t border-zinc-800/20 justify-between items-center flex-wrap">
+                                                    <span className="text-[8px] font-bold text-zinc-500 max-w-[200px]">Para melhor performance de voz, utilize o Google Chrome ou Edge.</span>
+                                                    <div className="flex gap-1.5">
+                                                        <button 
+                                                            type="button"
+                                                            onClick={handleTestVoice}
+                                                            className={`px-2.5 py-1.5 rounded-xl border text-[9px] font-black uppercase tracking-wider transition-all flex items-center gap-1 active:scale-95 ${
+                                                                flowchartLightMode 
+                                                                    ? 'bg-zinc-100 hover:bg-zinc-200 border-zinc-200 text-zinc-700' 
+                                                                    : 'bg-zinc-800 hover:bg-zinc-750 border-zinc-700 text-zinc-300 hover:text-white'
+                                                            }`}
+                                                        >
+                                                            <i className="fa-solid fa-volume-high"></i> Testar Voz
+                                                        </button>
+                                                        <button 
+                                                            type="button"
+                                                            onClick={async () => {
+                                                                try {
+                                                                    await navigator.mediaDevices.getUserMedia({ audio: true });
+                                                                    alert("🎤 Microfone autorizado e ativo!");
+                                                                } catch(err) {
+                                                                    alert("❌ Microfone negado ou ocupado: " + err.message);
+                                                                }
+                                                            }}
+                                                            className={`px-2.5 py-1.5 rounded-xl border text-[9px] font-black uppercase tracking-wider transition-all flex items-center gap-1 active:scale-95 ${
+                                                                flowchartLightMode 
+                                                                    ? 'bg-zinc-100 hover:bg-zinc-200 border-zinc-200 text-zinc-700' 
+                                                                    : 'bg-zinc-800 hover:bg-zinc-750 border-zinc-700 text-zinc-300 hover:text-white'
+                                                            }`}
+                                                        >
+                                                            <i className="fa-solid fa-microphone"></i> Testar Mic
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
                                 ) : null}
                                 
