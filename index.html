@@ -824,6 +824,22 @@ const FluxogramasTab = React.memo(({ fluxogramas = [], setDb, callIA, extractTex
             const [flowchartChatInput, setFlowchartChatInput] = React.useState('');
             const [isFlowchartChatLoading, setIsFlowchartChatLoading] = React.useState(false);
 
+            const flowchartChatEndRef = React.useRef(null);
+            const [flowchartLightMode, setFlowchartLightMode] = React.useState(() => localStorage.getItem('flowchart_light_mode') === 'true');
+            
+            React.useEffect(() => {
+                localStorage.setItem('flowchart_light_mode', flowchartLightMode);
+            }, [flowchartLightMode]);
+
+            React.useEffect(() => {
+                if (canvasViewMode === 'ia_chat' && flowchartChatEndRef.current) {
+                    flowchartChatEndRef.current.scrollIntoView({ behavior: 'smooth' });
+                }
+            }, [flowchartChat.length, isFlowchartChatLoading, canvasViewMode]);
+
+            
+
+
             React.useEffect(() => {
                 if (selectedFlow) {
                     setFlowchartChat(selectedFlow.chatHistory || []);
@@ -2745,7 +2761,7 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                                 </div>
                                             </div>
 
-                                            <div className="h-px bg-zinc-850"></div>
+                                            <div className={`h-px ${flowchartLightMode ? 'bg-zinc-200' : 'bg-zinc-850'}`}></div>
 
                                             {/* Mentor comment */}
                                             <div className="p-4 rounded-xl bg-zinc-900 border border-zinc-850 relative text-[11px] font-semibold text-zinc-300 leading-relaxed italic">
@@ -3274,19 +3290,19 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                     return (
                         <div className="max-w-2xl mx-auto space-y-6 animate-in fade-in zoom-in-95 duration-300">
                             {customStyleBlock}
-                            <div className="bg-gradient-to-br from-zinc-900 to-zinc-950 border border-zinc-800/80 rounded-[32px] p-6 md:p-8 shadow-2xl relative overflow-hidden space-y-6">
+                            <div className={`border rounded-[32px] p-6 md:p-8 shadow-2xl relative overflow-hidden space-y-6 ${flowchartLightMode ? 'bg-white border-zinc-200 text-zinc-800 shadow-zinc-200/20' : 'bg-gradient-to-br from-zinc-900 to-zinc-950 border-zinc-800/80 text-white'}`}>
                                 <div className="absolute top-0 right-0 w-36 h-36 bg-indigo-500/5 blur-3xl rounded-full"></div>
                                 
                                 <div className="text-center space-y-2">
-                                    <span className="text-[10px] font-black uppercase bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 px-3.5 py-1 rounded-full shrink-0 tracking-widest">Avaliação Médica</span>
-                                    <h3 className="text-2xl font-black text-white leading-tight">Simulação Concluída!</h3>
-                                    <p className="text-zinc-500 text-xs font-semibold">Os domínios clínicos foram analisados rigorosamente com base no protocolo.</p>
+                                    <span className={`text-[10px] font-black uppercase border px-3.5 py-1 rounded-full shrink-0 tracking-widest ${flowchartLightMode ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20'}`}>Avaliação Médica</span>
+                                    <h3 className={`text-2xl font-black leading-tight ${flowchartLightMode ? 'text-zinc-900' : 'text-white'}`}>Simulação Concluída!</h3>
+                                    <p className={`text-xs font-semibold ${flowchartLightMode ? 'text-zinc-500' : 'text-zinc-505'}`}>Os domínios clínicos foram analisados rigorosamente com base no protocolo.</p>
                                 </div>
                                 
-                                <div className="h-px bg-zinc-850"></div>
+                                <div className={`h-px ${flowchartLightMode ? 'bg-zinc-200' : 'bg-zinc-850'}`}></div>
                                 
                                 {/* SCORE BADGE CONTAINER */}
-                                <div className="flex flex-col items-center justify-center p-6 bg-zinc-950/80 border border-zinc-850 rounded-2xl relative overflow-hidden shadow-inner">
+                                <div className={`flex flex-col items-center justify-center p-6 border rounded-2xl relative overflow-hidden shadow-inner ${flowchartLightMode ? 'bg-zinc-50 border-zinc-200 shadow-zinc-100/50' : 'bg-zinc-950/80 border-zinc-850'}`}>
                                     <div className={`absolute inset-0 bg-gradient-to-t opacity-[0.03] ${colors.progress}`}></div>
                                     <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mb-1.5">Nota Final Ponderada</span>
                                     <div className={`text-5xl font-black ${colors.text} tracking-tighter mb-2 flex items-baseline gap-1`}>
@@ -3300,7 +3316,7 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                 
                                 {/* DOMAINS BREAKDOWN CHECKLIST */}
                                 <div className="space-y-4">
-                                    <h4 className="text-xs font-black text-zinc-400 uppercase tracking-widest mb-2"><i className="fa-solid fa-square-poll-vertical mr-1 text-indigo-500"></i> Desempenho por Domínios (PDF)</h4>
+                                    <h4 className={`text-xs font-black uppercase tracking-widest mb-2 ${flowchartLightMode ? 'text-zinc-650' : 'text-zinc-400'}`}><i className="fa-solid fa-square-poll-vertical mr-1 text-indigo-500"></i> Desempenho por Domínios (PDF)</h4>
                                     
                                     {[
                                         { label: 'Anamnese e história clínica', weight: '15%', grade: gradingScorecard.grades.d1 },
@@ -3311,16 +3327,20 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                     ].map((dom, index) => {
                                         const c = getScoreColor(dom.grade);
                                         return (
-                                            <div key={index} className={`p-4 rounded-2xl border transition-all ${dom.isSpecial ? 'bg-indigo-950/10 border-indigo-500/30 shadow-indigo-950/20' : 'bg-zinc-950/30 border-zinc-850 hover:border-zinc-800'}`}>
+                                            <div key={index} className={`p-4 rounded-2xl border transition-all ${
+                                                dom.isSpecial 
+                                                    ? (flowchartLightMode ? 'bg-indigo-50/50 border-indigo-200 shadow-sm' : 'bg-indigo-950/10 border-indigo-500/30 shadow-indigo-950/20') 
+                                                    : (flowchartLightMode ? 'bg-white border-zinc-200 hover:border-zinc-300 shadow-sm' : 'bg-zinc-950/30 border-zinc-850 hover:border-zinc-800')
+                                            }`}>
                                                 <div className="flex justify-between items-center gap-2 mb-2">
-                                                    <span className="text-xs font-black text-white flex items-center gap-1.5 leading-snug">
-                                                        <span className="text-zinc-500 text-[10px]">D{index + 1}.</span> {dom.label}
-                                                        {dom.isSpecial && <i className="fa-solid fa-star text-[10px] text-indigo-400 animate-pulse"></i>}
+                                                    <span className={`text-xs font-black flex items-center gap-1.5 leading-snug ${flowchartLightMode ? 'text-zinc-800' : 'text-white'}`}>
+                                                        <span className="text-zinc-400 text-[10px]">D{index + 1}.</span> {dom.label}
+                                                        {dom.isSpecial && <i className="fa-solid fa-star text-[10px] text-indigo-500 animate-pulse"></i>}
                                                     </span>
                                                     <span className="text-[10px] font-black text-zinc-500 uppercase shrink-0">Peso {dom.weight}</span>
                                                 </div>
                                                 <div className="flex items-center gap-3">
-                                                    <div className="flex-1 bg-zinc-800 rounded-full h-2 overflow-hidden shadow-inner">
+                                                    <div className={`flex-1 rounded-full h-2 overflow-hidden shadow-inner ${flowchartLightMode ? 'bg-zinc-200' : 'bg-zinc-800'}`}>
                                                         <div className={`h-full rounded-full transition-all duration-700 ${c.progress}`} style={{ width: `${dom.grade * 10}%` }}></div>
                                                     </div>
                                                     <span className={`text-xs font-black uppercase shrink-0 w-8 text-right ${c.text}`}>{dom.grade.toFixed(1)}</span>
@@ -3333,14 +3353,18 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                 <div className="h-px bg-zinc-850 my-2"></div>
                                 
                                 {/* MENTOR FEEDBACK SPEECH BUBBLE */}
-                                <div className={`p-5 rounded-2xl border bg-gradient-to-br flex gap-4 ${personaStyle.color} border-zinc-850 relative`}>
-                                    <div className="w-12 h-12 rounded-xl bg-black/40 border border-zinc-800 shrink-0 flex items-center justify-center shadow-lg"><i className={`fa-solid ${personaStyle.icon} text-lg`}></i></div>
+                                <div className={`p-5 rounded-2xl border flex gap-4 relative ${
+                                    flowchartLightMode 
+                                        ? 'bg-zinc-50 border-zinc-200 text-zinc-800' 
+                                        : `bg-gradient-to-br ${personaStyle.color} border-zinc-850 text-white`
+                                }`}>
+                                    <div className={`w-12 h-12 rounded-xl shrink-0 flex items-center justify-center shadow-lg border ${flowchartLightMode ? 'bg-white border-zinc-200 text-indigo-600' : 'bg-black/40 border-zinc-800'}`}><i className={`fa-solid ${personaStyle.icon} text-lg`}></i></div>
                                     <div className="space-y-1">
                                         <div className="flex items-center gap-2">
-                                            <span className="text-xs font-black text-white">{personaStyle.label}</span>
-                                            <span className="text-[8px] font-black uppercase bg-black/40 text-zinc-400 px-2 py-0.5 rounded-full border border-zinc-800">Persona Ativa</span>
+                                            <span className={`text-xs font-black ${flowchartLightMode ? 'text-zinc-900' : 'text-white'}`}>{personaStyle.label}</span>
+                                            <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded-full border ${flowchartLightMode ? 'bg-zinc-200/50 border-zinc-300 text-zinc-600' : 'bg-black/40 border-zinc-800 text-zinc-450'}`}>Persona Ativa</span>
                                         </div>
-                                        <p className="text-xs font-semibold text-zinc-300 leading-relaxed text-justify-custom italic">"{gradingScorecard.comment}"</p>
+                                        <p className={`text-xs font-semibold leading-relaxed text-justify-custom italic ${flowchartLightMode ? 'text-zinc-650' : 'text-zinc-300'}`}>"{gradingScorecard.comment}"</p>
                                     </div>
                                 </div>
                                 
@@ -3443,18 +3467,18 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                             
                             {/* PLANTÃO CLINICO ATIVO BANNER */}
                             {isShiftActive && (
-                                <div className="bg-gradient-to-r from-purple-900/80 to-indigo-950/80 border border-purple-500/35 rounded-2xl p-4 shadow-lg flex items-center justify-between">
+                                <div className={`border rounded-2xl p-4 shadow-lg flex items-center justify-between ${flowchartLightMode ? 'bg-gradient-to-r from-purple-50 to-indigo-50/50 border-purple-200' : 'bg-gradient-to-r from-purple-900/80 to-indigo-950/80 border-purple-500/35'}`}>
                                     <div className="flex items-center gap-3">
-                                        <div className="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-300 flex items-center justify-center shadow-md">
+                                        <div className={`w-10 h-10 rounded-xl flex items-center justify-center shadow-md border ${flowchartLightMode ? 'bg-purple-100/50 border-purple-200 text-purple-700' : 'bg-purple-500/10 border-purple-500/20 text-purple-300'}`}>
                                             <i className="fa-solid fa-user-doctor animate-pulse"></i>
                                         </div>
                                         <div>
-                                            <span className="text-[9px] font-black text-purple-400 uppercase tracking-widest block leading-none">Plantão Clínico Ativo</span>
-                                            <span className="text-xs font-black text-white block mt-0.5">Paciente {currentShiftIndex + 1} de {shiftQueue.length}</span>
+                                            <span className={`text-[9px] font-black uppercase tracking-widest block leading-none ${flowchartLightMode ? 'text-purple-700' : 'text-purple-400'}`}>Plantão Clínico Ativo</span>
+                                            <span className={`text-xs font-black block mt-0.5 ${flowchartLightMode ? 'text-zinc-800' : 'text-white'}`}>Paciente {currentShiftIndex + 1} de {shiftQueue.length}</span>
                                         </div>
                                     </div>
                                     <div className="flex items-center gap-4 flex-1 max-w-[200px] ml-4">
-                                        <div className="flex-1 bg-zinc-850 rounded-full h-1.5 overflow-hidden shadow-inner">
+                                        <div className={`flex-1 rounded-full h-1.5 overflow-hidden shadow-inner ${flowchartLightMode ? 'bg-zinc-200' : 'bg-zinc-850'}`}>
                                             <div className="h-full rounded-full bg-gradient-to-r from-purple-500 to-indigo-500 transition-all duration-500" style={{ width: `${((currentShiftIndex + 1) / shiftQueue.length) * 100}%` }}></div>
                                         </div>
                                     </div>
@@ -3477,30 +3501,30 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                             )}
                             
                             {/* PATIENT PROFILE CARD */}
-                            <div className="bg-gradient-to-br from-indigo-950/20 to-zinc-900 border border-indigo-500/25 rounded-3xl p-5 shadow-2xl relative overflow-hidden">
+                            <div className={`border rounded-3xl p-5 shadow-2xl relative overflow-hidden ${flowchartLightMode ? 'bg-white border-zinc-250' : 'bg-gradient-to-br from-indigo-950/20 to-zinc-900 border-indigo-500/25'}`}>
                                 <div className="absolute top-2 right-4 flex items-center gap-1.5">
                                     <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping"></span>
                                     <span className="text-[8px] font-black tracking-widest text-zinc-400 uppercase">Monitor Cardíaco</span>
                                     <i className="fa-solid fa-heart-pulse text-rose-500 text-xs animate-pulse ml-1"></i>
                                 </div>
-                                <h3 className="text-xs font-black text-indigo-400 uppercase tracking-widest mb-2 flex items-center gap-1"><i className="fa-solid fa-hospital-user text-xs"></i> Prontuário de Emergência</h3>
-                                <p className="text-xs font-bold text-white leading-relaxed text-justify-custom pr-6">{patientPresentation}</p>
+                                <h3 className={`text-xs font-black uppercase tracking-widest mb-2 flex items-center gap-1 ${flowchartLightMode ? 'text-indigo-700' : 'text-indigo-400'}`}><i className="fa-solid fa-hospital-user text-xs"></i> Prontuário de Emergência</h3>
+                                <p className={`text-xs font-bold leading-relaxed text-justify-custom pr-6 ${flowchartLightMode ? 'text-zinc-800' : 'text-white'}`}>{patientPresentation}</p>
                             </div>
                             
                             {/* ACTIVE CONVERSATION CAP */}
-                            <div className="bg-zinc-900/60 border border-zinc-850 rounded-[32px] p-5 shadow-xl flex flex-col h-[400px]">
-                                <div className="flex-1 overflow-y-auto planner-scroll space-y-4 mb-4 p-3 rounded-2xl bg-zinc-950/80 border border-zinc-900 shadow-inner flex flex-col">
+                            <div className={`border rounded-[32px] p-5 shadow-xl flex flex-col h-[400px] ${flowchartLightMode ? 'bg-white border-zinc-200' : 'bg-zinc-900/60 border-zinc-850'}`}>
+                                <div className={`flex-1 overflow-y-auto planner-scroll space-y-4 mb-4 p-3 rounded-2xl shadow-inner flex flex-col border ${flowchartLightMode ? 'bg-zinc-50 border-zinc-200' : 'bg-zinc-950/80 border-zinc-900'}`}>
                                     {displayMessages.slice(1).map((msg, idx) => {
                                         const isUser = msg.role === 'user';
                                         return (
-                                            <div key={idx} className={`flex max-w-[85%] rounded-2xl p-3 shadow-md leading-relaxed text-xs font-semibold ${isUser ? 'bg-emerald-600 text-white ml-auto rounded-tr-none' : 'bg-zinc-800 text-zinc-100 mr-auto rounded-tl-none border border-zinc-700/50 whitespace-pre-wrap'}`}>
+                                            <div key={idx} className={`flex max-w-[85%] rounded-2xl p-3 shadow-md leading-relaxed text-xs font-semibold ${isUser ? 'bg-emerald-600 text-white ml-auto rounded-tr-none' : (flowchartLightMode ? 'bg-white border border-zinc-200 text-zinc-800 mr-auto rounded-tl-none shadow-sm whitespace-pre-wrap' : 'bg-zinc-800 text-zinc-100 mr-auto rounded-tl-none border border-zinc-700/50 whitespace-pre-wrap')}`}>
                                                 {msg.text}
                                             </div>
                                         );
                                     })}
                                     
                                     {isEvaluating && (
-                                        <div className="bg-zinc-800 text-zinc-300 mr-auto rounded-2xl rounded-tl-none border border-zinc-700/50 p-3 shadow-md text-xs font-bold flex items-center gap-2">
+                                        <div className={`mr-auto rounded-2xl rounded-tl-none border p-3 shadow-md text-xs font-bold flex items-center gap-2 ${flowchartLightMode ? 'bg-white border-zinc-200 text-zinc-700' : 'bg-zinc-800 border-zinc-700/50 text-zinc-300'}`}>
                                             <i className="fa-solid fa-spinner animate-spin text-indigo-400"></i>
                                             <span>O mentor está analisando...</span>
                                         </div>
@@ -3516,7 +3540,7 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                 
                                 {/* INTERACTIVE CONTROLS (VOICE / TEXT INPUT) */}
                                 {simulationMode === 'voice' ? (
-                                    <div className="flex flex-col items-center justify-center py-2 space-y-3 bg-zinc-950 border border-zinc-900 rounded-2xl p-4 shadow-inner">
+                                    <div className={`flex flex-col items-center justify-center py-2 space-y-3 border rounded-2xl p-4 shadow-inner ${flowchartLightMode ? 'bg-zinc-50 border-zinc-200 shadow-zinc-100/50' : 'bg-zinc-950 border-zinc-900'}`}>
                                         
                                         {/* VISUALIZER DYNAMIC WAVE */}
                                         {isVoiceSynthesizing ? (
@@ -3590,7 +3614,7 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                         }}
                                         disabled={isEvaluating}
                                         placeholder={simulationMode === 'voice' ? "Ou digite sua conduta/pergunta aqui..." : "Digite sua conduta médica ou pergunta..."}
-                                        className="flex-1 px-4 py-3 bg-zinc-950 border border-zinc-855 rounded-2xl text-xs font-bold text-white outline-none focus:border-indigo-500 shadow-inner disabled:opacity-50 animate-in fade-in"
+                                        className={`flex-1 px-4 py-3 border rounded-2xl text-xs font-bold outline-none focus:border-indigo-500 shadow-inner disabled:opacity-50 animate-in fade-in ${flowchartLightMode ? 'bg-white border-zinc-200 text-zinc-850 placeholder-zinc-400 focus:ring-1 focus:ring-indigo-500' : 'bg-zinc-950 border-zinc-855 text-white placeholder-zinc-500'}`}
                                     />
                                     <button 
                                         type="submit" 
@@ -3655,14 +3679,14 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                         
                         {/* LEFT COLUMN: SETUP SIMULATION */}
                         <div className="col-span-1 lg:col-span-5 space-y-6">
-                            <div className="bg-gradient-to-br from-indigo-950/30 to-zinc-900/80 border border-indigo-500/20 rounded-[32px] p-6 shadow-2xl relative overflow-hidden flex flex-col justify-between h-full">
+                            <div className={`border rounded-[32px] p-6 shadow-2xl relative overflow-hidden flex flex-col justify-between h-full ${flowchartLightMode ? 'bg-white border-zinc-200 text-zinc-800 shadow-zinc-250/20' : 'bg-gradient-to-br from-indigo-950/30 to-zinc-900/80 border-indigo-500/20'}`}>
                                 <div className="absolute top-0 right-0 w-36 h-36 bg-purple-500/5 blur-3xl rounded-full"></div>
                                 
                                 <div className="space-y-4">
                                     <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center shadow-lg"><i className="fa-solid fa-brain text-xl animate-pulse"></i></div>
                                     <div>
-                                        <h3 className="text-lg font-black text-white leading-tight">Simulador de Conduta IA</h3>
-                                        <p className="text-zinc-400 text-xs font-semibold mt-1 leading-relaxed">Teste seu conhecimento de forma hiper-clínica. A IA gerará um caso que demanda as condutas deste fluxograma específico.</p>
+                                        <h3 className={`text-lg font-black leading-tight ${flowchartLightMode ? 'text-zinc-900' : 'text-white'}`}>Simulador de Conduta IA</h3>
+                                        <p className={`text-xs font-semibold mt-1 leading-relaxed ${flowchartLightMode ? 'text-zinc-500' : 'text-zinc-400'}`}>Teste seu conhecimento de forma hiper-clínica. A IA gerará um caso que demanda as condutas deste fluxograma específico.</p>
                                     </div>
                                     
                                     <div className="h-px bg-zinc-800"></div>
@@ -3670,16 +3694,24 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                     {/* MODE SELECTOR */}
                                     <div className="space-y-2">
                                         <label className="block text-[9px] font-black text-zinc-400 uppercase tracking-widest ml-1">Modo de Comunicação</label>
-                                        <div className="grid grid-cols-2 gap-2 bg-zinc-950 p-1 rounded-2xl border border-zinc-850">
+                                        <div className={`grid grid-cols-2 gap-2 p-1 rounded-2xl border ${flowchartLightMode ? 'bg-zinc-100 border-zinc-200' : 'bg-zinc-950 border-zinc-850'}`}>
                                             <button 
                                                 onClick={() => setSimulationMode('voice')}
-                                                className={`py-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 ${simulationMode === 'voice' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-500 hover:text-zinc-350'}`}
+                                                className={`py-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 ${
+                                                    simulationMode === 'voice' 
+                                                        ? 'bg-indigo-600 text-white shadow-md' 
+                                                        : (flowchartLightMode ? 'text-zinc-500 hover:text-zinc-800' : 'text-zinc-500 hover:text-zinc-350')
+                                                }`}
                                             >
                                                 <i className="fa-solid fa-microphone text-xs"></i> 🎙️ Voz (Live)
                                             </button>
                                             <button 
                                                 onClick={() => setSimulationMode('text')}
-                                                className={`py-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 ${simulationMode === 'text' ? 'bg-indigo-600 text-white shadow-md' : 'text-zinc-555 hover:text-zinc-350'}`}
+                                                className={`py-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 ${
+                                                    simulationMode === 'text' 
+                                                        ? 'bg-indigo-600 text-white shadow-md' 
+                                                        : (flowchartLightMode ? 'text-zinc-550 hover:text-zinc-850' : 'text-zinc-555 hover:text-zinc-350')
+                                                }`}
                                             >
                                                 <i className="fa-solid fa-file-invoice text-xs"></i> 📝 Texto
                                             </button>
@@ -3704,7 +3736,7 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                                 if (setAiConfig) setAiConfig(prev => ({ ...prev, model: e.target.value }));
                                                 localStorage.setItem('gemini_model', e.target.value);
                                             }}
-                                            className="w-full p-4 bg-zinc-950 border border-zinc-850 rounded-2xl outline-none text-xs font-black shadow-inner text-white focus:border-indigo-500 transition-colors"
+                                            className={`w-full p-4 border rounded-2xl outline-none text-xs font-black shadow-inner focus:border-indigo-500 transition-colors ${flowchartLightMode ? 'bg-white border-zinc-200 text-zinc-800' : 'bg-zinc-950 border-zinc-855 text-white'}`}
                                         >
                                             {availableModels.length === 0 ? (
                                                 <option value="">Insira a Chave API nas Configurações</option>
@@ -3719,7 +3751,7 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                     {/* CUSTOM PDF GUIDE (OPTIONAL) */}
                                     <div className="space-y-2 mt-4">
                                         <label className="block text-[9px] font-black text-zinc-450 uppercase tracking-widest ml-1">Guiar Caso por PDF Próprio (Opcional)</label>
-                                        <div className="flex gap-2 items-center bg-zinc-950 p-2.5 rounded-2xl border border-zinc-850">
+                                        <div className={`flex gap-2 items-center p-2.5 rounded-2xl border ${flowchartLightMode ? 'bg-zinc-100/50 border-zinc-200' : 'bg-zinc-950 border-zinc-850'}`}>
                                             <input 
                                                 type="file" 
                                                 accept=".pdf" 
@@ -3797,12 +3829,12 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                         
                         {/* RIGHT COLUMN: REVISION TIMELINE / HISTORY */}
                         <div className="col-span-1 lg:col-span-7 space-y-6">
-                            <div className="bg-zinc-900/60 border border-zinc-850 rounded-[32px] p-6 shadow-xl space-y-5">
+                            <div className={`border rounded-[32px] p-6 shadow-xl space-y-5 ${flowchartLightMode ? 'bg-white border-zinc-200' : 'bg-zinc-900/60 border-zinc-850'}`}>
                                 <div className="flex justify-between items-center">
                                     <div>
-                                        <h3 className="font-black text-sm md:text-base text-white"><i className="fa-solid fa-chart-line text-indigo-400 mr-2"></i> Histórico de Casos Clínicos</h3>
+                                        <h3 className={`font-black text-sm md:text-base ${flowchartLightMode ? 'text-zinc-900' : 'text-white'}`}><i className="fa-solid fa-chart-line text-indigo-400 mr-2"></i> Histórico de Casos Clínicos</h3>
                                     </div>
-                                    <span className="text-[10px] font-black text-zinc-400 bg-zinc-800 border border-zinc-700/50 px-3 py-1 rounded-full shrink-0">{aiReviews.length} Tentativas</span>
+                                    <span className={`text-[10px] font-black border px-3 py-1 rounded-full shrink-0 ${flowchartLightMode ? 'text-zinc-650 bg-zinc-100 border-zinc-200' : 'text-zinc-400 bg-zinc-800 border-zinc-700/50'}`}>{aiReviews.length} Tentativas</span>
                                 </div>
                                 
                                 {aiReviews.length === 0 ? (
@@ -3819,7 +3851,7 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                         
                                         {/* EVOLUTION SUMMARY TIMELINE CARDS */}
                                         <div className="grid grid-cols-2 gap-4">
-                                            <div className="p-4 rounded-2xl bg-zinc-950/50 border border-zinc-850 flex flex-col justify-between shadow-inner">
+                                            <div className={`p-4 rounded-2xl border flex flex-col justify-between shadow-inner ${flowchartLightMode ? 'bg-zinc-50 border-zinc-200 shadow-zinc-100/50' : 'bg-zinc-950/50 border-zinc-850'}`}>
                                                 <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-2 leading-none">Média Geral</span>
                                                 <div className="flex items-baseline gap-1.5 mt-1">
                                                     <span className={`text-2xl font-black ${avgColors.text}`}>{averageScore}</span>
@@ -3830,7 +3862,7 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                                 </span>
                                             </div>
                                             
-                                            <div className="p-4 rounded-2xl bg-zinc-950/50 border border-zinc-850 flex flex-col justify-between shadow-inner">
+                                            <div className={`p-4 rounded-2xl border flex flex-col justify-between shadow-inner ${flowchartLightMode ? 'bg-zinc-50 border-zinc-200 shadow-zinc-100/50' : 'bg-zinc-950/50 border-zinc-850'}`}>
                                                 <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-2 leading-none">Melhor Nota</span>
                                                 <div className="flex items-baseline gap-1.5 mt-1">
                                                     <span className={`text-2xl font-black ${maxColors.text}`}>{maxScore}</span>
@@ -3850,9 +3882,9 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                                     value={caseSearchQuery} 
                                                     onChange={(e) => setCaseSearchQuery(e.target.value)} 
                                                     placeholder="Pesquisar por queixa, data, nota ou feedback..." 
-                                                    className="w-full pl-9 pr-8 py-2.5 bg-zinc-950 border border-zinc-850 rounded-xl text-xs font-bold text-white outline-none focus:border-indigo-500 shadow-inner"
+                                                    className={`w-full pl-9 pr-8 py-2.5 border rounded-xl text-xs font-bold outline-none focus:border-indigo-500 shadow-inner ${flowchartLightMode ? 'bg-white border-zinc-200 text-zinc-900 placeholder-zinc-400' : 'bg-zinc-950 border-zinc-850 text-white placeholder-zinc-500'}`}
                                                 />
-                                                <i className="fa-solid fa-magnifying-glass absolute left-3.5 top-3.5 text-zinc-500 text-[10px]"></i>
+                                                <i className={`fa-solid fa-magnifying-glass absolute left-3.5 top-3.5 text-[10px] ${flowchartLightMode ? 'text-zinc-400' : 'text-zinc-500'}`}></i>
                                                 {caseSearchQuery && (
                                                     <button 
                                                         onClick={() => setCaseSearchQuery('')}
@@ -3893,18 +3925,18 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                                     return (
                                                         <div 
                                                             key={rev.id} 
-                                                            className="p-4 md:p-5 rounded-[24px] bg-zinc-950/40 border border-zinc-850 hover:border-zinc-800 transition-all shadow-md relative overflow-hidden space-y-4"
+                                                            className={`p-4 md:p-5 rounded-[24px] border transition-all shadow-md relative overflow-hidden space-y-4 ${flowchartLightMode ? 'bg-zinc-50/50 border-zinc-200 hover:border-zinc-300 shadow-sm' : 'bg-zinc-950/40 border-zinc-850 hover:border-zinc-800'}`}
                                                         >
                                                             <div className="flex justify-between items-start gap-3">
                                                                 <div className="space-y-1">
-                                                                    <h4 className="text-white text-xs font-black leading-snug line-clamp-1">Caso Clínico: {selectedFlow.title}</h4>
+                                                                    <h4 className={`text-xs font-black leading-snug line-clamp-1 ${flowchartLightMode ? 'text-zinc-900' : 'text-white'}`}>Caso Clínico: {selectedFlow.title}</h4>
                                                                     <p className="text-[9px] font-bold text-zinc-500">
                                                                         <i className="fa-solid fa-calendar-day mr-1"></i>
                                                                         {new Date(rev.date).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
                                                                     </p>
                                                                 </div>
                                                                 <div className="flex flex-col items-end gap-1.5 shrink-0">
-                                                                    <div className={`text-sm font-black ${revColors.text} tracking-tight bg-zinc-950 border border-zinc-850 rounded-xl px-3 py-1 flex items-baseline gap-0.5`}>
+                                                                    <div className={`text-sm font-black ${revColors.text} tracking-tight border rounded-xl px-3 py-1 flex items-baseline gap-0.5 ${flowchartLightMode ? 'bg-white border-zinc-200' : 'bg-zinc-950 border-zinc-850'}`}>
                                                                         {rev.score.toFixed(1)}
                                                                         <span className="text-[9px] text-zinc-600">/10</span>
                                                                     </div>
@@ -3927,7 +3959,7 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                                                 ].map((d, index) => {
                                                                     const dc = getScoreColor(d.score);
                                                                     return (
-                                                                        <div key={index} className="p-1 rounded-lg bg-zinc-950/60 border border-zinc-900 flex flex-col justify-between h-9 shadow-inner">
+                                                                        <div key={index} className={`p-1 rounded-lg border flex flex-col justify-between h-9 shadow-inner ${flowchartLightMode ? 'bg-white border-zinc-200' : 'bg-zinc-950/60 border-zinc-900'}`}>
                                                                             <span className="text-[7px] font-black text-zinc-500 uppercase leading-none truncate">{d.label}</span>
                                                                             <span className={`text-[9px] font-black leading-none ${dc.text}`}>{d.score.toFixed(1)}</span>
                                                                         </div>
@@ -3936,11 +3968,15 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                                             </div>
                                                             
                                                             {/* COMMENT FROM MENTOR BUBBLE */}
-                                                            <div className={`p-3.5 rounded-xl border bg-gradient-to-br flex gap-3 ${revPersona.color} border-zinc-850`}>
-                                                                <div className="w-8 h-8 rounded-lg bg-black/40 border border-zinc-800 shrink-0 flex items-center justify-center shadow-inner"><i className={`fa-solid ${revPersona.icon} text-xs`}></i></div>
+                                                            <div className={`p-3.5 rounded-xl border flex gap-3 ${
+                                                                flowchartLightMode 
+                                                                    ? 'bg-zinc-100/50 border-zinc-200 text-zinc-800 shadow-sm' 
+                                                                    : `bg-gradient-to-br ${revPersona.color} border-zinc-850 text-white`
+                                                            }`}>
+                                                                <div className={`w-8 h-8 rounded-lg shrink-0 flex items-center justify-center shadow-inner border ${flowchartLightMode ? 'bg-white border-zinc-250 text-indigo-600' : 'bg-black/40 border-zinc-800'}`}><i className={`fa-solid ${revPersona.icon} text-xs`}></i></div>
                                                                 <div className="space-y-0.5 min-w-0">
-                                                                    <span className="text-[9px] font-black text-white leading-none block">{revPersona.label}</span>
-                                                                    <p className="text-[10px] font-semibold text-zinc-400 leading-relaxed text-justify-custom italic line-clamp-2 hover:line-clamp-none transition-all">"{rev.comment}"</p>
+                                                                    <span className={`text-[9px] font-black leading-none block ${flowchartLightMode ? 'text-zinc-800' : 'text-white'}`}>{revPersona.label}</span>
+                                                                    <p className={`text-[10px] font-semibold leading-relaxed text-justify-custom italic line-clamp-2 hover:line-clamp-none transition-all ${flowchartLightMode ? 'text-zinc-550' : 'text-zinc-400'}`}>"{rev.comment}"</p>
                                                                 </div>
                                                             </div>
                                                             
@@ -3956,7 +3992,7 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                                             </div>
                                                             
                                                             {isExpanded && rev.chatHistory && (
-                                                                <div className="mt-3 bg-zinc-950/80 border border-zinc-900 rounded-xl p-3.5 space-y-3.5 max-h-[250px] overflow-y-auto planner-scroll shadow-inner">
+                                                                <div className={`mt-3 border rounded-xl p-3.5 space-y-3.5 max-h-[250px] overflow-y-auto planner-scroll shadow-inner ${flowchartLightMode ? 'bg-white border-zinc-200 text-zinc-800' : 'bg-zinc-950/80 border-zinc-900'}`}>
                                                                     {rev.chatHistory.map((ch, idx) => {
                                                                         const isUser = ch.role === 'user';
                                                                         return (
@@ -3964,7 +4000,7 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                                                                 <span className={`text-[7px] font-black uppercase tracking-widest block ${isUser ? 'text-emerald-400 text-right' : 'text-indigo-400'}`}>
                                                                                     {isUser ? "Estudante" : "Mentor Clínico"}
                                                                                 </span>
-                                                                                <div className={`p-2.5 rounded-xl text-[10px] font-bold leading-relaxed whitespace-pre-wrap ${isUser ? 'bg-emerald-950/30 text-white border border-emerald-900/30 text-right ml-auto max-w-[90%]' : 'bg-zinc-900 text-zinc-200 border border-zinc-800 mr-auto max-w-[90%]'}`}>
+                                                                                <div className={`p-2.5 rounded-xl text-[10px] font-bold leading-relaxed whitespace-pre-wrap ${isUser ? (flowchartLightMode ? 'bg-emerald-50 text-emerald-900 border border-emerald-200 text-right ml-auto max-w-[90%]' : 'bg-emerald-950/30 text-white border border-emerald-900/30 text-right ml-auto max-w-[90%]') : (flowchartLightMode ? 'bg-zinc-100 text-zinc-850 border border-zinc-200 mr-auto max-w-[90%]' : 'bg-zinc-900 text-zinc-200 border border-zinc-800 mr-auto max-w-[90%]')}`}>
                                                                                     {ch.text}
                                                                                 </div>
                                                                             </div>
@@ -3986,9 +4022,7 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                 };
 
             const renderIaChatContent = () => {
-                const scrollToBottom = (el) => {
-                    if (el) el.scrollIntoView({ behavior: 'smooth' });
-                };
+
 
                 const suggestions = [
                     "Quais são as doses e via de administração recomendadas?",
@@ -4000,22 +4034,22 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                 return (
                     <div className="max-w-2xl mx-auto space-y-6 animate-in fade-in duration-300">
                         {/* HEADER BANNER */}
-                        <div className="bg-gradient-to-r from-teal-900/60 to-emerald-950/60 border border-teal-500/25 rounded-3xl p-5 shadow-2xl relative overflow-hidden flex items-center justify-between">
+                        <div className={`border rounded-3xl p-5 shadow-2xl relative overflow-hidden flex items-center justify-between ${flowchartLightMode ? 'bg-gradient-to-r from-teal-50 to-emerald-50/70 border-teal-200' : 'bg-gradient-to-r from-teal-900/60 to-emerald-950/60 border-teal-500/25'}`}>
                             <div className="absolute top-0 right-0 w-36 h-36 bg-teal-500/5 blur-3xl rounded-full"></div>
                             <div className="flex items-center gap-3">
-                                <div className="w-12 h-12 rounded-2xl bg-teal-500/10 border border-teal-500/20 text-teal-400 flex items-center justify-center shadow-lg">
+                                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg border ${flowchartLightMode ? 'bg-teal-50 border-teal-200 text-teal-700' : 'bg-teal-500/10 border-teal-500/20 text-teal-400'}`}>
                                     <i className="fa-solid fa-comments text-lg animate-pulse"></i>
                                 </div>
                                 <div>
-                                    <span className="text-[10px] font-black text-teal-400 uppercase tracking-widest block leading-none">Chat da Diretriz</span>
-                                    <h3 className="text-sm font-black text-white block mt-1">Dúvidas & Raciocínio Clínico</h3>
+                                    <span className={`text-[10px] font-black uppercase tracking-widest block leading-none ${flowchartLightMode ? 'text-teal-700' : 'text-teal-400'}`}>Chat da Diretriz</span>
+                                    <h3 className={`text-sm font-black block mt-1 ${flowchartLightMode ? 'text-zinc-800' : 'text-white'}`}>Dúvidas & Raciocínio Clínico</h3>
                                 </div>
                             </div>
                             
                             {flowchartChat.length > 0 && (
                                 <button 
                                     onClick={handleClearFlowchartChat}
-                                    className="px-3 py-1.5 bg-rose-500/10 border border-rose-500/20 hover:bg-rose-600 text-rose-450 hover:text-white font-bold text-[9px] rounded-xl uppercase tracking-wider transition-all flex items-center gap-1 active:scale-95"
+                                    className={`px-3 py-1.5 font-bold text-[9px] rounded-xl uppercase tracking-wider transition-all flex items-center gap-1 active:scale-95 ${flowchartLightMode ? 'bg-rose-50 border border-rose-200 text-rose-700 hover:bg-rose-100' : 'bg-rose-500/10 border border-rose-500/20 hover:bg-rose-600 text-rose-450 hover:text-white'}`}
                                     title="Limpar Histórico"
                                 >
                                     <i className="fa-solid fa-trash-can"></i> Limpar
@@ -4024,16 +4058,16 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                         </div>
 
                         {/* CHAT BOX */}
-                        <div className="bg-zinc-900/60 border border-zinc-850 rounded-[32px] p-5 shadow-xl flex flex-col h-[480px]">
-                            <div className="flex-1 overflow-y-auto planner-scroll space-y-4 mb-4 p-3 rounded-2xl bg-zinc-950/80 border border-zinc-900 shadow-inner flex flex-col">
+                        <div className={`border rounded-[32px] p-5 shadow-xl flex flex-col h-[480px] ${flowchartLightMode ? 'bg-white border-zinc-200 text-zinc-800' : 'bg-zinc-900/60 border-zinc-850'}`}>
+                            <div className={`flex-1 overflow-y-auto planner-scroll space-y-4 mb-4 p-3 rounded-2xl shadow-inner flex flex-col border ${flowchartLightMode ? 'bg-zinc-50 border-zinc-200' : 'bg-zinc-950/80 border-zinc-900'}`}>
                                 {flowchartChat.length === 0 ? (
                                     <div className="flex-1 flex flex-col items-center justify-center text-center p-6 space-y-5">
-                                        <div className="w-16 h-16 rounded-full bg-teal-500/5 border border-teal-500/10 flex items-center justify-center text-teal-400/60">
+                                        <div className={`w-16 h-16 rounded-full flex items-center justify-center border ${flowchartLightMode ? 'bg-teal-50 border-teal-200 text-teal-650' : 'bg-teal-500/5 border-teal-500/10 text-teal-400/60'}`}>
                                             <i className="fa-solid fa-circle-info text-2xl"></i>
                                         </div>
                                         <div className="space-y-1.5 max-w-sm">
-                                            <p className="text-zinc-200 text-xs font-black">Nenhuma mensagem ainda</p>
-                                            <p className="text-zinc-500 text-[11px] font-semibold leading-relaxed">
+                                            <p className={`text-xs font-black ${flowchartLightMode ? 'text-zinc-800' : 'text-zinc-200'}`}>Nenhuma mensagem ainda</p>
+                                            <p className={`text-[11px] font-semibold leading-relaxed ${flowchartLightMode ? 'text-zinc-500' : 'text-zinc-500'}`}>
                                                 Tire suas dúvidas clínicas baseadas no PDF da diretriz usado para gerar este fluxograma. O Mentor IA responderá detalhadamente.
                                             </p>
                                         </div>
@@ -4046,7 +4080,7 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                                         key={i}
                                                         type="button"
                                                         onClick={() => handleSendFlowchartChatMessage(sug)}
-                                                        className="text-left p-3 bg-zinc-900/50 hover:bg-zinc-900 border border-zinc-850 hover:border-teal-500/40 rounded-xl text-[11px] font-bold text-zinc-400 hover:text-white transition-all text-justify-custom active:scale-[0.99]"
+                                                        className={`text-left p-3 border rounded-xl text-[11px] font-bold transition-all text-justify-custom active:scale-[0.99] ${flowchartLightMode ? 'bg-zinc-50 border-zinc-200 text-zinc-600 hover:bg-zinc-100/80 hover:text-zinc-800' : 'bg-zinc-900/50 hover:bg-zinc-900 border-zinc-850 hover:border-teal-500/40 text-zinc-400 hover:text-white'}`}
                                                     >
                                                         <i className="fa-solid fa-chevron-right text-[8px] mr-1.5 text-teal-500"></i> {sug}
                                                     </button>
@@ -4064,7 +4098,7 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                                     className={`flex max-w-[85%] rounded-2xl p-3 shadow-md leading-relaxed text-xs font-semibold ${
                                                         isUser 
                                                             ? 'bg-teal-600 text-white ml-auto rounded-tr-none' 
-                                                            : 'bg-zinc-800 text-zinc-100 mr-auto rounded-tl-none border border-zinc-700/50 whitespace-pre-wrap'
+                                                            : (flowchartLightMode ? 'bg-white border border-zinc-200 text-zinc-800 mr-auto rounded-tl-none shadow-sm whitespace-pre-wrap' : 'bg-zinc-800 text-zinc-100 mr-auto rounded-tl-none border border-zinc-700/50 whitespace-pre-wrap')
                                                     }`}
                                                 >
                                                     {msg.text}
@@ -4073,12 +4107,12 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                         })}
                                         
                                         {isFlowchartChatLoading && (
-                                            <div className="bg-zinc-800 text-zinc-300 mr-auto rounded-2xl rounded-tl-none border border-zinc-700/50 p-3 shadow-md text-xs font-bold flex items-center gap-2">
+                                            <div className={`mr-auto rounded-2xl rounded-tl-none border p-3 shadow-md text-xs font-bold flex items-center gap-2 ${flowchartLightMode ? 'bg-white border-zinc-200 text-zinc-650' : 'bg-zinc-800 border-zinc-700/50 text-zinc-300'}`}>
                                                 <i className="fa-solid fa-circle-notch fa-spin text-teal-400"></i>
                                                 <span>IA analisando diretriz...</span>
                                             </div>
                                         )}
-                                        <div ref={scrollToBottom} />
+                                        <div ref={flowchartChatEndRef} />
                                     </>
                                 )}
                             </div>
@@ -4094,12 +4128,12 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                     onChange={(e) => setFlowchartChatInput(e.target.value)} 
                                     disabled={isFlowchartChatLoading}
                                     placeholder={selectedFlow.sourcePdfText ? "Pergunte algo sobre a diretriz ou conduta..." : "Consulte a IA sobre este fluxograma..."}
-                                    className="flex-1 px-4 py-3 bg-zinc-950 border border-zinc-855 rounded-2xl text-xs font-bold text-white outline-none focus:border-teal-500 shadow-inner disabled:opacity-50 animate-in fade-in"
+                                    className={`flex-1 px-4 py-3 border rounded-2xl text-xs font-bold outline-none focus:border-teal-500 shadow-inner disabled:opacity-50 animate-in fade-in ${flowchartLightMode ? 'bg-white border-zinc-200 text-zinc-800 placeholder-zinc-400 focus:ring-1 focus:ring-teal-500' : 'bg-zinc-950 border-zinc-855 text-white placeholder-zinc-500'}`}
                                 />
                                 <button 
                                     type="submit" 
                                     disabled={isFlowchartChatLoading || !flowchartChatInput.trim()}
-                                    className="px-5 bg-teal-600 hover:bg-teal-500 disabled:bg-zinc-850 disabled:text-zinc-600 disabled:pointer-events-none text-white rounded-2xl font-black text-xs shadow-lg transition-colors flex items-center justify-center gap-1.5 shrink-0 active:scale-95"
+                                    className={`px-5 text-white rounded-2xl font-black text-xs shadow-lg transition-colors flex items-center justify-center gap-1.5 shrink-0 active:scale-95 ${flowchartLightMode ? 'bg-teal-600 hover:bg-teal-500 disabled:bg-zinc-200 disabled:text-zinc-400' : 'bg-teal-600 hover:bg-teal-500 disabled:bg-zinc-850 disabled:text-zinc-600'}`}
                                 >
                                     <i className="fa-solid fa-paper-plane text-xs"></i> Enviar
                                 </button>
@@ -4118,34 +4152,46 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                 const edges = selectedFlow.data.edges || [];
 
                 return (
-                    <div className="flex-1 flex flex-col text-zinc-100 relative h-[82vh] md:h-[80vh] min-h-[550px] border border-zinc-200 dark:border-zinc-800/80 rounded-[28px] md:rounded-[40px] bg-zinc-950 overflow-hidden shadow-2xl animate-in fade-in">
+                    <div className={`flex-1 flex flex-col relative h-[82vh] md:h-[80vh] min-h-[550px] border rounded-[28px] md:rounded-[40px] overflow-hidden shadow-2xl animate-in fade-in ${flowchartLightMode ? 'bg-zinc-50 border-zinc-200 text-zinc-850 shadow-zinc-200/50' : 'bg-zinc-950 border-zinc-200 dark:border-zinc-800/80 text-zinc-100'}`}>
                         {/* Visualizer Header (Optimized for Mobile/Tablet) */}
-                        <div className="absolute top-2 left-2 right-2 md:top-4 md:left-4 md:right-4 z-40 bg-zinc-900/95 backdrop-blur-xl border border-zinc-800/50 rounded-2xl md:rounded-3xl p-2.5 md:p-5 flex flex-row justify-between items-center gap-2 shadow-xl animate-in fade-in">
+                        <div className={`absolute top-2 left-2 right-2 md:top-4 md:left-4 md:right-4 z-40 border rounded-2xl md:rounded-3xl p-2.5 md:p-5 flex flex-row justify-between items-center gap-2 shadow-xl animate-in fade-in backdrop-blur-xl ${flowchartLightMode ? 'bg-white/95 border-zinc-200/80 text-zinc-850 shadow-zinc-200/20' : 'bg-zinc-900/95 border-zinc-800/50 text-white shadow-xl'}`}>
                             <div className="flex items-center gap-2 md:gap-3 min-w-0">
-                                <button onClick={() => { stopSpeaking(); stopSpeechRecognition(); setSelectedFlow(null); setView('gallery'); }} className="w-8.5 h-8.5 md:w-10 md:h-10 rounded-xl bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 flex items-center justify-center text-zinc-400 hover:text-white transition-colors shrink-0 active:scale-95">
+                                <button onClick={() => { stopSpeaking(); stopSpeechRecognition(); setSelectedFlow(null); setView('gallery'); }} className={`w-8.5 h-8.5 md:w-10 md:h-10 rounded-xl border flex items-center justify-center transition-colors shrink-0 active:scale-95 ${flowchartLightMode ? 'bg-zinc-100 hover:bg-zinc-200 border-zinc-200 text-zinc-650 hover:text-zinc-900' : 'bg-zinc-800 hover:bg-zinc-700 border-zinc-700 text-zinc-400 hover:text-white'}`}>
                                     <i className="fa-solid fa-chevron-left text-xs md:text-sm"></i>
                                 </button>
                                 <div className="min-w-0">
-                                    <h2 className="text-xs md:text-lg font-black text-white leading-tight flex items-center gap-1.5">
+                                    <h2 className={`text-xs md:text-lg font-black leading-tight flex items-center gap-1.5 ${flowchartLightMode ? 'text-zinc-900' : 'text-white'}`}>
                                         <span className="truncate max-w-[100px] sm:max-w-xs">{selectedFlow.title}</span>
-                                        <span className="text-[7px] md:text-[9px] font-black uppercase bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-1.5 py-0.5 rounded-full shrink-0">{selectedFlow.category}</span>
+                                        <span className={`text-[7px] md:text-[9px] font-black uppercase border px-1.5 py-0.5 rounded-full shrink-0 ${flowchartLightMode ? 'bg-emerald-50 text-emerald-600 border-emerald-250' : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'}`}>{selectedFlow.category}</span>
                                     </h2>
-                                    <p className="text-[7px] md:text-[10px] font-bold text-zinc-500 uppercase tracking-widest mt-0.5 truncate">Prazos: <span className="text-zinc-300 font-extrabold">{reviewDetails.text}</span></p>
+                                    <p className={`text-[7px] md:text-[10px] font-bold uppercase tracking-widest mt-0.5 truncate ${flowchartLightMode ? 'text-zinc-450' : 'text-zinc-500'}`}>Prazos: <span className={`${flowchartLightMode ? 'text-zinc-700 font-black' : 'text-zinc-300 font-extrabold'}`}>{reviewDetails.text}</span></p>
                                 </div>
                             </div>
 
                             <div className="flex items-center gap-1.5 shrink-0">
                                 {/* Compact Checklist/Canvas/AI toggle */}
-                                <div className="flex bg-zinc-950 p-0.5 rounded-xl border border-zinc-800 shrink-0">
-                                    <button onClick={() => { stopSpeaking(); stopSpeechRecognition(); setCanvasViewMode('canvas'); }} className={`px-2 py-1 md:px-4 md:py-2 rounded-lg text-[9px] md:text-xs font-bold transition-all ${canvasViewMode === 'canvas' ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-zinc-300'}`} title="Diagrama"><i className="fa-solid fa-circle-nodes md:mr-1.5"></i> <span className="hidden md:inline">Diagrama</span></button>
-                                    <button onClick={() => { stopSpeaking(); stopSpeechRecognition(); setCanvasViewMode('checklist'); }} className={`px-2 py-1 md:px-4 md:py-2 rounded-lg text-[9px] md:text-xs font-bold transition-all ${canvasViewMode === 'checklist' ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-zinc-300'}`} title="Checklist"><i className="fa-solid fa-list-check md:mr-1.5"></i> <span className="hidden md:inline">Checklist</span></button>
-                                    <button onClick={() => { stopSpeaking(); stopSpeechRecognition(); setCanvasViewMode('ia_chat'); }} className={`px-2 py-1 md:px-4 md:py-2 rounded-lg text-[9px] md:text-xs font-bold transition-all flex items-center gap-1 ${canvasViewMode === 'ia_chat' ? 'bg-gradient-to-r from-teal-600 to-emerald-600 text-white shadow-lg shadow-emerald-900/30' : 'text-teal-400 hover:text-teal-300'}`} title="Conversar com IA sobre a Diretriz"><i className="fa-solid fa-comments md:mr-1.5"></i> <span className="hidden md:inline">Chat Diretriz</span></button>
-                                    <button onClick={() => { stopSpeaking(); stopSpeechRecognition(); setCanvasViewMode('ia_review'); }} className={`px-2 py-1 md:px-4 md:py-2 rounded-lg text-[9px] md:text-xs font-black transition-all flex items-center gap-1 ${canvasViewMode === 'ia_review' ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-lg shadow-indigo-900/30' : 'text-purple-400 hover:text-purple-300'}`} title="Revisão Clínica com IA"><i className="fa-solid fa-brain md:mr-1.5 animate-pulse"></i> <span className="hidden md:inline">Revisão IA</span></button>
+                                <div className={`flex p-0.5 rounded-xl border shrink-0 ${flowchartLightMode ? 'bg-zinc-100 border-zinc-200' : 'bg-zinc-950 border-zinc-800'}`}>
+                                    <button onClick={() => { stopSpeaking(); stopSpeechRecognition(); setCanvasViewMode('canvas'); }} className={`px-2 py-1 md:px-4 md:py-2 rounded-lg text-[9px] md:text-xs font-bold transition-all ${canvasViewMode === 'canvas' ? (flowchartLightMode ? 'bg-white text-zinc-900 shadow-sm border border-zinc-200/55' : 'bg-zinc-800 text-white') : (flowchartLightMode ? 'text-zinc-550 hover:text-zinc-800' : 'text-zinc-500 hover:text-zinc-300')}`} title="Diagrama"><i className="fa-solid fa-circle-nodes md:mr-1.5"></i> <span className="hidden md:inline">Diagrama</span></button>
+                                    <button onClick={() => { stopSpeaking(); stopSpeechRecognition(); setCanvasViewMode('checklist'); }} className={`px-2 py-1 md:px-4 md:py-2 rounded-lg text-[9px] md:text-xs font-bold transition-all ${canvasViewMode === 'checklist' ? (flowchartLightMode ? 'bg-white text-zinc-900 shadow-sm border border-zinc-200/55' : 'bg-zinc-800 text-white') : (flowchartLightMode ? 'text-zinc-550 hover:text-zinc-800' : 'text-zinc-500 hover:text-zinc-300')}`} title="Checklist"><i className="fa-solid fa-list-check md:mr-1.5"></i> <span className="hidden md:inline">Checklist</span></button>
+                                    <button onClick={() => { stopSpeaking(); stopSpeechRecognition(); setCanvasViewMode('ia_chat'); }} className={`px-2 py-1 md:px-4 md:py-2 rounded-lg text-[9px] md:text-xs font-bold transition-all flex items-center gap-1 ${canvasViewMode === 'ia_chat' ? 'bg-gradient-to-r from-teal-600 to-emerald-600 text-white shadow-lg shadow-emerald-900/30' : (flowchartLightMode ? 'text-teal-650 hover:text-teal-850' : 'text-teal-400 hover:text-teal-300')}`} title="Conversar com IA sobre a Diretriz"><i className="fa-solid fa-comments md:mr-1.5"></i> <span className="hidden md:inline">Chat Diretriz</span></button>
+                                    <button onClick={() => { stopSpeaking(); stopSpeechRecognition(); setCanvasViewMode('ia_review'); }} className={`px-2 py-1 md:px-4 md:py-2 rounded-lg text-[9px] md:text-xs font-black transition-all flex items-center gap-1 ${canvasViewMode === 'ia_review' ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-lg shadow-indigo-900/30' : (flowchartLightMode ? 'text-purple-650 hover:text-purple-850' : 'text-purple-400 hover:text-purple-300')}`} title="Revisão Clínica com IA"><i className="fa-solid fa-brain md:mr-1.5 animate-pulse"></i> <span className="hidden md:inline">Revisão IA</span></button>
                                 </div>
+
+                                <button 
+                                    onClick={() => setFlowchartLightMode(!flowchartLightMode)} 
+                                    className={`w-7 h-7 md:w-10 md:h-10 rounded-xl border flex items-center justify-center transition-all shrink-0 active:scale-95 ${
+                                        flowchartLightMode 
+                                            ? 'bg-zinc-100 hover:bg-zinc-200 border-zinc-200 text-zinc-650' 
+                                            : 'bg-zinc-800/50 hover:bg-zinc-750 border-zinc-700 text-zinc-400 hover:text-white'
+                                    }`}
+                                    title={flowchartLightMode ? "Modo Escuro" : "Modo Claro"}
+                                >
+                                    <i className={`fa-solid ${flowchartLightMode ? 'fa-moon' : 'fa-sun'} text-xs md:text-sm`}></i>
+                                </button>
 
                                 <button onClick={() => handleMarkReviewed(selectedFlow.id)} className="px-2.5 py-1.5 md:px-5 md:py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-[9px] md:text-xs rounded-xl shadow-lg transition-all active:scale-95 flex items-center gap-1 shrink-0" title="Marcar como revisado!"><i className="fa-solid fa-check text-xs"></i> <span className="hidden sm:inline">Revisado!</span><span className="sm:hidden">OK</span></button>
                                 
-                                <button onClick={(e) => handleDeleteFlow(selectedFlow.id, e)} className="w-7 h-7 md:w-10 md:h-10 rounded-xl bg-zinc-800/50 hover:bg-red-500/20 border border-zinc-700 text-zinc-400 hover:text-red-500 transition-colors flex items-center justify-center shrink-0" title="Excluir"><i className="fa-solid fa-trash text-xs"></i></button>
+                                <button onClick={(e) => handleDeleteFlow(selectedFlow.id, e)} className={`w-7 h-7 md:w-10 md:h-10 rounded-xl border text-zinc-400 hover:text-red-500 transition-colors flex items-center justify-center shrink-0 ${flowchartLightMode ? 'bg-zinc-100 hover:bg-red-500/10 border-zinc-200' : 'bg-zinc-800/50 hover:bg-red-500/20 border-zinc-700'}`} title="Excluir"><i className="fa-solid fa-trash text-xs"></i></button>
                             </div>
                         </div>
                         
@@ -4161,21 +4207,23 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                 onTouchMove={handleTouchMove}
                                 onTouchEnd={handleTouchEnd}
                                 onWheel={handleWheel}
-                                className="flex-1 w-full h-full relative cursor-grab active:cursor-grabbing overflow-hidden"
+className="flex-1 w-full h-full relative cursor-grab active:cursor-grabbing overflow-hidden"
                                 style={{
-                                    backgroundImage: 'radial-gradient(rgba(255, 255, 255, 0.08) 1.2px, transparent 0)',
+                                    backgroundImage: flowchartLightMode 
+                                        ? 'radial-gradient(rgba(0, 0, 0, 0.07) 1.2px, transparent 0)' 
+                                        : 'radial-gradient(rgba(255, 255, 255, 0.08) 1.2px, transparent 0)',
                                     backgroundSize: '24px 24px'
                                 }}
                             >
                                 {/* Zoom/Pan HUD Floating controls (Fully responsive on Mobile) */}
-                                <div className="absolute bottom-4 left-4 right-4 md:right-auto z-40 bg-zinc-900/95 backdrop-blur-xl border border-zinc-800 rounded-2xl p-1.5 md:p-2 flex items-center justify-between md:justify-start gap-1.5 md:gap-2 shadow-lg">
+                                <div className={`absolute bottom-4 left-4 right-4 md:right-auto z-40 backdrop-blur-xl border rounded-2xl p-1.5 md:p-2 flex items-center justify-between md:justify-start gap-1.5 md:gap-2 shadow-lg ${flowchartLightMode ? 'bg-white/95 border-zinc-250 text-zinc-800 shadow-zinc-200/50' : 'bg-zinc-900/95 border-zinc-800 text-zinc-400 shadow-lg'}`}>
                                     <div className="flex gap-1">
-                                        <button onClick={() => setZoom(Math.min(zoom * 1.15, 2.5))} className="w-9 h-9 md:w-10 md:h-10 rounded-xl bg-zinc-850 hover:bg-zinc-800 flex items-center justify-center text-zinc-400 hover:text-white border border-zinc-800 transition-all shadow-inner" title="Zoom In"><i className="fa-solid fa-plus text-xs"></i></button>
-                                        <button onClick={() => setZoom(Math.max(zoom / 1.15, 0.4))} className="w-9 h-9 md:w-10 md:h-10 rounded-xl bg-zinc-800 hover:bg-zinc-805 flex items-center justify-center text-zinc-400 hover:text-white border border-zinc-800 transition-all shadow-inner" title="Zoom Out"><i className="fa-solid fa-minus text-xs"></i></button>
-                                        <button onClick={() => { setZoom(isMobile ? 0.6 : 1); centerCanvas(); }} className="w-9 h-9 md:w-10 md:h-10 rounded-xl bg-zinc-850 hover:bg-zinc-800 flex items-center justify-center text-zinc-400 hover:text-white border border-zinc-800 transition-all shadow-inner" title="Centralizar"><i className="fa-solid fa-arrows-to-eye text-xs"></i></button>
+                                        <button onClick={() => setZoom(Math.min(zoom * 1.15, 2.5))} className={`w-9 h-9 md:w-10 md:h-10 rounded-xl border flex items-center justify-center transition-all shadow-inner ${flowchartLightMode ? 'bg-zinc-100 hover:bg-zinc-200 border-zinc-200 text-zinc-600 hover:text-zinc-950' : 'bg-zinc-800 hover:bg-zinc-750 border-zinc-800 text-zinc-400 hover:text-white'}`} title="Zoom In"><i className="fa-solid fa-plus text-xs"></i></button>
+                                        <button onClick={() => setZoom(Math.max(zoom / 1.15, 0.4))} className={`w-9 h-9 md:w-10 md:h-10 rounded-xl border flex items-center justify-center transition-all shadow-inner ${flowchartLightMode ? 'bg-zinc-100 hover:bg-zinc-200 border-zinc-200 text-zinc-600 hover:text-zinc-955' : 'bg-zinc-800 hover:bg-zinc-750 border-zinc-800 text-zinc-400 hover:text-white'}`} title="Zoom Out"><i className="fa-solid fa-minus text-xs"></i></button>
+                                        <button onClick={() => { setZoom(isMobile ? 0.6 : 1); centerCanvas(); }} className={`w-9 h-9 md:w-10 md:h-10 rounded-xl border flex items-center justify-center transition-all shadow-inner ${flowchartLightMode ? 'bg-zinc-100 hover:bg-zinc-200 border-zinc-200 text-zinc-600 hover:text-zinc-950' : 'bg-zinc-800 hover:bg-zinc-750 border-zinc-800 text-zinc-400 hover:text-white'}`} title="Centralizar"><i className="fa-solid fa-arrows-to-eye text-xs"></i></button>
                                     </div>
-                                    <div className="w-px h-5 bg-zinc-800 mx-1"></div>
-                                    <button onClick={() => setLayoutDirection(layoutDirection === 'TB' ? 'LR' : 'TB')} className="px-3 py-2 rounded-xl bg-zinc-850 hover:bg-zinc-800 flex items-center justify-center text-zinc-400 hover:text-white border border-zinc-800 transition-all text-[10px] md:text-xs font-bold gap-1 md:gap-1.5 shadow-inner grow md:grow-0">
+                                    <div className={`w-px h-5 mx-1 ${flowchartLightMode ? 'bg-zinc-200' : 'bg-zinc-800'}`}></div>
+                                    <button onClick={() => setLayoutDirection(layoutDirection === 'TB' ? 'LR' : 'TB')} className={`px-3 py-2 rounded-xl border flex items-center justify-center transition-all text-[10px] md:text-xs font-bold gap-1 md:gap-1.5 shadow-inner grow md:grow-0 ${flowchartLightMode ? 'bg-zinc-100 hover:bg-zinc-200 border-zinc-200 text-zinc-650 hover:text-zinc-950' : 'bg-zinc-850 hover:bg-zinc-800 border-zinc-800 text-zinc-400 hover:text-white'}`}>
                                         <i className="fa-solid fa-shuffle text-[10px]"></i> 
                                         {layoutDirection === 'TB' ? 'Vertical' : 'Horizontal'}
                                     </button>
@@ -4219,7 +4267,7 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                             const isYes = edge.label && ['sim', 'yes', 'confirmado', 'positivo', 'alto risco', 'choque', 'grave'].includes(edge.label.toLowerCase());
                                             const isNo = edge.label && ['não', 'no', 'rejeitado', 'negativo', 'baixo risco', 'melhora'].includes(edge.label.toLowerCase());
                                             
-                                            const lineColor = isYes ? '#10b981' : (isNo ? '#ef4444' : '#52525b');
+                                            const lineColor = isYes ? '#10b981' : (isNo ? '#ef4444' : (flowchartLightMode ? '#a1a1aa' : '#52525b'));
                                             const markerUrl = isYes ? 'url(#arrow-green)' : (isNo ? 'url(#arrow-red)' : 'url(#arrow)');
 
                                             const pathData = `M ${x1} ${y1} C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${x2} ${y2}`;
@@ -4233,7 +4281,13 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                                     {edge.label && (
                                                         <foreignObject x={mx - 60} y={my - 14} width={120} height={28} className="overflow-visible">
                                                             <div className="flex justify-center items-center h-full">
-                                                                <span className={`text-[10px] font-black px-2 py-0.5 rounded-md shadow-md border whitespace-nowrap ${isYes ? 'bg-emerald-950 text-emerald-400 border-emerald-800' : (isNo ? 'bg-rose-950 text-rose-400 border-rose-800' : 'bg-zinc-900 text-zinc-400 border-zinc-800')}`}>
+                                                                <span className={`text-[10px] font-black px-2 py-0.5 rounded-md border whitespace-nowrap ${
+                                                                    isYes 
+                                                                        ? (flowchartLightMode ? 'bg-emerald-55 text-emerald-700 border-emerald-250 shadow-sm' : 'bg-emerald-950 text-emerald-400 border-emerald-800 shadow-md') 
+                                                                        : (isNo 
+                                                                            ? (flowchartLightMode ? 'bg-rose-55 text-rose-700 border-rose-250 shadow-sm' : 'bg-rose-950 text-rose-400 border-rose-800 shadow-md') 
+                                                                            : (flowchartLightMode ? 'bg-white text-zinc-700 border-zinc-200 shadow-sm' : 'bg-zinc-900 text-zinc-400 border-zinc-800 shadow-md'))
+                                                                }`}>
                                                                     {edge.label}
                                                                 </span>
                                                             </div>
@@ -4253,19 +4307,48 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                         let nodeIcon = '';
                                         
                                         switch (node.type) {
-                                            case 'start': nodeColorClasses = 'from-blue-600/10 to-blue-500/20 border-blue-500 text-blue-300'; nodeIcon = 'fa-play'; break;
-                                            case 'decision': nodeColorClasses = 'from-amber-600/10 to-amber-500/20 border-amber-500 text-amber-300'; nodeIcon = 'fa-code-branch'; break;
-                                            case 'warning': nodeColorClasses = 'from-rose-600/20 to-rose-500/35 border-rose-500 text-rose-300 animate-pulse border-2'; nodeIcon = 'fa-triangle-exclamation'; break;
-                                            case 'success': nodeColorClasses = 'from-emerald-600/10 to-emerald-500/20 border-emerald-500 text-emerald-300'; nodeIcon = 'fa-circle-check'; break;
-                                            case 'end': nodeColorClasses = 'from-purple-600/10 to-purple-500/20 border-purple-500 text-purple-300'; nodeIcon = 'fa-door-open'; break;
-                                            default: nodeColorClasses = 'from-zinc-900/90 to-zinc-950 border-zinc-800 text-zinc-300'; nodeIcon = 'fa-gears';
+                                            case 'start':
+                                                nodeColorClasses = flowchartLightMode 
+                                                    ? 'from-blue-50 to-blue-100 border-blue-450 text-blue-900 shadow-sm' 
+                                                    : 'from-blue-600/10 to-blue-500/20 border-blue-500 text-blue-300';
+                                                nodeIcon = 'fa-play';
+                                                break;
+                                            case 'decision':
+                                                nodeColorClasses = flowchartLightMode 
+                                                    ? 'from-amber-50 to-amber-100 border-amber-450 text-amber-900 shadow-sm' 
+                                                    : 'from-amber-600/10 to-amber-500/20 border-amber-500 text-amber-300';
+                                                nodeIcon = 'fa-code-branch';
+                                                break;
+                                            case 'warning':
+                                                nodeColorClasses = flowchartLightMode 
+                                                    ? 'from-rose-50 to-rose-100 border-rose-450 text-rose-900 animate-pulse border-2 shadow-sm' 
+                                                    : 'from-rose-600/20 to-rose-500/35 border-rose-500 text-rose-300 animate-pulse border-2';
+                                                nodeIcon = 'fa-triangle-exclamation';
+                                                break;
+                                            case 'success':
+                                                nodeColorClasses = flowchartLightMode 
+                                                    ? 'from-emerald-50 to-emerald-100 border-emerald-450 text-emerald-900 shadow-sm' 
+                                                    : 'from-emerald-600/10 to-emerald-500/20 border-emerald-500 text-emerald-300';
+                                                nodeIcon = 'fa-circle-check';
+                                                break;
+                                            case 'end':
+                                                nodeColorClasses = flowchartLightMode 
+                                                    ? 'from-purple-50 to-purple-100 border-purple-450 text-purple-900 shadow-sm' 
+                                                    : 'from-purple-600/10 to-purple-500/20 border-purple-500 text-purple-300';
+                                                nodeIcon = 'fa-door-open';
+                                                break;
+                                            default:
+                                                nodeColorClasses = flowchartLightMode 
+                                                    ? 'from-zinc-50 to-zinc-100 border-zinc-300 text-zinc-800 shadow-sm' 
+                                                    : 'from-zinc-900/90 to-zinc-950 border-zinc-800 text-zinc-300';
+                                                nodeIcon = 'fa-gears';
                                         }
 
                                         const isSelected = selectedNode && selectedNode.id === node.id;
 
                                         return (
                                             <div key={node.id} onClick={() => setSelectedNode(node)} className={`interactive-node absolute w-[240px] h-[80px] rounded-2xl bg-gradient-to-r border p-4 flex items-center gap-3 cursor-pointer shadow-lg hover:scale-105 transition-all select-none z-10 ${nodeColorClasses} ${isSelected ? 'ring-4 ring-emerald-500/40 border-emerald-500 scale-105 z-20' : ''}`} style={{ left: `${pos.x}px`, top: `${pos.y}px` }}>
-                                                <div className="w-8 h-8 rounded-lg bg-black/40 flex items-center justify-center shrink-0"><i className={`fa-solid ${nodeIcon} text-xs opacity-80`}></i></div>
+                                                <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${flowchartLightMode ? 'bg-black/10' : 'bg-black/40'}`}><i className={`fa-solid ${nodeIcon} text-xs opacity-80`}></i></div>
                                                 <div className="flex-1 min-w-0"><p className="text-[11px] font-bold leading-snug line-clamp-3 select-none">{node.label}</p></div>
                                             </div>
                                         );
@@ -4274,7 +4357,7 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                             </div>
                         ) : canvasViewMode === 'checklist' ? (
                             /* Checklist sequence mode (Mobile optimized scrolling) */
-                            <div className="flex-1 w-full p-4 md:p-6 overflow-y-auto planner-scroll bg-zinc-950 pt-28 pb-28 md:pt-32">
+                            <div className={`flex-1 w-full p-4 md:p-6 overflow-y-auto planner-scroll pt-28 pb-28 md:pt-32 ${flowchartLightMode ? 'bg-zinc-50' : 'bg-zinc-950'}`}>
                                 <div className="max-w-2xl mx-auto space-y-5">
                                     {/* Progress & Quick Stats Card */}
                                     {(() => {
@@ -4283,17 +4366,17 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                         const totalCount = nodes.length;
                                         const percent = Math.round((readCount / totalCount) * 100) || 0;
                                         return (
-                                            <div className="bg-gradient-to-br from-zinc-900 to-zinc-950 border border-zinc-800/80 rounded-[24px] p-5 shadow-xl space-y-3 relative overflow-hidden">
+                                            <div className={`border rounded-[24px] p-5 shadow-xl space-y-3 relative overflow-hidden ${flowchartLightMode ? 'bg-white border-zinc-200 text-zinc-850' : 'bg-gradient-to-br from-zinc-900 to-zinc-950 border-zinc-800/80 text-white'}`}>
                                                 <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-500/5 blur-2xl rounded-full"></div>
                                                 <div className="flex justify-between items-center relative z-10">
                                                     <div>
-                                                        <h3 className="font-black text-sm md:text-base text-white mb-0.5"><i className="fa-solid fa-list-check text-emerald-500 mr-2 animate-pulse"></i> Checklist de Estudo</h3>
-                                                        <p className="text-zinc-400 text-[10px] md:text-xs font-semibold leading-relaxed">Marque as etapas estudadas temporariamente.</p>
+                                                        <h3 className={`font-black text-sm md:text-base mb-0.5 ${flowchartLightMode ? 'text-zinc-900' : 'text-white'}`}><i className="fa-solid fa-list-check text-emerald-500 mr-2 animate-pulse"></i> Checklist de Estudo</h3>
+                                                        <p className={`text-[10px] md:text-xs font-semibold leading-relaxed ${flowchartLightMode ? 'text-zinc-500' : 'text-zinc-400'}`}>Marque as etapas estudadas temporariamente.</p>
                                                     </div>
-                                                    <span className="text-xs font-black text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1 rounded-full">{percent}% Concluído</span>
+                                                    <span className={`text-xs font-black px-3 py-1 rounded-full ${flowchartLightMode ? 'text-emerald-700 bg-emerald-100/50 border border-emerald-300/60' : 'text-emerald-400 bg-emerald-500/10 border border-emerald-500/20'}`}>{percent}% Concluído</span>
                                                 </div>
                                                 <div className="space-y-1">
-                                                    <div className="w-full bg-zinc-800 rounded-full h-2 overflow-hidden">
+                                                    <div className={`w-full rounded-full h-2 overflow-hidden ${flowchartLightMode ? 'bg-zinc-200' : 'bg-zinc-800'}`}>
                                                         <div className="bg-gradient-to-r from-emerald-500 to-teal-500 h-full rounded-full transition-all duration-500 shadow-[0_0_8px_rgba(16,185,129,0.3)]" style={{ width: `${percent}%` }}></div>
                                                     </div>
                                                     <div className="flex justify-between text-[9px] font-black text-zinc-500 uppercase tracking-widest pt-1">
@@ -4308,13 +4391,13 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                     {/* Search and Filters Controls */}
                                     <div className="space-y-3">
                                         <div className="relative">
-                                            <i className="fa-solid fa-magnifying-glass absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500 text-xs"></i>
+                                            <i className={`fa-solid fa-magnifying-glass absolute left-4 top-1/2 -translate-y-1/2 text-xs ${flowchartLightMode ? 'text-zinc-400' : 'text-zinc-500'}`}></i>
                                             <input 
                                                 type="text" 
                                                 value={checklistSearch} 
                                                 onChange={e => setChecklistSearch(e.target.value)} 
                                                 placeholder="Buscar etapa, medicamento ou critério clínico..." 
-                                                className="w-full pl-10 pr-4 py-3 bg-zinc-900/90 border border-zinc-800 rounded-2xl text-xs font-semibold text-zinc-100 placeholder-zinc-500 outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-all"
+                                                className={`w-full pl-10 pr-4 py-3 border rounded-2xl text-xs font-semibold outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition-all ${flowchartLightMode ? 'bg-white border-zinc-200 text-zinc-900 placeholder-zinc-400 shadow-sm' : 'bg-zinc-900/90 border-zinc-800 text-zinc-100 placeholder-zinc-500 shadow-inner'}`}
                                             />
                                             {checklistSearch && (
                                                 <button onClick={() => setChecklistSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-white p-1"><i className="fa-solid fa-xmark text-xs"></i></button>
@@ -4336,10 +4419,10 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                                     <button 
                                                         key={opt.id} 
                                                         onClick={() => setChecklistFilter(opt.id)}
-                                                        className={`px-3.5 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all flex items-center gap-1.5 shrink-0 border border-zinc-800 ${
+                                                        className={`px-3.5 py-2 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all flex items-center gap-1.5 shrink-0 border ${
                                                             isActive 
-                                                                ? 'bg-zinc-800 border-zinc-700 text-white shadow-md' 
-                                                                : 'bg-zinc-900/40 text-zinc-400 hover:text-zinc-200'
+                                                                ? (flowchartLightMode ? 'bg-zinc-900 border-zinc-900 text-white shadow-md' : 'bg-zinc-800 border-zinc-700 text-white shadow-md') 
+                                                                : (flowchartLightMode ? 'bg-white border-zinc-200 text-zinc-500 hover:text-zinc-700 hover:bg-zinc-50 shadow-sm' : 'bg-zinc-900/40 border-zinc-800 text-zinc-400 hover:text-zinc-200')
                                                         }`}
                                                     >
                                                         <i className={`fa-solid ${opt.icon} ${opt.color || ''} text-[10px]`}></i>
@@ -4372,7 +4455,7 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
 
                                             if (filteredNodes.length === 0) {
                                                 return (
-                                                    <div className="text-center py-12 bg-zinc-900/35 rounded-3xl border border-dashed border-zinc-800 p-6 flex flex-col items-center justify-center">
+                                                    <div className={`text-center py-12 border border-dashed rounded-3xl p-6 flex flex-col items-center justify-center ${flowchartLightMode ? 'bg-zinc-100/30 border-zinc-200 text-zinc-650' : 'bg-zinc-900/35 border-zinc-800 text-zinc-400'}`}>
                                                         <i className="fa-solid fa-magnifying-glass text-3xl text-zinc-600 mb-3 animate-pulse"></i>
                                                         <h4 className="font-black text-sm text-zinc-400">Nenhuma etapa encontrada</h4>
                                                         <p className="text-zinc-500 text-[10px] font-semibold mt-1">Experimente mudar o filtro ou termo de pesquisa.</p>
@@ -4388,21 +4471,52 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                                 let textGlow = '';
                                                 
                                                 switch (node.type) {
-                                                    case 'start': leftBorderClass = 'border-l-blue-500'; badgeColor = 'bg-blue-500/10 text-blue-400 border border-blue-500/20'; break;
-                                                    case 'decision': leftBorderClass = 'border-l-amber-500'; badgeColor = 'bg-amber-500/10 text-amber-400 border border-amber-500/20'; break;
-                                                    case 'warning': leftBorderClass = 'border-l-rose-500'; badgeColor = 'bg-rose-500/15 text-rose-400 border border-rose-500/25'; textGlow = 'text-rose-400'; break;
-                                                    case 'success': leftBorderClass = 'border-l-emerald-500'; badgeColor = 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'; break;
-                                                    case 'end': leftBorderClass = 'border-l-purple-500'; badgeColor = 'bg-purple-500/10 text-purple-400 border border-purple-500/20'; break;
+                                                    case 'start':
+                                                        leftBorderClass = 'border-l-blue-500';
+                                                        badgeColor = flowchartLightMode 
+                                                            ? 'bg-blue-50 text-blue-800 border border-blue-200' 
+                                                            : 'bg-blue-500/10 text-blue-400 border border-blue-500/20';
+                                                        break;
+                                                    case 'decision':
+                                                        leftBorderClass = 'border-l-amber-500';
+                                                        badgeColor = flowchartLightMode 
+                                                            ? 'bg-amber-50 text-amber-800 border border-amber-200' 
+                                                            : 'bg-amber-500/10 text-amber-400 border border-amber-500/20';
+                                                        break;
+                                                    case 'warning':
+                                                        leftBorderClass = 'border-l-rose-500';
+                                                        badgeColor = flowchartLightMode 
+                                                            ? 'bg-rose-50 text-rose-800 border border-rose-200' 
+                                                            : 'bg-rose-500/15 text-rose-400 border border-rose-500/25';
+                                                        textGlow = flowchartLightMode ? 'text-rose-600 font-extrabold' : 'text-rose-400';
+                                                        break;
+                                                    case 'success':
+                                                        leftBorderClass = 'border-l-emerald-500';
+                                                        badgeColor = flowchartLightMode 
+                                                            ? 'bg-emerald-50 text-emerald-800 border border-emerald-250' 
+                                                            : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20';
+                                                        break;
+                                                    case 'end':
+                                                        leftBorderClass = 'border-l-purple-500';
+                                                        badgeColor = flowchartLightMode 
+                                                            ? 'bg-purple-50 text-purple-800 border border-purple-200' 
+                                                            : 'bg-purple-500/10 text-purple-400 border border-purple-500/20';
+                                                        break;
+                                                    default:
+                                                        leftBorderClass = 'border-l-zinc-350';
+                                                        badgeColor = flowchartLightMode 
+                                                            ? 'bg-zinc-100 text-zinc-700 border border-zinc-200' 
+                                                            : 'bg-zinc-800 text-zinc-400';
                                                 }
 
                                                 return (
                                                     <div 
                                                         key={node.id} 
                                                         onClick={() => setSelectedNode(node)} 
-                                                        className={`bg-zinc-900/50 hover:bg-zinc-900/90 border rounded-2xl p-4 md:p-5 border-l-4 transition-all duration-300 cursor-pointer flex items-start gap-3.5 relative overflow-hidden active:scale-[0.98] ${
+                                                        className={`border rounded-2xl p-4 md:p-5 border-l-4 transition-all duration-300 cursor-pointer flex items-start gap-3.5 relative overflow-hidden active:scale-[0.98] ${
                                                             isNodeChecked 
-                                                                ? 'border-emerald-500/40 bg-emerald-950/5 border-l-emerald-500/80 shadow-md' 
-                                                                : 'border-zinc-800/80'
+                                                                ? (flowchartLightMode ? 'border-emerald-500/45 bg-emerald-50/20 border-l-emerald-500 shadow-sm' : 'border-emerald-500/40 bg-emerald-950/5 border-l-emerald-500/80 shadow-md') 
+                                                                : (flowchartLightMode ? 'bg-white border-zinc-200 hover:bg-zinc-50/50 border-l-zinc-300 shadow-sm' : 'bg-zinc-900/50 hover:bg-zinc-900 border-zinc-800/80')
                                                         } ${selectedNode?.id === node.id ? 'ring-2 ring-emerald-500/40 border-emerald-500/50 scale-[1.01]' : ''}`}
                                                     >
                                                         {/* Studied checkbox button container */}
@@ -4411,7 +4525,7 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                                             className={`w-7 h-7 rounded-xl flex items-center justify-center border shrink-0 transition-all active:scale-90 ${
                                                                 isNodeChecked 
                                                                     ? 'bg-emerald-50 border-emerald-400 text-black shadow-lg shadow-emerald-900/20' 
-                                                                    : 'bg-zinc-950 border-zinc-700 text-transparent hover:border-zinc-500'
+                                                                    : (flowchartLightMode ? 'bg-zinc-50 border-zinc-250 text-transparent hover:border-zinc-400' : 'bg-zinc-950 border-zinc-700 text-transparent hover:border-zinc-500')
                                                             }`}
                                                         >
                                                             <i className="fa-solid fa-check text-xs font-black"></i>
@@ -4424,8 +4538,8 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                                                     {node.type}
                                                                 </span>
                                                             </div>
-                                                            <h4 className={`font-black text-xs md:text-sm leading-snug mb-1 transition-colors ${isNodeChecked ? 'text-zinc-300 line-through decoration-zinc-700 decoration-2' : 'text-white'} ${textGlow}`}>{node.label}</h4>
-                                                            <p className={`text-[11px] md:text-xs font-medium leading-relaxed line-clamp-2 ${isNodeChecked ? 'text-zinc-500' : 'text-zinc-400'}`}>{node.description}</p>
+                                                            <h4 className={`font-black text-xs md:text-sm leading-snug mb-1 transition-colors ${isNodeChecked ? (flowchartLightMode ? 'text-zinc-400 line-through decoration-zinc-300 decoration-2' : 'text-zinc-300 line-through decoration-zinc-700 decoration-2') : (flowchartLightMode ? 'text-zinc-900' : 'text-white')} ${textGlow}`}>{node.label}</h4>
+                                                            <p className={`text-[11px] md:text-xs font-medium leading-relaxed line-clamp-2 ${isNodeChecked ? (flowchartLightMode ? 'text-zinc-400' : 'text-zinc-505') : (flowchartLightMode ? 'text-zinc-600' : 'text-zinc-400')}`}>{node.description}</p>
                                                         </div>
                                                     </div>
                                                 );
@@ -4436,12 +4550,12 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                             </div>
                         ) : canvasViewMode === 'ia_review' ? (
                             /* IA Revision Mode */
-                            <div className="flex-1 w-full overflow-y-auto planner-scroll bg-zinc-950 pt-28 pb-28 md:pt-32 p-4 md:p-6 text-zinc-100 select-text">
+                            <div className={`flex-1 w-full overflow-y-auto planner-scroll pt-28 pb-28 md:pt-32 p-4 md:p-6 select-text ${flowchartLightMode ? 'bg-zinc-50 text-zinc-800' : 'bg-zinc-950 text-zinc-100'}`}>
                                 {renderIaReviewContent()}
                             </div>
                         ) : (
                             /* IA Chat Mode */
-                            <div className="flex-1 w-full overflow-y-auto planner-scroll bg-zinc-950 pt-28 pb-28 md:pt-32 p-4 md:p-6 text-zinc-100 select-text">
+                            <div className={`flex-1 w-full overflow-y-auto planner-scroll pt-28 pb-28 md:pt-32 p-4 md:p-6 select-text ${flowchartLightMode ? 'bg-zinc-50 text-zinc-800' : 'bg-zinc-950 text-zinc-100'}`}>
                                 {renderIaChatContent()}
                             </div>
                         )}
@@ -4454,20 +4568,20 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                     onTouchStart={handleBottomSheetTouchStart}
                                     onTouchMove={handleBottomSheetTouchMove}
                                     onTouchEnd={handleBottomSheetTouchEnd}
-                                    className="fixed bottom-0 left-0 right-0 max-h-[75vh] bg-zinc-950/98 backdrop-blur-3xl border-t border-zinc-850 rounded-t-[32px] shadow-[0_-8px_30px_rgba(0,0,0,0.5)] p-6 pb-10 overflow-y-auto z-[5100] select-text planner-scroll transition-transform duration-100 ease-out"
+                                    className={`fixed bottom-0 left-0 right-0 max-h-[75vh] backdrop-blur-3xl border-t rounded-t-[32px] p-6 pb-10 overflow-y-auto z-[5100] select-text planner-scroll transition-transform duration-100 ease-out ${flowchartLightMode ? 'bg-white/98 border-zinc-200 shadow-[0_-8px_30px_rgba(0,0,0,0.08)]' : 'bg-zinc-950/98 border-zinc-850 shadow-[0_-8px_30px_rgba(0,0,0,0.5)]'}`}
                                     style={{
                                         transform: `translateY(${bottomSheetY}px)`,
                                     }}
                                 >
-                                    <div className="bottom-sheet-handle w-12 h-1.5 bg-zinc-700 hover:bg-zinc-500 rounded-full mx-auto mb-5 cursor-grab active:cursor-grabbing"></div>
+                                    <div className={`bottom-sheet-handle w-12 h-1.5 rounded-full mx-auto mb-5 cursor-grab active:cursor-grabbing ${flowchartLightMode ? 'bg-zinc-350 hover:bg-zinc-400' : 'bg-zinc-700 hover:bg-zinc-500'}`}></div>
                                     <div className="bottom-sheet-header flex justify-between items-start gap-3 mb-4">
                                         <span className={`text-[8px] font-black uppercase tracking-wider px-2.5 py-1 rounded-full ${
-                                            selectedNode.type === 'start' ? 'bg-blue-500/15 text-blue-400' :
-                                            selectedNode.type === 'decision' ? 'bg-amber-500/15 text-amber-400' :
-                                            selectedNode.type === 'warning' ? 'bg-rose-500/15 text-rose-400 animate-pulse' :
-                                            selectedNode.type === 'success' ? 'bg-emerald-500/15 text-emerald-400' :
-                                            selectedNode.type === 'end' ? 'bg-purple-500/15 text-purple-400' :
-                                            'bg-zinc-800 text-zinc-400'
+                                            selectedNode.type === 'start' ? (flowchartLightMode ? 'bg-blue-100 text-blue-800' : 'bg-blue-500/15 text-blue-400') :
+                                            selectedNode.type === 'decision' ? (flowchartLightMode ? 'bg-amber-100 text-amber-800' : 'bg-amber-500/15 text-amber-400') :
+                                            selectedNode.type === 'warning' ? (flowchartLightMode ? 'bg-rose-100 text-rose-800 animate-pulse' : 'bg-rose-500/15 text-rose-400 animate-pulse') :
+                                            selectedNode.type === 'success' ? (flowchartLightMode ? 'bg-emerald-100 text-emerald-800' : 'bg-emerald-500/15 text-emerald-400') :
+                                            selectedNode.type === 'end' ? (flowchartLightMode ? 'bg-purple-100 text-purple-800' : 'bg-purple-500/15 text-purple-400') :
+                                            (flowchartLightMode ? 'bg-zinc-150 text-zinc-700' : 'bg-zinc-800 text-zinc-400')
                                         }`}>
                                             {selectedNode.type === 'start' ? 'Início do Protocolo' :
                                              selectedNode.type === 'decision' ? 'Decisão / Triagem' :
@@ -4476,20 +4590,24 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                              selectedNode.type === 'end' ? 'Seguimento pós-alta' :
                                              'Ação de Conduta'}
                                         </span>
-                                        <button onClick={() => setSelectedNode(null)} className="w-8 h-8 rounded-full bg-zinc-850 hover:bg-zinc-800 text-zinc-400 hover:text-white flex items-center justify-center transition-colors shrink-0"><i className="fa-solid fa-xmark text-sm"></i></button>
+                                        <button onClick={() => setSelectedNode(null)} className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors shrink-0 ${flowchartLightMode ? 'bg-zinc-100 hover:bg-zinc-200 text-zinc-500 hover:text-zinc-900' : 'bg-zinc-850 hover:bg-zinc-800 text-zinc-400 hover:text-white'}`}><i className="fa-solid fa-xmark text-sm"></i></button>
                                     </div>
                                     <div className="space-y-4 pb-6">
-                                        <h3 className="text-white font-black text-base md:text-lg leading-snug">{selectedNode.label}</h3>
-                                        <div className="h-px bg-zinc-850/80 my-3"></div>
-                                        <p className="text-zinc-300 text-sm font-semibold leading-relaxed text-justify-custom whitespace-pre-wrap">{selectedNode.description}</p>
+                                        <h3 className={`font-black text-base md:text-lg leading-snug ${flowchartLightMode ? 'text-zinc-900' : 'text-white'}`}>{selectedNode.label}</h3>
+                                        <div className={`h-px my-3 ${flowchartLightMode ? 'bg-zinc-200' : 'bg-zinc-855/80'}`}></div>
+                                        <p className={`text-sm font-semibold leading-relaxed text-justify-custom whitespace-pre-wrap ${flowchartLightMode ? 'text-zinc-700' : 'text-zinc-300'}`}>{selectedNode.description}</p>
                                     </div>
 
                                     {/* Mobile Step-by-Step Navigator inside Bottom Sheet */}
-                                    <div className="border-t border-zinc-850/80 pt-4 flex items-center justify-between gap-4 mt-6">
+                                    <div className={`border-t pt-4 flex items-center justify-between gap-4 mt-6 ${flowchartLightMode ? 'border-zinc-200' : 'border-zinc-850/80'}`}>
                                         <button 
                                             onClick={handlePrevNode}
                                             disabled={!hasPrevNode}
-                                            className="flex-1 py-3 bg-zinc-900 hover:bg-zinc-850 disabled:opacity-30 disabled:pointer-events-none text-zinc-300 hover:text-white font-black rounded-xl text-xs transition-all active:scale-95 flex items-center justify-center gap-1.5 border border-zinc-800"
+                                            className={`flex-1 py-3 disabled:opacity-30 disabled:pointer-events-none font-black rounded-xl text-xs transition-all active:scale-95 flex items-center justify-center gap-1.5 border ${
+                                                flowchartLightMode 
+                                                    ? 'bg-zinc-100 hover:bg-zinc-200 border-zinc-200 text-zinc-700 shadow-sm' 
+                                                    : 'bg-zinc-900 hover:bg-zinc-850 border-zinc-800 text-zinc-300 hover:text-white'
+                                            }`}
                                         >
                                             <i className="fa-solid fa-chevron-left text-[10px]"></i> Passo Anterior
                                         </button>
@@ -4504,16 +4622,16 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                 </div>
                             ) : (
                                 /* Desktop Right Sliding Drawer (Step Navigation Enabled) */
-                                <div className="absolute top-36 right-4 bottom-4 w-[340px] bg-zinc-900/95 backdrop-blur-2xl border border-zinc-800 rounded-3xl shadow-2xl p-6 overflow-y-auto z-50 animate-in slide-in-from-right duration-350 flex flex-col justify-between select-text planner-scroll">
+                                <div className={`absolute top-36 right-4 bottom-4 w-[340px] backdrop-blur-2xl border rounded-3xl shadow-2xl p-6 overflow-y-auto z-50 animate-in slide-in-from-right duration-350 flex flex-col justify-between select-text planner-scroll ${flowchartLightMode ? 'bg-white/95 border-zinc-250 shadow-zinc-200/30 text-zinc-800' : 'bg-zinc-900/95 border-zinc-800 shadow-2xl text-white'}`}>
                                     <div className="space-y-6">
                                         <div className="flex justify-between items-start gap-2">
                                             <span className={`text-[9px] font-black uppercase tracking-wider px-2.5 py-1 rounded-full ${
-                                                selectedNode.type === 'start' ? 'bg-blue-500/15 text-blue-400' :
-                                                selectedNode.type === 'decision' ? 'bg-amber-500/15 text-amber-400' :
-                                                selectedNode.type === 'warning' ? 'bg-rose-500/15 text-rose-400 animate-pulse' :
-                                                selectedNode.type === 'success' ? 'bg-emerald-500/15 text-emerald-400' :
-                                                selectedNode.type === 'end' ? 'bg-purple-500/15 text-purple-400' :
-                                                'bg-zinc-800 text-zinc-400'
+                                                selectedNode.type === 'start' ? (flowchartLightMode ? 'bg-blue-100 text-blue-800' : 'bg-blue-500/15 text-blue-400') :
+                                                selectedNode.type === 'decision' ? (flowchartLightMode ? 'bg-amber-100 text-amber-800' : 'bg-amber-500/15 text-amber-400') :
+                                                selectedNode.type === 'warning' ? (flowchartLightMode ? 'bg-rose-100 text-rose-800 animate-pulse' : 'bg-rose-500/15 text-rose-400 animate-pulse') :
+                                                selectedNode.type === 'success' ? (flowchartLightMode ? 'bg-emerald-100 text-emerald-800' : 'bg-emerald-500/15 text-emerald-400') :
+                                                selectedNode.type === 'end' ? (flowchartLightMode ? 'bg-purple-100 text-purple-800' : 'bg-purple-500/15 text-purple-400') :
+                                                (flowchartLightMode ? 'bg-zinc-150 text-zinc-700' : 'bg-zinc-800 text-zinc-400')
                                             }`}>
                                                 {selectedNode.type === 'start' ? 'Início do Protocolo' :
                                                  selectedNode.type === 'decision' ? 'Decisão / Triagem' :
@@ -4522,32 +4640,36 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                                  selectedNode.type === 'end' ? 'Seguimento pós-alta' :
                                                  'Ação de Conduta'}
                                             </span>
-                                            <button onClick={() => setSelectedNode(null)} className="w-8 h-8 rounded-full bg-zinc-800/80 hover:bg-zinc-700 text-zinc-400 hover:text-white flex items-center justify-center transition-colors"><i className="fa-solid fa-xmark"></i></button>
+                                            <button onClick={() => setSelectedNode(null)} className={`w-8 h-8 rounded-full flex items-center justify-center transition-colors ${flowchartLightMode ? 'bg-zinc-100 hover:bg-zinc-200 text-zinc-500 hover:text-zinc-900 border border-zinc-200' : 'bg-zinc-800/80 hover:bg-zinc-700 text-zinc-400 hover:text-white'}`}><i className="fa-solid fa-xmark"></i></button>
                                         </div>
                                         <div>
-                                            <h3 className="text-white font-black text-lg leading-snug">{selectedNode.label}</h3>
-                                            <div className="h-px bg-zinc-800 my-4"></div>
-                                            <p className="text-zinc-300 text-sm font-semibold leading-relaxed text-justify-custom whitespace-pre-wrap">{selectedNode.description}</p>
+                                            <h3 className={`font-black text-lg leading-snug ${flowchartLightMode ? 'text-zinc-900' : 'text-white'}`}>{selectedNode.label}</h3>
+                                            <div className={`h-px my-4 ${flowchartLightMode ? 'bg-zinc-200' : 'bg-zinc-800'}`}></div>
+                                            <p className={`text-sm font-semibold leading-relaxed text-justify-custom whitespace-pre-wrap ${flowchartLightMode ? 'text-zinc-700' : 'text-zinc-300'}`}>{selectedNode.description}</p>
                                         </div>
                                     </div>
-                                    <div className="space-y-3 pt-6 mt-6 border-t border-zinc-800">
+                                    <div className={`space-y-3 pt-6 mt-6 border-t ${flowchartLightMode ? 'border-zinc-200' : 'border-zinc-800'}`}>
                                         <div className="flex gap-2">
                                             <button 
                                                 onClick={handlePrevNode}
                                                 disabled={!hasPrevNode}
-                                                className="flex-1 py-2.5 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-30 disabled:pointer-events-none text-zinc-300 font-bold rounded-xl text-xs transition-colors flex items-center justify-center gap-1.5 border border-zinc-800 animate-in fade-in"
+                                                className={`flex-1 py-2.5 disabled:opacity-30 disabled:pointer-events-none font-bold rounded-xl text-xs transition-colors flex items-center justify-center gap-1.5 border ${
+                                                    flowchartLightMode 
+                                                        ? 'bg-zinc-100 hover:bg-zinc-200 border-zinc-200 text-zinc-700 shadow-sm' 
+                                                        : 'bg-zinc-800 hover:bg-zinc-700 border-zinc-800 text-zinc-300'
+                                                }`}
                                             >
                                                 <i className="fa-solid fa-chevron-left text-[10px]"></i> Anterior
                                             </button>
                                             <button 
                                                 onClick={handleNextNode}
                                                 disabled={!hasNextNode}
-                                                className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-30 disabled:pointer-events-none text-white font-bold rounded-xl text-xs transition-colors flex items-center justify-center gap-1.5 animate-in fade-in"
+                                                className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-30 disabled:pointer-events-none text-white font-bold rounded-xl text-xs transition-colors flex items-center justify-center gap-1.5 active:scale-95"
                                             >
                                                 Próximo <i className="fa-solid fa-chevron-right text-[10px]"></i>
                                             </button>
                                         </div>
-                                        <button onClick={() => setSelectedNode(null)} className="w-full py-2.5 bg-zinc-850 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-300 font-bold rounded-xl text-xs transition-colors">Fechar Detalhes</button>
+                                        <button onClick={() => setSelectedNode(null)} className={`w-full py-2.5 font-bold rounded-xl text-xs transition-colors ${flowchartLightMode ? 'bg-zinc-100 hover:bg-zinc-200 text-zinc-650 hover:text-zinc-900 border border-zinc-200' : 'bg-zinc-850 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-300'}`}>Fechar Detalhes</button>
                                     </div>
                                 </div>
                             )
