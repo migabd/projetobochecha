@@ -1520,8 +1520,9 @@ INSTRUÇÕES IMPORTANTES DA SIMULAÇÃO:
 4. Mantenha as respostas curtas e objetivas, agindo como a equipe de enfermagem ou o próprio paciente, estimulando o raciocínio socrático.
 5. Se o usuário escolher o Modo Voz (você está nesse modo se \`mode === 'voice'\`), suas falas devem ser curtas e dinâmicas, prontas para serem lidas em voz alta.
 6. A personalidade do seu mentor clínico deve seguir o tom: "${getLocalPersonaInstruction(aiConfig?.persona || 'amigavel', 'chat')}".
+7. ATENÇÃO: Apenas na sua primeira resposta você deve apresentar a introdução do caso clínico do paciente. Nas respostas e interações seguintes, prossiga com a simulação fornecendo exames, respostas clínicas e reações de acordo com o que o estudante solicitar, sem NUNCA mais repetir a introdução ou o caso clínico inicial.
 
-Responda APENAS com a introdução do paciente e pergunte qual é a primeira conduta ou pergunta do estudante.`;
+Para iniciar a simulação, responda agora APENAS com a introdução do caso clínico inicial do paciente e pergunte qual é a primeira conduta ou pergunta do estudante.`;
 
                 const initialMessages = [{ role: 'system', text: initialPrompt }];
                 setActiveReviewChat(initialMessages);
