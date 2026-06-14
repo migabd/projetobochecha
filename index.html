@@ -821,17 +821,29 @@ const FluxogramasTab = React.memo(({ fluxogramas = [], setDb, callIA, extractTex
             const [currentSpeechSentence, setCurrentSpeechSentence] = React.useState('');
             const [speechMicLevel, setSpeechMicLevel] = React.useState(0);
             const [showVoiceConfig, setShowVoiceConfig] = React.useState(false);
+            const [voiceAutoSend, setVoiceAutoSend] = React.useState(() => localStorage.getItem('flowchart_voice_autosend') === 'true');
 
             const simulationModeRef = React.useRef('voice');
             const cloudAudioRef = React.useRef(null);
             const micStreamRef = React.useRef(null);
             const audioContextRef = React.useRef(null);
             const animationFrameRef = React.useRef(null);
+            const voiceAutoSendRef = React.useRef(voiceAutoSend);
+            const silenceThresholdRef = React.useRef(silenceThreshold);
 
-            // Sync simulationMode ref to avoid stale closures
+            // Sync refs to avoid stale closures
             React.useEffect(() => {
                 simulationModeRef.current = simulationMode;
             }, [simulationMode]);
+
+            React.useEffect(() => {
+                voiceAutoSendRef.current = voiceAutoSend;
+                localStorage.setItem('flowchart_voice_autosend', voiceAutoSend);
+            }, [voiceAutoSend]);
+
+            React.useEffect(() => {
+                silenceThresholdRef.current = silenceThreshold;
+            }, [silenceThreshold]);
 
             // Sync voiceEngine storage
             React.useEffect(() => {
@@ -1292,11 +1304,6 @@ const FluxogramasTab = React.memo(({ fluxogramas = [], setDb, callIA, extractTex
                 };
                 
                 rec.onresult = (event) => {
-                    // Sempre limpa o timer de silêncio ao receber qualquer atividade de fala (parcial ou final)
-                    if (recognitionSilenceTimerRef.current) {
-                        clearTimeout(recognitionSilenceTimerRef.current);
-                    }
-
                     let finalText = '';
                     let interimText = '';
                     
@@ -1309,28 +1316,32 @@ const FluxogramasTab = React.memo(({ fluxogramas = [], setDb, callIA, extractTex
                         }
                     }
                     
-                    // Feedback visual em tempo real
-                    if (interimText.trim()) {
-                        const fullInterim = recognitionAccumulatedRef.current 
-                            ? recognitionAccumulatedRef.current + ' ' + interimText.trim()
-                            : interimText.trim();
-                        setInterimTranscript(fullInterim);
-                    }
-                    
+                    // Se houver texto finalizado, escreve no input de texto
                     if (finalText.trim()) {
-                        recognitionAccumulatedRef.current += (recognitionAccumulatedRef.current ? ' ' : '') + finalText.trim();
-                        setInterimTranscript(recognitionAccumulatedRef.current);
+                        setChatInputText(prev => {
+                            const cleanPrev = prev.trim();
+                            return cleanPrev ? cleanPrev + ' ' + finalText.trim() : finalText.trim();
+                        });
                         
-                        // Aguarda o silêncio dinâmico configurado antes de enviar
-                        if (recognitionSilenceTimerRef.current) clearTimeout(recognitionSilenceTimerRef.current);
-                        recognitionSilenceTimerRef.current = setTimeout(() => {
-                            const toSend = recognitionAccumulatedRef.current.trim();
-                            recognitionAccumulatedRef.current = '';
-                            setInterimTranscript('');
-                            if (toSend) {
-                                handleSendReviewChatMessage(toSend);
-                            }
-                        }, silenceThreshold);
+                        // Envio automático se ativado
+                        if (voiceAutoSendRef.current) {
+                            if (recognitionSilenceTimerRef.current) clearTimeout(recognitionSilenceTimerRef.current);
+                            recognitionSilenceTimerRef.current = setTimeout(() => {
+                                setChatInputText(currentText => {
+                                    const toSend = currentText.trim();
+                                    if (toSend) {
+                                        handleSendReviewChatMessage(toSend);
+                                    }
+                                    return '';
+                                });
+                            }, silenceThresholdRef.current);
+                        }
+                    }
+
+                    if (interimText.trim()) {
+                        setInterimTranscript(interimText.trim());
+                    } else {
+                        setInterimTranscript('');
                     }
                 };
                 
@@ -1546,6 +1557,7 @@ Responda APENAS com a introdução do paciente e pergunte qual é a primeira con
                 if (!trimmed || isEvaluating) return;
                 
                 stopSpeaking();
+                stopSpeechRecognition();
                 
                 // Sempre lê a referência mais recente para evitar problemas de stale closure
                 const currentChat = [...activeReviewChatRef.current, { role: 'user', text: trimmed }];
@@ -3856,14 +3868,44 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                                         </div>
                                                     </div>
 
-                                                    {/* SILENCE DETECTION AUTO-SEND TIMEOUT */}
+                                                    {/* AUTO SEND TOGGLE */}
                                                     <div className="space-y-1.5">
+                                                        <label className="text-[10px] font-black uppercase text-zinc-500 tracking-wider">Envio de Mensagem</label>
+                                                        <div className={`flex p-0.5 rounded-xl border ${flowchartLightMode ? 'bg-zinc-100 border-zinc-200' : 'bg-zinc-950 border-zinc-850'}`}>
+                                                            <button 
+                                                                type="button"
+                                                                onClick={() => setVoiceAutoSend(true)}
+                                                                className={`flex-1 py-1.5 rounded-lg text-[9px] font-black transition-all ${
+                                                                    voiceAutoSend 
+                                                                        ? 'bg-indigo-600 text-white shadow-sm' 
+                                                                        : 'text-zinc-500 hover:text-zinc-400'
+                                                                }`}
+                                                            >
+                                                                ⚡ Auto (Silêncio)
+                                                            </button>
+                                                            <button 
+                                                                type="button"
+                                                                onClick={() => setVoiceAutoSend(false)}
+                                                                className={`flex-1 py-1.5 rounded-lg text-[9px] font-black transition-all ${
+                                                                    !voiceAutoSend 
+                                                                        ? 'bg-indigo-600 text-white shadow-sm' 
+                                                                        : 'text-zinc-500 hover:text-zinc-400'
+                                                                }`}
+                                                            >
+                                                                ⌨️ Manual (Enter)
+                                                            </button>
+                                                        </div>
+                                                    </div>
+
+                                                    {/* SILENCE DETECTION AUTO-SEND TIMEOUT */}
+                                                    <div className={`space-y-1.5 ${!voiceAutoSend ? 'opacity-40 pointer-events-none' : ''}`}>
                                                         <div className="flex justify-between items-center">
                                                             <label className="text-[10px] font-black uppercase text-zinc-500 tracking-wider">Silêncio de Envio</label>
                                                             <span className="text-[10px] font-black text-indigo-500">{(silenceThreshold / 1000).toFixed(1)}s</span>
                                                         </div>
                                                         <input 
                                                             type="range" 
+                                                            disabled={!voiceAutoSend}
                                                             min="1000" 
                                                             max="4000" 
                                                             step="200"
