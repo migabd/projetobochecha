@@ -10849,7 +10849,7 @@ Gere um resumo PROFUNDO e PERSONALIZADO para este caso clínico. O resumo deve s
                             if (!errorTitles.has(fingerprint)) {
                                 basePool.push({
                                     ...q,
-                                    id: `ai_${q.id}`,
+                                    id: String(q.id).startsWith('ai_') ? q.id : `ai_${q.id}`,
                                     tags: [...(q.tags || []), 'Gerada por IA', 'Lista: ' + list.name],
                                     isAI: true,
                                     listId: list.id
@@ -10955,7 +10955,7 @@ Gere um resumo PROFUNDO e PERSONALIZADO para este caso clínico. O resumo deve s
                             if (!errorTitles.has(fingerprint)) {
                                 basePool.push({
                                     ...q,
-                                    id: `ai_${q.id}`,
+                                    id: String(q.id).startsWith('ai_') ? q.id : `ai_${q.id}`,
                                     tags: [...(q.tags || []), 'Gerada por IA', 'Lista: ' + list.name],
                                     isAI: true,
                                     listId: list.id
@@ -11339,7 +11339,7 @@ Gere um resumo PROFUNDO e PERSONALIZADO para este caso clínico. O resumo deve s
                         if (aiQuestion) {
                             const promoted = {
                                 ...aiQuestion,
-                                id: Date.now() + Math.floor(Math.random() * 1000),
+                                id: String(aiQuestion.id).startsWith('ai_') ? aiQuestion.id : Date.now() + Math.floor(Math.random() * 1000),
                                 history: { correct: isCorrect ? 1 : 0, wrong: isCorrect ? 0 : 1 },
                                 isAI: false // No longer just a list item, now a formal error entry
                             };
@@ -15887,7 +15887,7 @@ IMPORTANTE: Retorne APENAS um objeto JSON válido representando o novo array de 
                         if (elaboradorState.questions.length === 0) return;
                         const deck = elaboradorState.questions.map((q, i) => ({
                             ...q,
-                            id: 'tmp_' + Date.now() + '_' + i,
+                            id: q.id ? (String(q.id).startsWith('ai_') ? q.id : 'ai_' + q.id) : 'ai_tmp_' + Date.now() + '_' + i,
                             date: new Date().toLocaleDateString('pt-PT'),
                             subject: db.subjects[0]?.id || 'clinica_medica',
                             type: elaboradorState.settings.type,
@@ -16196,7 +16196,7 @@ IMPORTANTE: Retorne APENAS um objeto JSON válido representando o novo array de 
                                                     <button onClick={() => {
                                                         const deck = list.questions.map((q, i) => ({
                                                             ...q,
-                                                            id: 'tmp_' + Date.now() + '_' + i,
+                                                            id: q.id ? (String(q.id).startsWith('ai_') ? q.id : 'ai_' + q.id) : 'ai_tmp_' + Date.now() + '_' + i,
                                                             date: new Date().toLocaleDateString('pt-PT'),
                                                             subject: db.subjects[0]?.id || 'clinica_medica',
                                                             reason: ERROR_REASONS[0],
