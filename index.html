@@ -15916,6 +15916,7 @@ IMPORTANTE: Retorne APENAS um objeto JSON válido representando o novo array de 
                             isGeneratingFlashcards: false, 
                             crossedAlts: [], 
                             highlightedText: '',
+                            revealMode: simRevealMode,
                             source: 'elaborador'
                         });
                         setElaboradorState(p => ({ ...p, questions: [], status: 'idle', fileData: null, fileName: '' }));
@@ -16002,6 +16003,13 @@ IMPORTANTE: Retorne APENAS um objeto JSON válido representando o novo array de 
                                                     <option value="difícil">Difícil (Residência)</option>
                                                     <option value="extremo">Extremo (R4 / Subespecialidade)</option>
                                                     <option value="uti">UTI (Pegadinhas Matadoras)</option>
+                                                </select>
+                                            </div>
+                                            <div>
+                                                <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1">Modo de Resolução</label>
+                                                <select value={simRevealMode} onChange={e => setSimRevealMode(e.target.value)} className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 text-sm font-bold outline-none focus:ring-2 focus:ring-emerald-500">
+                                                    <option value="end">Modo Simulado (Gabarito ao Final)</option>
+                                                    <option value="each">Modo Aprendizado (Feedback Imediato)</option>
                                                 </select>
                                             </div>
                                             <div className="flex gap-4">
@@ -16216,6 +16224,7 @@ IMPORTANTE: Retorne APENAS um objeto JSON válido representando o novo array de 
                                                             isGeneratingFlashcards: false, 
                                                             crossedAlts: [], 
                                                             highlightedText: '',
+                                                            revealMode: simRevealMode,
                                                             source: 'elaborador'
                                                         });
                                                     }} className="flex-1 bg-indigo-50 hover:bg-indigo-600 text-indigo-600 hover:text-white dark:bg-indigo-900/20 dark:text-indigo-400 py-3 rounded-xl font-black transition-all text-xs flex justify-center items-center gap-2 border border-indigo-200 dark:border-indigo-800/50"><i className="fa-solid fa-play"></i> Resolver</button>
