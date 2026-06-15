@@ -8808,8 +8808,9 @@ Retorne apenas o texto da resposta, sem JSON ou tags explicativas.`;
 
             // --- ESTADOS DE RESUMOS EM HTML ---
             const [htmlSummaryState, setHtmlSummaryState] = useState({
-                view: 'list', // 'list' ou 'edit'
+                view: 'list', // 'list', 'edit' ou 'view'
                 search: '',
+                selectedId: null,
                 editor: {
                     id: null,
                     title: '',
@@ -8820,6 +8821,91 @@ Retorne apenas o texto da resposta, sem JSON ou tags explicativas.`;
                     materialText: ''
                 }
             });
+
+            // --- ESTADOS DE VISUALIZAÇÃO DE RESUMOS HTML ---
+            const [htmlSummaryViewSettings, setHtmlSummaryViewSettings] = useState({
+                fontSize: 'base', // 'sm', 'base', 'lg', 'xl'
+                fontFamily: 'sans', // 'sans', 'serif', 'mono'
+                theme: 'light', // 'light', 'dark', 'sepia'
+                studyMode: false,
+                notesVisible: false,
+                aiCompanionVisible: false,
+                currentHighlightColor: 'yellow',
+                documentSearch: ''
+            });
+            const [summaryChat, setSummaryChat] = useState([]);
+            const [summaryChatInput, setSummaryChatInput] = useState('');
+            const [isSummaryChatLoading, setIsSummaryChatLoading] = useState(false);
+            const [ttsState, setTtsState] = useState({ playing: false, paused: false, speed: 1.0 });
+            const [headings, setHeadings] = useState([]);
+            const [notesText, setNotesText] = useState('');
+            const [selectionMenu, setSelectionMenu] = useState({ visible: false, x: 0, y: 0 });
+            const ttsUtteranceRef = React.useRef(null);
+
+            // Efeito para extrair os cabeçalhos do resumo HTML
+            React.useEffect(() => {
+                if (htmlSummaryState.view === 'view' && htmlSummaryState.selectedId) {
+                    const timer = setTimeout(() => {
+                        const container = document.getElementById('summary-reading-content');
+                        if (container) {
+                            const headingElements = container.querySelectorAll('h1, h2, h3, h4');
+                            const list = Array.from(headingElements).map((el, index) => {
+                                if (!el.id) {
+                                    el.id = `heading-${index}`;
+                                }
+                                return {
+                                    id: el.id,
+                                    text: el.innerText || el.textContent,
+                                    tag: el.tagName.toLowerCase()
+                                };
+                            });
+                            setHeadings(list);
+                        }
+                    }, 400);
+                    return () => clearTimeout(timer);
+                } else {
+                    setHeadings([]);
+                }
+            }, [htmlSummaryState.view, htmlSummaryState.selectedId, db.summariesHtml]);
+
+            // Efeito para gerenciar a seleção de texto e exibir o menu flutuante de marcação
+            React.useEffect(() => {
+                const handleSelectionChange = () => {
+                    const selection = window.getSelection();
+                    if (!selection || selection.rangeCount === 0) {
+                        setSelectionMenu(p => ({ ...p, visible: false }));
+                        return;
+                    }
+                    const range = selection.getRangeAt(0);
+                    if (range.collapsed) {
+                        setSelectionMenu(p => ({ ...p, visible: false }));
+                        return;
+                    }
+
+                    const container = document.getElementById('summary-reading-content');
+                    if (!container || !container.contains(range.commonAncestorContainer)) {
+                        setSelectionMenu(p => ({ ...p, visible: false }));
+                        return;
+                    }
+
+                    const rect = range.getBoundingClientRect();
+                    setSelectionMenu({
+                        visible: true,
+                        x: rect.left + window.scrollX + (rect.width / 2),
+                        y: rect.top + window.scrollY - 55
+                    });
+                };
+
+                if (htmlSummaryState.view === 'view') {
+                    document.addEventListener('selectionchange', handleSelectionChange);
+                } else {
+                    setSelectionMenu(p => ({ ...p, visible: false }));
+                }
+
+                return () => {
+                    document.removeEventListener('selectionchange', handleSelectionChange);
+                };
+            }, [htmlSummaryState.view, htmlSummaryState.selectedId]);
 
             const [fluxogramaPlay, setFluxogramaPlay] = useState(null);
 
@@ -13879,6 +13965,628 @@ Estrutura esperada:
 
             const renderResumosHtmlTab = () => {
                 const summariesList = db.summariesHtml || [];
+                const renderSummaryVisualizer = (activeSummary) => {
+                    // Typography maps
+                    const fontSizeClasses = {
+                        sm: 'text-xs leading-relaxed',
+                        base: 'text-sm sm:text-base leading-relaxed',
+                        lg: 'text-lg leading-relaxed',
+                        xl: 'text-xl leading-relaxed'
+                    };
+                    const fontFamilyClasses = {
+                        sans: 'font-sans',
+                        serif: 'font-serif',
+                        mono: 'font-mono'
+                    };
+                    const themeClasses = {
+                        light: 'bg-white text-zinc-950 border-zinc-200 shadow-sm',
+                        dark: 'bg-zinc-950 text-zinc-100 border-zinc-900/60 shadow-lg dark:prose-invert',
+                        sepia: 'theme-sepia border-[#d7c5a9]/50 shadow-md'
+                    };
+
+                    // Highlight Selection Helper
+                    const applyHighlight = (colorClass) => {
+                        const selection = window.getSelection();
+                        if (!selection.rangeCount) return;
+                        const range = selection.getRangeAt(0);
+                        if (range.collapsed) return;
+
+                        const container = document.getElementById('summary-reading-content');
+                        if (!container || !container.contains(range.commonAncestorContainer)) return;
+
+                        const span = document.createElement('span');
+                        span.className = `${colorClass} px-0.5 rounded transition-all`;
+                        try {
+                            range.surroundContents(span);
+                            // Save to DB (after removing search marks if any)
+                            const rawHtml = container.innerHTML;
+                            const newContent = cleanHtmlBeforeSaving(rawHtml);
+                            setDb(p => ({
+                                ...p,
+                                summariesHtml: p.summariesHtml.map(x => x.id === activeSummary.id ? { ...x, content: newContent } : x)
+                            }));
+                            showAlert("✨ Trecho destacado!");
+                        } catch (e) {
+                            console.warn("Cross-boundary selection highlight failed", e);
+                        }
+                    };
+
+                    const removeHighlight = () => {
+                        const selection = window.getSelection();
+                        if (!selection.rangeCount) return;
+                        const range = selection.getRangeAt(0);
+                        if (range.collapsed) return;
+
+                        const container = document.getElementById('summary-reading-content');
+                        if (!container || !container.contains(range.commonAncestorContainer)) return;
+
+                        let node = range.commonAncestorContainer;
+                        if (node.nodeType === Node.TEXT_NODE) {
+                            node = node.parentNode;
+                        }
+
+                        if (node && node.tagName === 'SPAN' && (node.className.includes('bg-yellow-') || node.className.includes('bg-emerald-') || node.className.includes('bg-pink-') || node.className.includes('bg-blue-'))) {
+                            const parent = node.parentNode;
+                            while (node.firstChild) {
+                                parent.insertBefore(node.firstChild, node);
+                            }
+                            parent.removeChild(node);
+
+                            const rawHtml = container.innerHTML;
+                            const newContent = cleanHtmlBeforeSaving(rawHtml);
+                            setDb(p => ({
+                                ...p,
+                                summariesHtml: p.summariesHtml.map(x => x.id === activeSummary.id ? { ...x, content: newContent } : x)
+                            }));
+                            showAlert("✨ Destaque removido!");
+                        }
+                    };
+
+                    const cleanHtmlBeforeSaving = (html) => {
+                        return html.replace(/<mark class="bg-yellow-300[^>]*>([\s\S]*?)<\/mark>/gi, '$1');
+                    };
+
+                    // Search highlight helper
+                    const escapeRegExp = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                    
+                    const getHighlightedContent = (htmlContent, search) => {
+                        if (!search || !search.trim()) return htmlContent;
+                        const escaped = escapeRegExp(search.trim());
+                        const regex = new RegExp(`(?![^<>]*>)(${escaped})`, 'gi');
+                        return htmlContent.replace(regex, '<mark class="bg-yellow-300 text-zinc-950 px-0.5 rounded font-bold border-b border-amber-600">$1</mark>');
+                    };
+
+                    // TTS helpers
+                    const handlePlayTTS = () => {
+                        if (ttsState.playing) {
+                            if (ttsState.paused) {
+                                window.speechSynthesis.resume();
+                                setTtsState(p => ({ ...p, paused: false }));
+                            } else {
+                                window.speechSynthesis.pause();
+                                setTtsState(p => ({ ...p, paused: true }));
+                            }
+                        } else {
+                            window.speechSynthesis.cancel();
+                            const tempDiv = document.createElement('div');
+                            tempDiv.innerHTML = activeSummary.content;
+                            const textToRead = tempDiv.innerText || tempDiv.textContent || '';
+                            
+                            if (!textToRead.trim()) return showAlert("O resumo não contém texto para ler.");
+                            
+                            const utterance = new SpeechSynthesisUtterance(textToRead);
+                            utterance.lang = 'pt-BR';
+                            utterance.rate = ttsState.speed;
+                            
+                            utterance.onend = () => setTtsState(p => ({ ...p, playing: false, paused: false }));
+                            utterance.onerror = () => setTtsState(p => ({ ...p, playing: false, paused: false }));
+                            
+                            ttsUtteranceRef.current = utterance;
+                            window.speechSynthesis.speak(utterance);
+                            setTtsState(p => ({ ...p, playing: true, paused: false }));
+                        }
+                    };
+
+                    const handleStopTTS = () => {
+                        window.speechSynthesis.cancel();
+                        setTtsState(p => ({ ...p, playing: false, paused: false }));
+                    };
+
+                    const handleSpeedChange = (e) => {
+                        const speed = parseFloat(e.target.value);
+                        setTtsState(p => ({ ...p, speed }));
+                        if (ttsState.playing) {
+                            window.speechSynthesis.cancel();
+                            const tempDiv = document.createElement('div');
+                            tempDiv.innerHTML = activeSummary.content;
+                            const textToRead = tempDiv.innerText || tempDiv.textContent || '';
+                            const utterance = new SpeechSynthesisUtterance(textToRead);
+                            utterance.lang = 'pt-BR';
+                            utterance.rate = speed;
+                            utterance.onend = () => setTtsState(p => ({ ...p, playing: false, paused: false }));
+                            utterance.onerror = () => setTtsState(p => ({ ...p, playing: false, paused: false }));
+                            ttsUtteranceRef.current = utterance;
+                            window.speechSynthesis.speak(utterance);
+                            setTtsState(p => ({ ...p, playing: true, paused: false }));
+                        }
+                    };
+
+                    // Notes helper
+                    const handleNotesChange = (val) => {
+                        setNotesText(val);
+                        setDb(p => ({
+                            ...p,
+                            summariesHtml: p.summariesHtml.map(x => x.id === activeSummary.id ? { ...x, notes: val } : x)
+                        }));
+                    };
+
+                    // AI Companion helpers
+                    const handleSendSummaryChat = async () => {
+                        const text = summaryChatInput.trim();
+                        if (!text || isSummaryChatLoading) return;
+
+                        setSummaryChat(p => [...p, { role: 'user', text }]);
+                        setSummaryChatInput('');
+                        setIsSummaryChatLoading(true);
+
+                        const docText = activeSummary.content.replace(/<[^>]*>/g, '').substring(0, 18000);
+                        const promptText = `Você é o Mentor IA PRO, um professor e assistente médico de elite. O estudante está revisando o seguinte resumo médico intitulado "${activeSummary.title}" (Categoria: ${activeSummary.category || 'Geral'}):
+                        
+                        RESUMO DO CONTEÚDO:
+                        ${docText}
+                        
+                        Responda à dúvida do estudante de forma direta, clínica e socrática, usando a diretriz do resumo como base.`;
+
+                        const msgsToApi = [
+                            { role: 'user', parts: [{ text: promptText }] },
+                            ...summaryChat.map(m => ({
+                                role: m.role === 'model' ? 'model' : 'user',
+                                parts: [{ text: m.text }]
+                            })),
+                            { role: 'user', parts: [{ text }] }
+                        ];
+
+                        try {
+                            const responseText = await callIA(msgsToApi);
+                            const cleanResponse = responseText.replace(/\[ERRO_\w+\] /, '');
+                            setSummaryChat(p => [...p, { role: 'model', text: cleanResponse }]);
+                        } catch (e) {
+                            console.error("Erro no chat do resumo:", e);
+                            setSummaryChat(p => [...p, { role: 'model', text: "❌ Erro de conexão com a IA." }]);
+                        } finally {
+                            setIsSummaryChatLoading(false);
+                        }
+                    };
+
+                    const scrollToHeading = (id) => {
+                        const el = document.getElementById(id);
+                        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    };
+
+                    const renderedContent = getHighlightedContent(activeSummary.content, htmlSummaryViewSettings.documentSearch);
+
+                    return (
+                        <div className="p-3 sm:p-6 space-y-6 max-w-[1600px] mx-auto w-full relative">
+                            <style dangerouslySetInnerHTML={{ __html: `
+                                .theme-sepia { background-color: #fcf6e8 !important; color: #433422 !important; }
+                                .theme-sepia h1, .theme-sepia h2, .theme-sepia h3, .theme-sepia h4, .theme-sepia h5, .theme-sepia h6 { color: #2b1f11 !important; border-color: rgba(67, 52, 34, 0.15) !important; }
+                                .theme-sepia table { border-color: rgba(67, 52, 34, 0.2) !important; }
+                                .theme-sepia th, .theme-sepia td { border-color: rgba(67, 52, 34, 0.15) !important; background-color: rgba(67, 52, 34, 0.02) !important; }
+                                .theme-sepia mark { background-color: #f59e0b !important; color: #000 !important; }
+
+                                .study-mode-active strong, .study-mode-active b {
+                                    background-color: #cbd5e1 !important;
+                                    color: transparent !important;
+                                    border-radius: 0.25rem;
+                                    padding: 0px 4px;
+                                    cursor: pointer;
+                                    transition: all 0.2s ease;
+                                    user-select: none;
+                                    box-shadow: inset 0 0 2px rgba(0,0,0,0.1);
+                                }
+                                .dark .study-mode-active strong, .dark .study-mode-active b {
+                                    background-color: #4b5563 !important;
+                                    color: transparent !important;
+                                }
+                                .theme-sepia.study-mode-active strong, .theme-sepia.study-mode-active b {
+                                    background-color: #d7c5a9 !important;
+                                    color: transparent !important;
+                                }
+                                .study-mode-active strong:hover, .study-mode-active b:hover {
+                                    background-color: transparent !important;
+                                    color: inherit !important;
+                                }
+
+                                @media print {
+                                    body * { visibility: hidden; }
+                                    #summary-reading-content, #summary-reading-content * { visibility: visible; }
+                                    #summary-reading-content {
+                                        position: absolute;
+                                        left: 0;
+                                        top: 0;
+                                        width: 100%;
+                                        box-shadow: none !important;
+                                        border: none !important;
+                                        background: white !important;
+                                        color: black !important;
+                                        padding: 2cm !important;
+                                    }
+                                }
+                            `}} />
+
+                            {/* Floating Selection Menu */}
+                            {selectionMenu.visible && (
+                                <div 
+                                    style={{ left: `${selectionMenu.x}px`, top: `${selectionMenu.y}px` }} 
+                                    className="fixed -translate-x-1/2 bg-zinc-900 dark:bg-zinc-950 text-white rounded-full px-3 py-1.5 flex items-center gap-2.5 shadow-xl border border-zinc-700/50 z-50 animate-in fade-in zoom-in-95 duration-100"
+                                    onMouseDown={e => e.preventDefault()}
+                                >
+                                    {[
+                                        { id: 'yellow', bg: 'bg-yellow-300', class: 'bg-yellow-250 dark:bg-yellow-500/35 text-zinc-950 dark:text-zinc-50' },
+                                        { id: 'green', bg: 'bg-emerald-400', class: 'bg-emerald-100 dark:bg-emerald-500/35 text-zinc-950 dark:text-zinc-50' },
+                                        { id: 'pink', bg: 'bg-pink-400', class: 'bg-pink-100 dark:bg-pink-500/35 text-zinc-950 dark:text-zinc-50' },
+                                        { id: 'blue', bg: 'bg-blue-400', class: 'bg-blue-100 dark:bg-blue-500/35 text-zinc-950 dark:text-zinc-50' }
+                                    ].map(color => (
+                                        <button 
+                                            key={color.id} 
+                                            onClick={() => {
+                                                applyHighlight(color.class);
+                                                window.getSelection().removeAllRanges();
+                                            }} 
+                                            className={`w-5 h-5 rounded-full ${color.bg} border border-white/20 hover:scale-125 transition-all active:scale-95`}
+                                            title={`Marcar em ${color.id}`}
+                                        />
+                                    ))}
+                                    <div className="w-[1px] h-4 bg-zinc-700 mx-0.5" />
+                                    <button 
+                                        onClick={() => {
+                                            removeHighlight();
+                                            window.getSelection().removeAllRanges();
+                                        }} 
+                                        className="text-[10px] font-black uppercase text-zinc-400 hover:text-white transition-colors"
+                                        title="Remover destaque"
+                                    >
+                                        <i className="fa-solid fa-eraser text-xs"></i>
+                                    </button>
+                                </div>
+                            )}
+
+                            {/* Top Header */}
+                            <div className="bg-white dark:bg-zinc-900 p-6 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4 animate-in fade-in duration-300">
+                                <div className="flex items-center gap-4">
+                                    <button 
+                                        onClick={() => {
+                                            handleStopTTS();
+                                            setHtmlSummaryState(p => ({ ...p, view: 'list' }));
+                                        }} 
+                                        className="w-10 h-10 rounded-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all active:scale-95"
+                                    >
+                                        <i className="fa-solid fa-arrow-left text-zinc-500"></i>
+                                    </button>
+                                    <div>
+                                        <div className="flex items-center gap-2">
+                                            <span className="px-2 py-0.5 bg-emerald-50 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400 rounded-lg text-[9px] font-black uppercase tracking-wider border border-emerald-100 dark:border-emerald-900/40">
+                                                {activeSummary.category || 'Geral'}
+                                            </span>
+                                            <span className="text-[10px] font-bold text-zinc-400">{activeSummary.date}</span>
+                                        </div>
+                                        <h2 className="text-xl font-black text-zinc-800 dark:text-white mt-1 leading-tight">{activeSummary.title}</h2>
+                                    </div>
+                                </div>
+                                
+                                <div className="flex items-center gap-2 w-full md:w-auto">
+                                    <button 
+                                        onClick={() => setHtmlSummaryViewSettings(p => ({ ...p, aiCompanionVisible: !p.aiCompanionVisible, notesVisible: false }))} 
+                                        className={`flex-1 md:flex-initial px-4 py-2.5 rounded-xl font-black text-xs transition-all flex items-center justify-center gap-1.5 border active:scale-95 ${
+                                            htmlSummaryViewSettings.aiCompanionVisible 
+                                                ? 'bg-purple-600 border-purple-500 text-white shadow-md' 
+                                                : 'bg-white dark:bg-zinc-800 border-zinc-200 dark:border-zinc-750 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-700'
+                                        }`}
+                                    >
+                                        <i className="fa-solid fa-robot"></i> Tutor IA
+                                    </button>
+                                    <button 
+                                        onClick={() => setHtmlSummaryViewSettings(p => ({ ...p, notesVisible: !p.notesVisible, aiCompanionVisible: false }))} 
+                                        className={`flex-1 md:flex-initial px-4 py-2.5 rounded-xl font-black text-xs transition-all flex items-center justify-center gap-1.5 border active:scale-95 ${
+                                            htmlSummaryViewSettings.notesVisible 
+                                                ? 'bg-amber-600 border-amber-500 text-white shadow-md' 
+                                                : 'bg-white dark:bg-zinc-800 border-zinc-200 dark:border-zinc-750 text-zinc-750 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-700'
+                                        }`}
+                                    >
+                                        <i className="fa-solid fa-note-sticky"></i> Anotações
+                                    </button>
+                                    <button 
+                                        onClick={() => window.print()} 
+                                        className="px-3.5 py-2.5 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-600 dark:text-zinc-350 rounded-xl font-black text-xs transition-all flex items-center justify-center gap-1"
+                                        title="Imprimir / Salvar PDF"
+                                    >
+                                        <i className="fa-solid fa-print"></i>
+                                    </button>
+                                    <button 
+                                        onClick={() => {
+                                            handleStopTTS();
+                                            setHtmlSummaryState(p => ({
+                                                ...p,
+                                                view: 'edit',
+                                                editor: { id: activeSummary.id, title: activeSummary.title, category: activeSummary.category || '', content: activeSummary.content, isGenerating: false, aiPrompt: '' }
+                                            }));
+                                        }} 
+                                        className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black text-xs transition-all flex items-center justify-center gap-1.5 shadow-md active:scale-95"
+                                    >
+                                        <i className="fa-solid fa-pen"></i> Editar Código
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Toolbar */}
+                            <div className="bg-white dark:bg-zinc-900 p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-xs flex flex-wrap gap-4 items-center justify-between">
+                                <div className="flex items-center gap-3 flex-wrap">
+                                    <div className="flex items-center bg-zinc-100 dark:bg-zinc-800 rounded-xl p-1 gap-1 border border-zinc-200 dark:border-zinc-750">
+                                        {[
+                                            { id: 'light', label: 'Luz', bg: 'bg-white text-zinc-800 border-zinc-200' },
+                                            { id: 'sepia', label: 'Sépia', bg: 'bg-[#fcf6e8] text-[#433422] border-[#e4d9c4]' },
+                                            { id: 'dark', label: 'Dark', bg: 'bg-zinc-950 text-zinc-100 border-zinc-850' }
+                                        ].map(theme => (
+                                            <button 
+                                                key={theme.id}
+                                                onClick={() => setHtmlSummaryViewSettings(p => ({ ...p, theme: theme.id }))}
+                                                className={`px-3 py-1.5 text-xs font-black rounded-lg border transition-all active:scale-95 ${
+                                                    htmlSummaryViewSettings.theme === theme.id 
+                                                        ? `${theme.bg} shadow-xs scale-102` 
+                                                        : 'text-zinc-500 border-transparent hover:text-zinc-800 dark:hover:text-zinc-350'
+                                                }`}
+                                            >
+                                                {theme.label}
+                                            </button>
+                                        ))}
+                                    </div>
+
+                                    <div className="flex items-center bg-zinc-100 dark:bg-zinc-800 rounded-xl p-1 gap-1 border border-zinc-200 dark:border-zinc-750">
+                                        <button 
+                                            onClick={() => {
+                                                const sizes = ['sm', 'base', 'lg', 'xl'];
+                                                const idx = sizes.indexOf(htmlSummaryViewSettings.fontSize);
+                                                if (idx > 0) setHtmlSummaryViewSettings(p => ({ ...p, fontSize: sizes[idx - 1] }));
+                                            }}
+                                            className="w-7 h-7 flex items-center justify-center text-xs font-black text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-250 transition-colors"
+                                            title="Diminuir texto"
+                                        >
+                                            A-
+                                        </button>
+                                        <span className="text-[10px] font-black uppercase text-zinc-400 px-1">{htmlSummaryViewSettings.fontSize}</span>
+                                        <button 
+                                            onClick={() => {
+                                                const sizes = ['sm', 'base', 'lg', 'xl'];
+                                                const idx = sizes.indexOf(htmlSummaryViewSettings.fontSize);
+                                                if (idx < sizes.length - 1) setHtmlSummaryViewSettings(p => ({ ...p, fontSize: sizes[idx + 1] }));
+                                            }}
+                                            className="w-7 h-7 flex items-center justify-center text-xs font-black text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-250 transition-colors"
+                                            title="Aumentar texto"
+                                        >
+                                            A+
+                                        </button>
+                                    </div>
+
+                                    <select 
+                                        value={htmlSummaryViewSettings.fontFamily}
+                                        onChange={e => setHtmlSummaryViewSettings(p => ({ ...p, fontFamily: e.target.value }))}
+                                        className="p-2 text-xs font-black rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-750 text-zinc-700 dark:text-zinc-300 outline-none"
+                                    >
+                                        <option value="sans">Outfit (Sans)</option>
+                                        <option value="serif">Georgia (Serif)</option>
+                                        <option value="mono">Courier (Mono)</option>
+                                    </select>
+                                </div>
+
+                                <div className="flex items-center gap-3">
+                                    <button 
+                                        onClick={() => setHtmlSummaryViewSettings(p => ({ ...p, studyMode: !p.studyMode }))} 
+                                        className={`px-4 py-2 rounded-xl font-black text-xs transition-all flex items-center gap-1.5 border active:scale-95 ${
+                                            htmlSummaryViewSettings.studyMode 
+                                                ? 'bg-amber-500 border-amber-400 text-white shadow-md' 
+                                                : 'bg-zinc-100 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-750 text-zinc-600 dark:text-zinc-350 hover:bg-zinc-200 dark:hover:bg-zinc-700'
+                                        }`}
+                                        title="Oculta termos importantes (negritos) no texto. Passe o mouse para revelar."
+                                    >
+                                        <i className={`fa-solid ${htmlSummaryViewSettings.studyMode ? 'fa-eye-slash animate-pulse' : 'fa-eye'}`}></i> Memorização Activa (Cloze)
+                                    </button>
+                                </div>
+
+                                <div className="flex items-center bg-zinc-100 dark:bg-zinc-800 rounded-xl px-3 py-1.5 gap-2 border border-zinc-200 dark:border-zinc-750 flex-wrap">
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 flex items-center gap-1 mr-1">
+                                        <i className={`fa-solid fa-volume-high ${ttsState.playing && !ttsState.paused ? 'animate-bounce text-emerald-500' : ''}`}></i> Áudio
+                                    </span>
+                                    
+                                    <button 
+                                        onClick={handlePlayTTS} 
+                                        className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${
+                                            ttsState.playing && !ttsState.paused 
+                                                ? 'bg-amber-500 text-white hover:bg-amber-600' 
+                                                : 'bg-emerald-500 text-white hover:bg-emerald-600'
+                                        }`}
+                                        title={ttsState.playing && !ttsState.paused ? 'Pausar leitura' : 'Iniciar/Retomar leitura'}
+                                    >
+                                        <i className={`fa-solid ${ttsState.playing && !ttsState.paused ? 'fa-pause' : 'fa-play'}`}></i>
+                                    </button>
+
+                                    {ttsState.playing && (
+                                        <button 
+                                            onClick={handleStopTTS}
+                                            className="w-7 h-7 rounded-lg bg-red-500 text-white hover:bg-red-600 flex items-center justify-center transition-colors"
+                                            title="Parar leitura"
+                                        >
+                                            <i className="fa-solid fa-stop"></i>
+                                        </button>
+                                    )}
+
+                                    <div className="flex items-center gap-1.5 pl-1.5 border-l border-zinc-200 dark:border-zinc-700">
+                                        <select 
+                                            value={ttsState.speed} 
+                                            onChange={handleSpeedChange} 
+                                            className="bg-transparent text-[11px] font-bold text-zinc-600 dark:text-zinc-300 outline-none"
+                                            title="Velocidade"
+                                        >
+                                            <option value="0.75" className="bg-zinc-800 text-white">0.75x</option>
+                                            <option value="1.0" className="bg-zinc-800 text-white">1.0x</option>
+                                            <option value="1.25" className="bg-zinc-800 text-white">1.25x</option>
+                                            <option value="1.5" className="bg-zinc-800 text-white">1.5x</option>
+                                            <option value="2.0" className="bg-zinc-800 text-white">2.0x</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div className="relative max-w-[200px] w-full">
+                                    <i className="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 text-xs"></i>
+                                    <input 
+                                        type="text" 
+                                        value={htmlSummaryViewSettings.documentSearch}
+                                        onChange={e => setHtmlSummaryViewSettings(p => ({ ...p, documentSearch: e.target.value }))}
+                                        placeholder="Pesquisar..."
+                                        className="w-full pl-8 pr-3 py-1.5 rounded-xl bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-750 text-xs font-bold outline-none focus:ring-1 focus:ring-emerald-500 text-zinc-700 dark:text-zinc-300"
+                                    />
+                                </div>
+                            </div>
+
+                            {/* Workspace */}
+                            <div className="flex flex-col lg:flex-row gap-6 items-start w-full">
+                                {/* Sumário Dinâmico */}
+                                <div className="w-full lg:w-64 lg:sticky lg:top-24 shrink-0 space-y-4">
+                                    <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-5 rounded-3xl shadow-xs">
+                                        <h3 className="text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-3 flex items-center gap-1.5">
+                                            <i className="fa-solid fa-list-ol text-emerald-500"></i> Sumário Dinâmico
+                                        </h3>
+                                        {headings.length > 0 ? (
+                                            <div className="space-y-1 max-h-[350px] overflow-y-auto planner-scroll pr-1.5">
+                                                {headings.map(h => {
+                                                    const depth = h.tag === 'h4' ? 'pl-4 text-[11px]' : 'text-xs';
+                                                    return (
+                                                        <button 
+                                                            key={h.id}
+                                                            onClick={() => scrollToHeading(h.id)}
+                                                            className={`w-full text-left py-1 px-1.5 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-lg transition-colors font-bold text-zinc-500 dark:text-zinc-400 hover:text-emerald-500 dark:hover:text-emerald-400 block truncate ${depth}`}
+                                                            title={h.text}
+                                                        >
+                                                            {h.text}
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                        ) : (
+                                            <p className="text-[10px] font-bold text-zinc-400 italic">Nenhum cabeçalho detectado no HTML.</p>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* Reading panel */}
+                                <div className="flex-1 w-full min-w-0">
+                                    <div 
+                                        id="summary-reading-content"
+                                        className={`p-6 sm:p-10 rounded-[32px] border transition-all prose prose-sm max-w-none shadow-xs ${fontSizeClasses[htmlSummaryViewSettings.fontSize]} ${fontFamilyClasses[htmlSummaryViewSettings.fontFamily]} ${themeClasses[htmlSummaryViewSettings.theme]} ${htmlSummaryViewSettings.studyMode ? 'study-mode-active' : ''}`}
+                                    >
+                                        {renderedContent.trim() ? (
+                                            <div dangerouslySetInnerHTML={{ __html: renderedContent }} />
+                                        ) : (
+                                            <div className="text-center py-20 text-zinc-400 italic font-bold">O conteúdo deste resumo está vazio.</div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* Notes panel */}
+                                {htmlSummaryViewSettings.notesVisible && (
+                                    <div className="w-full lg:w-80 lg:sticky lg:top-24 shrink-0 space-y-4 animate-in slide-in-from-right duration-250">
+                                        <div className="bg-amber-50/50 dark:bg-amber-950/10 border border-amber-500/20 p-5 rounded-3xl shadow-sm space-y-4">
+                                            <div className="flex justify-between items-center">
+                                                <h3 className="text-xs font-black uppercase tracking-widest text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+                                                    <i className="fa-solid fa-note-sticky text-amber-500"></i> Bloco de Notas
+                                                </h3>
+                                                <span className="text-[8px] font-black uppercase text-amber-500/60 bg-amber-500/10 px-1.5 py-0.5 rounded-md">Salvo</span>
+                                            </div>
+                                            <textarea
+                                                value={notesText}
+                                                onChange={e => handleNotesChange(e.target.value)}
+                                                placeholder="Suas anotações de aula para este resumo..."
+                                                className="w-full h-[350px] p-4 rounded-2xl bg-white dark:bg-zinc-950 border border-amber-500/20 font-semibold text-xs outline-none focus:ring-1 focus:ring-amber-500 text-zinc-800 dark:text-zinc-250 resize-none shadow-inner"
+                                            />
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* AI Companion */}
+                                {htmlSummaryViewSettings.aiCompanionVisible && (
+                                    <div className="w-full lg:w-80 lg:sticky lg:top-24 shrink-0 animate-in slide-in-from-right duration-250">
+                                        <div className="bg-white dark:bg-zinc-900 border border-zinc-250 dark:border-zinc-800 rounded-3xl p-5 shadow-lg flex flex-col h-[480px]">
+                                            <div className="pb-3 border-b border-zinc-150 dark:border-zinc-850 shrink-0">
+                                                <h3 className="text-xs font-black uppercase tracking-widest text-purple-600 dark:text-purple-400 flex items-center gap-1.5">
+                                                    <i className="fa-solid fa-robot text-purple-500"></i> IA Tira-Dúvidas
+                                                </h3>
+                                            </div>
+                                            
+                                            <div className="flex-1 overflow-y-auto planner-scroll space-y-3 py-3 flex flex-col">
+                                                {summaryChat.length === 0 ? (
+                                                    <div className="flex-1 flex flex-col items-center justify-center text-center p-4">
+                                                        <i className="fa-solid fa-comments text-2xl text-purple-500/20 mb-2"></i>
+                                                        <p className="text-xs text-zinc-400 font-bold">Nenhuma dúvida.</p>
+                                                    </div>
+                                                ) : (
+                                                    summaryChat.map((m, idx) => {
+                                                        const isUser = m.role === 'user';
+                                                        return (
+                                                            <div key={idx} className={`max-w-[90%] p-3 rounded-2xl text-xs font-semibold shadow-xs leading-normal ${
+                                                                isUser 
+                                                                    ? 'bg-purple-600 text-white ml-auto rounded-tr-none' 
+                                                                    : 'bg-zinc-100 dark:bg-zinc-850 text-zinc-850 dark:text-zinc-100 mr-auto rounded-tl-none border border-zinc-200 dark:border-zinc-700/50'
+                                                            }`}>
+                                                                {m.text}
+                                                            </div>
+                                                        );
+                                                    })
+                                                )}
+                                                {isSummaryChatLoading && (
+                                                    <div className="bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 p-3 rounded-2xl rounded-tl-none mr-auto border border-zinc-200 dark:border-zinc-700/50 flex items-center gap-2 text-xs font-bold animate-pulse">
+                                                        <i className="fa-solid fa-circle-notch animate-spin text-purple-500"></i> Mentor está lendo...
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            <div className="pt-3 border-t border-zinc-150 dark:border-zinc-850 shrink-0 flex gap-2">
+                                                <input 
+                                                    type="text" 
+                                                    value={summaryChatInput}
+                                                    onChange={e => setSummaryChatInput(e.target.value)}
+                                                    onKeyDown={e => e.key === 'Enter' && handleSendSummaryChat()}
+                                                    placeholder="Perguntar ao Mentor..."
+                                                    className="flex-1 px-3 py-2 rounded-xl bg-zinc-100 dark:bg-zinc-950 border border-zinc-250 dark:border-zinc-850 text-xs font-semibold outline-none focus:ring-1 focus:ring-purple-500 text-zinc-800 dark:text-zinc-100"
+                                                />
+                                                <button 
+                                                    onClick={handleSendSummaryChat}
+                                                    disabled={isSummaryChatLoading}
+                                                    className="w-8 h-8 rounded-xl bg-purple-600 hover:bg-purple-750 text-white flex items-center justify-center shadow-md active:scale-95 transition-all shrink-0"
+                                                >
+                                                    <i className="fa-solid fa-paper-plane text-xs"></i>
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    );
+                };
+
+                // --- GATILHO: EXIBIR VISUALIZADOR SE view === 'view' ---
+                if (htmlSummaryState.view === 'view') {
+                    const activeSummary = summariesList.find(s => s.id === htmlSummaryState.selectedId);
+                    if (!activeSummary) {
+                        return (
+                            <div className="p-6 text-center">
+                                <p className="font-bold text-red-500">Resumo não encontrado.</p>
+                                <button onClick={() => setHtmlSummaryState(p => ({ ...p, view: 'list' }))} className="mt-4 px-4 py-2 bg-zinc-200 dark:bg-zinc-800 rounded-xl font-bold">Voltar</button>
+                            </div>
+                        );
+                    }
+                    return renderSummaryVisualizer(activeSummary);
+                }
+
                 const filteredList = summariesList.filter(s => {
                     if (!htmlSummaryState.search.trim()) return true;
                     const term = htmlSummaryState.search.toLowerCase();
@@ -14175,9 +14883,25 @@ Estrutura esperada:
                                     </div>
 
                                     <div className="flex items-center justify-between border-t border-zinc-100 dark:border-zinc-800 pt-4 mt-2">
-                                        <button onClick={() => setHtmlSummaryState(p => ({ ...p, view: 'edit', editor: { id: item.id, title: item.title, category: item.category || '', content: item.content, isGenerating: false, aiPrompt: '' } }))} className="px-4 py-2 bg-emerald-50 dark:bg-emerald-950/50 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400 rounded-xl font-black text-xs transition-all flex items-center gap-1.5">
-                                            <i className="fa-solid fa-pen"></i> Editar / Abrir
-                                        </button>
+                                        <div className="flex gap-2">
+                                            <button 
+                                                onClick={() => {
+                                                    setHtmlSummaryState(p => ({ ...p, view: 'view', selectedId: item.id }));
+                                                    setSummaryChat([]);
+                                                    setNotesText(item.notes || '');
+                                                }} 
+                                                className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black text-xs transition-all flex items-center gap-1 active:scale-95 shadow-sm"
+                                            >
+                                                <i className="fa-solid fa-eye"></i> Visualizar
+                                            </button>
+                                            <button 
+                                                onClick={() => setHtmlSummaryState(p => ({ ...p, view: 'edit', editor: { id: item.id, title: item.title, category: item.category || '', content: item.content, isGenerating: false, aiPrompt: '' } }))} 
+                                                className="px-3 py-2 bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-xl font-black text-xs transition-all flex items-center gap-1 active:scale-95"
+                                                title="Editar"
+                                            >
+                                                <i className="fa-solid fa-pen"></i>
+                                            </button>
+                                        </div>
                                         <div className="flex items-center gap-1.5">
                                             <button onClick={() => {
                                                 const blob = new Blob([item.content], { type: 'text/html;charset=utf-8' });
