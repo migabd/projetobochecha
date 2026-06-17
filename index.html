@@ -20,7 +20,7 @@
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800;900&display=swap">
 
     <!-- Tailwind CDN com defer para não bloquear o parser HTML -->
-    <script src="https://cdn.tailwindcss.com" defer></script>
+    <script src="https://cdn.tailwindcss.com" crossorigin defer></script>
     <script>
         // Configuração do Tailwind — precisa rodar antes do defer acima carregar,
         // então colocamos via window.__tailwind_config__ e aplicamos no onload
@@ -286,12 +286,12 @@
 
     <!-- Dependências JS: defer garante execução após o parser terminar o HTML -->
     <!-- Ordem importa: jsonrepair → React → ReactDOM → Babel → PDF.js → JSZip -->
-    <script src="https://cdn.jsdelivr.net/npm/jsonrepair/lib/umd/jsonrepair.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsonrepair/lib/umd/jsonrepair.js" crossorigin defer></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin defer></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin defer></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js" defer></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js" defer></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" defer></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js" crossorigin defer></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js" crossorigin defer></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" crossorigin defer></script>
     <!-- PDF.js worker: configurado dentro do código principal após o lib carregar -->
     <script>
         // Registra o worker do PDF.js assim que a lib carregar (via defer)
@@ -1507,12 +1507,17 @@ Desenvolva os sintomas, a anamnese e os achados físicos iniciais com base estri
                     ? `DIRETRIZ MÉDICA (PDF ANEXADO PELO USUÁRIO):\n${simulationPdfText.substring(0, 15000)}` 
                     : `TÍTULO DO FLUXOGRAMA: "${flowTitle}"\nDESCRIÇÃO: "${flowDesc}"\nETAPAS DO PROTOCOLO:\n${flowNodes}`;
 
+                const customFlowInstructions = db.customFlowchartPromptEnabled && db.customFlowchartPrompt
+                    ? `\nINSTRUÇÕES PERSONALIZADAS ADICIONAIS DO USUÁRIO (ATENÇÃO: crie o caso clínico inicial respeitando rigorosamente estas diretrizes adicionais):\n${db.customFlowchartPrompt}\n`
+                    : '';
+
                 const initialPrompt = `Você é um Mentor de Simulação Clínica Avançada extremamente competente e puramente clínico.
 Sua missão é conduzir uma simulação clínica interativa (Caso Clínico) onde o diagnóstico correto e a conduta terapêutica ideal seguem RIGOROSAMENTE as recomendações da seguinte referência médica:
 
 ${guidelineContext}
 ${pastCasesBlock}
 ${diversityBlock}
+${customFlowInstructions}
 INSTRUÇÕES IMPORTANTES DA SIMULAÇÃO:
 1. Crie uma apresentação inicial do paciente (caso clínico INÉDITO, realista, compatível com a diretriz e DIFERENTE de todos os casos anteriores listados acima). O caso DEVE ser 100% compatível com a referência e usar a demografia/variação da diretriz de diversidade acima.
 2. NUNCA diga o diagnóstico, o nome das condutas corretas ou o caminho ideal diretamente. O estudante deve investigar e tomar as decisões.
@@ -5554,7 +5559,7 @@ className="flex-1 w-full h-full relative cursor-grab active:cursor-grabbing over
                         "pontos_conduta": "Condutas imediatas e exames solicitados...",
                         "pontos_comunicacao": "Orientações ao paciente ou equipe..."
                       }
-                    }`;
+                    }${db.customDailyChallengePromptEnabled && db.customDailyChallengePrompt ? `\n\n6. DIRETRIZES PERSONALIZADAS ADICIONAIS DO USUÁRIO (ATENÇÃO: siga rigorosamente estas instruções para moldar o caso clínico e o gabarito):\n${db.customDailyChallengePrompt}\n` : ''}`;
 
                     const selectedModel = db.desafioDiarioModel || aiConfig.model || 'gemini-1.5-flash';
                     const responseText = await callIA([
@@ -6095,7 +6100,7 @@ Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto 
                         "pontos_conduta": "Condutas imediatas e exames solicitados...",
                         "pontos_comunicacao": "Orientações ao paciente ou equipe..."
                       }
-                    }`;
+                    }${db.customDailyChallengePromptEnabled && db.customDailyChallengePrompt ? `\n\n6. DIRETRIZES PERSONALIZADAS ADICIONAIS DO USUÁRIO (ATENÇÃO: siga rigorosamente estas instruções para moldar o caso clínico e o gabarito):\n${db.customDailyChallengePrompt}\n` : ''}`;
 
                     const selectedModel = db.desafioDiarioModel || aiConfig.model || 'gemini-1.5-flash';
                     const responseText = await callIA([
@@ -8008,7 +8013,11 @@ Retorne apenas o texto da resposta, sem JSON ou tags explicativas.`;
                     simuladoPausado: null,
                     fluxogramas: [],
                     desafiosDiarios: [],
-                    comments: {}
+                    comments: {},
+                    customDailyChallengePromptEnabled: false,
+                    customDailyChallengePrompt: '',
+                    customFlowchartPromptEnabled: false,
+                    customFlowchartPrompt: ''
                 };
 
                 // Forçar "Zerar" se o usuário solicitou limpeza total (v7)
@@ -8030,6 +8039,10 @@ Retorne apenas o texto da resposta, sem JSON ou tags explicativas.`;
                         const parsed = JSON.parse(saved);
                         if (!parsed.desafiosDiarios) parsed.desafiosDiarios = [];
                         if (!parsed.comments) parsed.comments = {};
+                        if (parsed.customDailyChallengePromptEnabled === undefined) parsed.customDailyChallengePromptEnabled = false;
+                        if (parsed.customDailyChallengePrompt === undefined) parsed.customDailyChallengePrompt = '';
+                        if (parsed.customFlowchartPromptEnabled === undefined) parsed.customFlowchartPromptEnabled = false;
+                        if (parsed.customFlowchartPrompt === undefined) parsed.customFlowchartPrompt = '';
 
                         // Restaurar imagens e dados limpos do window.__INITIAL_STATE__
                         if (window.__INITIAL_STATE__) {
@@ -17463,6 +17476,62 @@ ${(obj.questoesAnalisadas || []).map(q => `### ${q.identificacao}
                                         </div>
 
                                         <button onClick={testIA} disabled={isAiLoading} className="w-full py-4 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 rounded-2xl font-black text-sm shadow-sm hover:bg-emerald-200 dark:hover:bg-emerald-900/50 active:scale-95 transition-all disabled:opacity-50"><i className="fa-solid fa-wifi mr-2"></i> Testar Conexão com IA</button>
+                                    </section>
+
+                                    <section className="bg-emerald-50 dark:bg-emerald-800/10 p-6 rounded-3xl border border-emerald-100 dark:border-emerald-800/20 shadow-inner">
+                                        <h3 className="text-xs font-black uppercase text-emerald-600 dark:text-emerald-400 mb-4 tracking-widest flex items-center gap-2">
+                                            <i className="fa-solid fa-sliders"></i> Customização de IA (Casos e Desafios)
+                                        </h3>
+                                        
+                                        {/* 1. Desafio Diário */}
+                                        <div className="space-y-3 mb-6">
+                                            <div className="flex justify-between items-center">
+                                                <label className="text-[10px] font-bold text-zinc-550 dark:text-zinc-400 uppercase tracking-wider">Desafio Diário</label>
+                                                <label className="flex items-center gap-2 cursor-pointer select-none">
+                                                    <span className={`text-[9px] font-black uppercase tracking-widest ${db.customDailyChallengePromptEnabled ? 'text-emerald-600 dark:text-emerald-400' : 'text-zinc-400'}`}>{db.customDailyChallengePromptEnabled ? 'Personalizado' : 'Padrão'}</span>
+                                                    <div
+                                                        onClick={() => setDb(p => ({ ...p, customDailyChallengePromptEnabled: !p.customDailyChallengePromptEnabled }))}
+                                                        className={`relative w-9 h-5 rounded-full transition-all cursor-pointer ${db.customDailyChallengePromptEnabled ? 'bg-emerald-500' : 'bg-zinc-300 dark:bg-zinc-700'}`}
+                                                    >
+                                                        <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow-md transition-all ${db.customDailyChallengePromptEnabled ? 'left-[18px]' : 'left-0.5'}`}></div>
+                                                    </div>
+                                                </label>
+                                            </div>
+                                            {db.customDailyChallengePromptEnabled && (
+                                                <textarea
+                                                    value={db.customDailyChallengePrompt || ''}
+                                                    onChange={e => setDb(p => ({ ...p, customDailyChallengePrompt: e.target.value }))}
+                                                    placeholder="Como você quer o Desafio Clínico do dia seguinte? (Ex: Focar em pediatria, casos raros, etc.)"
+                                                    className="w-full p-3 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl outline-none text-xs font-bold font-sans resize-none text-zinc-800 dark:text-white"
+                                                    rows="3"
+                                                />
+                                            )}
+                                        </div>
+
+                                        {/* 2. Caso de Fluxograma */}
+                                        <div className="space-y-3">
+                                            <div className="flex justify-between items-center">
+                                                <label className="text-[10px] font-bold text-zinc-550 dark:text-zinc-400 uppercase tracking-wider">Caso de Fluxograma</label>
+                                                <label className="flex items-center gap-2 cursor-pointer select-none">
+                                                    <span className={`text-[9px] font-black uppercase tracking-widest ${db.customFlowchartPromptEnabled ? 'text-emerald-600 dark:text-emerald-400' : 'text-zinc-400'}`}>{db.customFlowchartPromptEnabled ? 'Personalizado' : 'Padrão'}</span>
+                                                    <div
+                                                        onClick={() => setDb(p => ({ ...p, customFlowchartPromptEnabled: !p.customFlowchartPromptEnabled }))}
+                                                        className={`relative w-9 h-5 rounded-full transition-all cursor-pointer ${db.customFlowchartPromptEnabled ? 'bg-emerald-500' : 'bg-zinc-300 dark:bg-zinc-700'}`}
+                                                    >
+                                                        <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow-md transition-all ${db.customFlowchartPromptEnabled ? 'left-[18px]' : 'left-0.5'}`}></div>
+                                                    </div>
+                                                </label>
+                                            </div>
+                                            {db.customFlowchartPromptEnabled && (
+                                                <textarea
+                                                    value={db.customFlowchartPrompt || ''}
+                                                    onChange={e => setDb(p => ({ ...p, customFlowchartPrompt: e.target.value }))}
+                                                    placeholder="Como você quer o Caso Clínico da revisão do fluxograma? (Ex: Paciente idoso, comorbidade diabetes, sintomas atípicos...)"
+                                                    className="w-full p-3 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl outline-none text-xs font-bold font-sans resize-none text-zinc-800 dark:text-white"
+                                                    rows="3"
+                                                />
+                                            )}
+                                        </div>
                                     </section>
 
                                     <section className="bg-violet-50 dark:bg-violet-900/10 p-6 rounded-3xl border border-violet-100 dark:border-violet-900/30 shadow-inner">
