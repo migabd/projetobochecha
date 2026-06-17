@@ -8180,6 +8180,56 @@ Retorne apenas o texto da resposta, sem JSON ou tags explicativas.`;
                 loadImages();
             }, []);
 
+            // ----- ESTADO DO CHAT (Definido no topo para evitar erro de inicialização) -----
+            const [chatSessions, setChatSessions] = useState(() => {
+                try {
+                    const saved = JSON.parse(localStorage.getItem('chat_med_ia_sessions'));
+                    if (saved && Array.isArray(saved) && saved.length > 0) return saved;
+                } catch (e) {}
+                try {
+                    const oldChat = JSON.parse(localStorage.getItem('chat_med_ia_master'));
+                    if (oldChat && Array.isArray(oldChat) && oldChat.length > 0) {
+                        return [{ id: 'default_session', title: 'Conversa Migrada', messages: oldChat, createdAt: new Date().toISOString() }];
+                    }
+                } catch (e) {}
+                return [{ id: 'default_session', title: 'Nova Conversa', messages: [{ role: 'model', text: 'Olá! Sou o Mentor IA PRO. Estou conectado ao ambiente. Pode colar imagens (Ctrl+V) ou fazer perguntas diretas sobre os seus estudos.' }], createdAt: new Date().toISOString() }];
+            });
+
+            const [activeSessionId, setActiveSessionId] = useState(() => {
+                try {
+                    const saved = JSON.parse(localStorage.getItem('chat_med_ia_sessions'));
+                    if (saved && Array.isArray(saved) && saved.length > 0) return saved[0].id;
+                } catch (e) {}
+                return 'default_session';
+            });
+
+            const activeSessionIdRef = useRef(activeSessionId);
+            useEffect(() => {
+                activeSessionIdRef.current = activeSessionId;
+            }, [activeSessionId]);
+
+            const [chatMessages, setChatMessages] = useState(() => {
+                try {
+                    const saved = JSON.parse(localStorage.getItem('chat_med_ia_sessions'));
+                    if (saved && Array.isArray(saved) && saved.length > 0) return saved[0].messages || [];
+                } catch (e) {}
+                try {
+                    const oldChat = JSON.parse(localStorage.getItem('chat_med_ia_master'));
+                    if (oldChat && Array.isArray(oldChat)) return oldChat;
+                } catch (e) {}
+                return [{ role: 'model', text: 'Olá! Sou o Mentor IA PRO. Estou conectado ao ambiente. Pode colar imagens (Ctrl+V) ou fazer perguntas diretas sobre os seus estudos.' }];
+            });
+
+            const chatMessagesRef = useRef(chatMessages);
+            useEffect(() => {
+                chatMessagesRef.current = chatMessages;
+            }, [chatMessages]);
+
+            const chatSessionsRef = useRef(chatSessions);
+            useEffect(() => {
+                chatSessionsRef.current = chatSessions;
+            }, [chatSessions]);
+
             // ----- GIST SYNC CONFIG -----
             const [gistConfig, setGistConfig] = useState(() => {
                 try {
@@ -8655,44 +8705,6 @@ Retorne apenas o texto da resposta, sem JSON ou tags explicativas.`;
                 return [];
             });
             const [isAiLoading, setIsAiLoading] = useState(false);
-            const [chatSessions, setChatSessions] = useState(() => {
-                try {
-                    const saved = JSON.parse(localStorage.getItem('chat_med_ia_sessions'));
-                    if (saved && Array.isArray(saved) && saved.length > 0) return saved;
-                } catch (e) {}
-                try {
-                    const oldChat = JSON.parse(localStorage.getItem('chat_med_ia_master'));
-                    if (oldChat && Array.isArray(oldChat) && oldChat.length > 0) {
-                        return [{ id: 'default_session', title: 'Conversa Migrada', messages: oldChat, createdAt: new Date().toISOString() }];
-                    }
-                } catch (e) {}
-                return [{ id: 'default_session', title: 'Nova Conversa', messages: [{ role: 'model', text: 'Olá! Sou o Mentor IA PRO. Estou conectado ao ambiente. Pode colar imagens (Ctrl+V) ou fazer perguntas diretas sobre os seus estudos.' }], createdAt: new Date().toISOString() }];
-            });
-
-            const [activeSessionId, setActiveSessionId] = useState(() => {
-                try {
-                    const saved = JSON.parse(localStorage.getItem('chat_med_ia_sessions'));
-                    if (saved && Array.isArray(saved) && saved.length > 0) return saved[0].id;
-                } catch (e) {}
-                return 'default_session';
-            });
-
-            const activeSessionIdRef = useRef(activeSessionId);
-            useEffect(() => {
-                activeSessionIdRef.current = activeSessionId;
-            }, [activeSessionId]);
-
-            const [chatMessages, setChatMessages] = useState(() => {
-                try {
-                    const saved = JSON.parse(localStorage.getItem('chat_med_ia_sessions'));
-                    if (saved && Array.isArray(saved) && saved.length > 0) return saved[0].messages || [];
-                } catch (e) {}
-                try {
-                    const oldChat = JSON.parse(localStorage.getItem('chat_med_ia_master'));
-                    if (oldChat && Array.isArray(oldChat)) return oldChat;
-                } catch (e) {}
-                return [{ role: 'model', text: 'Olá! Sou o Mentor IA PRO. Estou conectado ao ambiente. Pode colar imagens (Ctrl+V) ou fazer perguntas diretas sobre os seus estudos.' }];
-            });
 
             const [chatInput, setChatInput] = useState('');
             const chatEndRef = useRef(null);
@@ -8705,16 +8717,6 @@ Retorne apenas o texto da resposta, sem JSON ou tags explicativas.`;
             const [floatingPdf, setFloatingPdf] = useState(null);
             const chatFileInputRef = useRef(null);
             const floatingFileInputRef = useRef(null);
-
-            const chatMessagesRef = useRef(chatMessages);
-            useEffect(() => {
-                chatMessagesRef.current = chatMessages;
-            }, [chatMessages]);
-
-            const chatSessionsRef = useRef(chatSessions);
-            useEffect(() => {
-                chatSessionsRef.current = chatSessions;
-            }, [chatSessions]);
 
             // Atualiza automaticamente as sessões quando as mensagens mudam, incluindo auto-título na primeira mensagem
             useEffect(() => {
