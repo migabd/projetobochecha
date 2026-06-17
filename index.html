@@ -290,6 +290,16 @@
     <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin defer></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin defer></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js" crossorigin defer></script>
+    <script defer>
+        if (typeof Babel !== 'undefined') {
+            Babel.registerPreset('react-classic', {
+                presets: [
+                    [Babel.availablePresets['env'], {}],
+                    [Babel.availablePresets['react'], { runtime: 'classic' }]
+                ]
+            });
+        }
+    </script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js" crossorigin defer></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" crossorigin defer></script>
     <!-- PDF.js worker: configurado dentro do código principal após o lib carregar -->
@@ -348,7 +358,7 @@
             </div>`;
         });
     </script>
-    <script type="text/babel" data-type="module" data-presets='["env", ["react", {"runtime": "classic"}]]' class="notranslate" translate="no">
+    <script type="text/babel" data-type="module" data-presets="react-classic" class="notranslate" translate="no">
 
         // Configura o worker do PDF.js (carregado via defer, então já está disponível)
         if (typeof pdfjsLib !== 'undefined') {
@@ -9602,13 +9612,23 @@ Retorne apenas o texto da resposta, sem JSON ou tags explicativas.`;
     <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin><\/script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin><\/script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"><\/script>
+    <script>
+        if (typeof Babel !== 'undefined') {
+            Babel.registerPreset('react-classic', {
+                presets: [
+                    [Babel.availablePresets['env'], {}],
+                    [Babel.availablePresets['react'], { runtime: 'classic' }]
+                ]
+            });
+        }
+    <\/script>
     <script id="data-store">
         window.__INITIAL_STATE__ = ${dataString}; // SAVE_MARKER
     <\/script>
 </head>
 <body class="bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 min-h-screen flex flex-col font-sans transition-colors duration-300">
     <div id="root" class="flex-1 flex flex-col"></div>
-    <script type="text/babel" data-presets='["env", ["react", {"runtime": "classic"}]]' class="notranslate" translate="no">
+    <script type="text/babel" data-presets="react-classic" class="notranslate" translate="no">
 ${safeScript}
     <\/script>
 </body>
@@ -9668,13 +9688,23 @@ ${safeScript}
     <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin><\/script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin><\/script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"><\/script>
+    <script>
+        if (typeof Babel !== 'undefined') {
+            Babel.registerPreset('react-classic', {
+                presets: [
+                    [Babel.availablePresets['env'], {}],
+                    [Babel.availablePresets['react'], { runtime: 'classic' }]
+                ]
+            });
+        }
+    <\/script>
     <script id="data-store">
         window.__INITIAL_STATE__ = ${dataString}; // SAVE_MARKER
     <\/script>
 </head>
 <body class="bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 min-h-screen flex flex-col font-sans transition-colors duration-300">
     <div id="root" class="flex-1 flex flex-col"></div>
-    <script type="text/babel" data-presets='["env", ["react", {"runtime": "classic"}]]' class="notranslate" translate="no">
+    <script type="text/babel" data-presets="react-classic" class="notranslate" translate="no">
 ${safeScript}
     <\/script>
 </body>
