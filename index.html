@@ -4528,11 +4528,6 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                             <div className="flex gap-3">
                                 <button 
                                     onClick={() => {
-                                        if (window.confirm("Deseja realmente cancelar esta simulação? Seu progresso será descartado.")) {
-                                            stopSpeaking(); stopSpeechRecognition(); setIsSimulating(false);
-                                        }
-                                    }}
-                                    onClick={() => {
                                         if (window.confirm("Deseja gerar um novo caso clínico para este tema? O progresso do caso atual será descartado.")) {
                                             handleStartSimulation(simulationMode);
                                         }
@@ -4551,8 +4546,10 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                 </button>
                             </div>
                         </div>
-                    );
-                }
+                    </div>
+                </div>
+            );
+        }
 
                 // VIEW: GENERAL DASHBOARD
                 const averageScore = aiReviews.length > 0 
