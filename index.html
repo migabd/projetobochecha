@@ -910,6 +910,7 @@ const FluxogramasTab = React.memo(({ db, fluxogramas = [], setDb, callIA, extrac
             const [showFocusSelector, setShowFocusSelector] = React.useState(false);
             const [focusSuggestions, setFocusSuggestions] = React.useState([]);
             const [selectedFocusId, setSelectedFocusId] = React.useState('full');
+            const [customFocusText, setCustomFocusText] = React.useState('');
             const [pendingSimMode, setPendingSimMode] = React.useState('voice');
             const [pendingDirectFlow, setPendingDirectFlow] = React.useState(null);
 
@@ -1045,6 +1046,9 @@ const FluxogramasTab = React.memo(({ db, fluxogramas = [], setDb, callIA, extrac
             // Ref to track currently queued utterances for clean cancellation
             const ttsQueueRef = React.useRef([]);
             const ttsActiveRef = React.useRef(false);
+            // Generation token: incremented on every speakText call so stale callbacks from
+            // a cancelled utterance cannot re-enqueue chunks of the previous speech.
+            const ttsGenerationRef = React.useRef(0);
 
             // Expand common medical abbreviations so they're spoken naturally
             const expandMedicalAbbr = (text) => {
@@ -1157,6 +1161,8 @@ const FluxogramasTab = React.memo(({ db, fluxogramas = [], setDb, callIA, extrac
             const speakText = (text) => {
                 // Cancel any ongoing speech
                 stopSpeaking();
+                // Bump generation token — all stale callbacks will see a mismatch and abort
+                const generation = ++ttsGenerationRef.current;
 
                 // Clean markdown, brackets, and expand medical terms
                 let clean = text
@@ -1180,6 +1186,8 @@ const FluxogramasTab = React.memo(({ db, fluxogramas = [], setDb, callIA, extrac
                 // CLOUD TTS ENGINE
                 // ----------------------------------------------------
                 const speakNextCloud = () => {
+                    // Guard: abort if a newer speakText call has taken over
+                    if (ttsGenerationRef.current !== generation) return;
                     const chunk = ttsQueueRef.current.shift();
                     if (!chunk) {
                         setIsVoiceSynthesizing(false);
@@ -1189,7 +1197,7 @@ const FluxogramasTab = React.memo(({ db, fluxogramas = [], setDb, callIA, extrac
                         // Autonomous listening trigger:
                         if (simulationModeRef.current === 'voice') {
                             setTimeout(() => {
-                                startSpeechRecognition();
+                                if (ttsGenerationRef.current === generation) startSpeechRecognition();
                             }, 300);
                         }
                         return;
@@ -1200,19 +1208,27 @@ const FluxogramasTab = React.memo(({ db, fluxogramas = [], setDb, callIA, extrac
                     const audio = new Audio(url);
                     audio.playbackRate = voiceRate;
                     audio.volume = voiceVolume;
+                    
+                    let fallbackTriggered = false;
+                    const triggerFallback = (reason) => {
+                        if (ttsGenerationRef.current !== generation) return;
+                        if (fallbackTriggered) return;
+                        fallbackTriggered = true;
+                        console.warn(`Cloud voice failed (${reason}), falling back to browser voice...`);
+                        ttsQueueRef.current.unshift(chunk);
+                        speakNextBrowser();
+                    };
+
                     audio.onended = () => {
+                        if (ttsGenerationRef.current !== generation) return;
                         setTimeout(speakNextCloud, 80);
                     };
                     audio.onerror = (e) => {
-                        console.warn("Cloud voice error, falling back to browser voice...", e);
-                        ttsQueueRef.current.unshift(chunk);
-                        speakNextBrowser();
+                        triggerFallback("onerror");
                     };
                     cloudAudioRef.current = audio;
                     audio.play().catch(err => {
-                        console.warn("Could not play cloud voice:", err);
-                        ttsQueueRef.current.unshift(chunk);
-                        speakNextBrowser();
+                        triggerFallback(`play_catch: ${err.message}`);
                     });
                 };
 
@@ -1220,6 +1236,8 @@ const FluxogramasTab = React.memo(({ db, fluxogramas = [], setDb, callIA, extrac
                 // BROWSER / SYSTEM TTS ENGINE
                 // ----------------------------------------------------
                 const speakNextBrowser = () => {
+                    // Guard: abort if a newer speakText call has taken over
+                    if (ttsGenerationRef.current !== generation) return;
                     if (!window.speechSynthesis) {
                         setIsVoiceSynthesizing(false);
                         ttsActiveRef.current = false;
@@ -1241,7 +1259,7 @@ const FluxogramasTab = React.memo(({ db, fluxogramas = [], setDb, callIA, extrac
                         // Autonomous listening trigger:
                         if (simulationModeRef.current === 'voice') {
                             setTimeout(() => {
-                                startSpeechRecognition();
+                                if (ttsGenerationRef.current === generation) startSpeechRecognition();
                             }, 300);
                         }
                         return;
@@ -1260,6 +1278,7 @@ const FluxogramasTab = React.memo(({ db, fluxogramas = [], setDb, callIA, extrac
                     utterance.volume = voiceVolume;
 
                     utterance.onend = () => {
+                        if (ttsGenerationRef.current !== generation) return;
                         if (ttsQueueRef.current.length > 0) {
                             setTimeout(speakNextBrowser, 80);
                         } else {
@@ -1270,12 +1289,13 @@ const FluxogramasTab = React.memo(({ db, fluxogramas = [], setDb, callIA, extrac
                             // Autonomous listening trigger:
                             if (simulationModeRef.current === 'voice') {
                                 setTimeout(() => {
-                                    startSpeechRecognition();
+                                    if (ttsGenerationRef.current === generation) startSpeechRecognition();
                                 }, 300);
                             }
                         }
                     };
                     utterance.onerror = (e) => {
+                        if (ttsGenerationRef.current !== generation) return;
                         if (e.error !== 'interrupted' && e.error !== 'canceled') {
                             console.warn('TTS error:', e.error);
                         }
@@ -1289,7 +1309,7 @@ const FluxogramasTab = React.memo(({ db, fluxogramas = [], setDb, callIA, extrac
                             // Autonomous listening trigger:
                             if (simulationModeRef.current === 'voice') {
                                 setTimeout(() => {
-                                    startSpeechRecognition();
+                                    if (ttsGenerationRef.current === generation) startSpeechRecognition();
                                 }, 300);
                             }
                         }
@@ -1733,15 +1753,24 @@ Desenvolva os sintomas, a anamnese e os achados físicos iniciais com base estri
                     ? `DIRETRIZ MÉDICA (PDF ANEXADO PELO USUÁRIO):\n${simulationPdfText.substring(0, 15000)}` 
                     : `TÍTULO DO FLUXOGRAMA: "${flowTitle}"\nDESCRIÇÃO: "${flowDesc}"\nETAPAS DO PROTOCOLO:\n${flowNodes}`;
 
-                const focusBlock = (chosenFocus && chosenFocus.id !== 'full')
-                    ? `\nFOCO ESPECÍFICO DA REVISÃO (ATENÇÃO — OBRIGATÓRIO):
+                const focusBlock = (() => {
+                    if (selectedFocusId === 'custom' && customFocusText.trim()) {
+                        return `\nFOCO PERSONALIZADO DO ESTUDANTE (ATENÇÃO — OBRIGATÓRIO):
+O estudante escolheu revisar o seguinte aspecto específico do fluxograma: "${customFocusText.trim()}".
+Você DEVE criar o caso clínico de forma que o estudante precise navegar especificamente por esse aspecto.
+As demais etapas do fluxograma podem aparecer como contexto, mas o FOCO principal e as situações desafiadoras devem girar em torno do que o estudante descreveu.\n`;
+                    }
+                    if (chosenFocus && chosenFocus.id !== 'full') {
+                        return `\nFOCO ESPECÍFICO DA REVISÃO (ATENÇÃO — OBRIGATÓRIO):
 O estudante escolheu focar na seguinte parte do fluxograma: "${chosenFocus.label}".
 O caso clínico DEVE obrigatoriamente focar nos seguintes aspectos e etapas do protocolo:
 ${chosenFocus.nodes.map(n => `- [${(n.type || 'action').toUpperCase()}] ${n.label}: ${n.description || ''}`).join('\n')}
 
 Você DEVE criar o caso de forma que o estudante precise navegar especificamente por essas etapas do protocolo.
-As demais etapas do fluxograma podem aparecer como contexto, mas o FOCO principal e as perguntas devem girar em torno dos nós listados acima.\n`
-                    : '';
+As demais etapas do fluxograma podem aparecer como contexto, mas o FOCO principal e as perguntas devem girar em torno dos nós listados acima.\n`;
+                    }
+                    return '';
+                })();
 
                 const initialPrompt = `Você é um Mentor de Simulação Clínica Avançada extremamente competente e puramente clínico.
 Sua missão é conduzir uma simulação clínica interativa (Caso Clínico) onde o diagnóstico correto e a conduta terapêutica ideal seguem RIGOROSAMENTE as recomendações da seguinte referência médica:
@@ -3892,13 +3921,11 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
  
                 // VIEW: ACTIVE LIVE CLINICAL CASE SIMULATION
                 if (isSimulating) {
-                    const patientPresentation = activeReviewChat[1]?.text || 'Carregando caso clínico...';
                     const displayMessages = activeReviewChat.filter(m => m.role !== 'system');
-                    // Only allow finishing if student has sent at least one message (not just the AI's case presentation)
                     const hasMessages = displayMessages.some(m => m.role === 'user');
                     
                     return (
-                        <div className="max-w-2xl mx-auto space-y-6 animate-in fade-in duration-300">
+                        <div className="max-w-6xl mx-auto px-4 py-6 space-y-6 animate-in fade-in duration-300">
                             {customStyleBlock}
                             
                             {/* PLANTÃO CLINICO ATIVO BANNER */}
@@ -3935,408 +3962,594 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                     </button>
                                 </div>
                             )}
-                            
-                            {/* PATIENT PROFILE CARD */}
-                            <div className={`border rounded-3xl p-5 shadow-2xl relative overflow-hidden ${flowchartLightMode ? 'bg-white border-zinc-250' : 'bg-gradient-to-br from-indigo-950/20 to-zinc-900 border-indigo-500/25'}`}>
-                                <div className="absolute top-2 right-4 flex items-center gap-1.5">
-                                    <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping"></span>
-                                    <span className="text-[8px] font-black tracking-widest text-zinc-400 uppercase">Monitor Cardíaco</span>
-                                    <i className="fa-solid fa-heart-pulse text-rose-500 text-xs animate-pulse ml-1"></i>
-                                </div>
-                                <h3 className={`text-xs font-black uppercase tracking-widest mb-2 flex items-center gap-1 ${flowchartLightMode ? 'text-indigo-700' : 'text-indigo-400'}`}><i className="fa-solid fa-hospital-user text-xs"></i> Prontuário de Emergência</h3>
-                                <p className={`text-xs font-bold leading-relaxed text-justify-custom pr-6 ${flowchartLightMode ? 'text-zinc-800' : 'text-white'}`}>{patientPresentation}</p>
-                            </div>
-                            
-                            {/* ACTIVE CONVERSATION CAP */}
-                            <div className={`border rounded-[32px] p-5 shadow-xl flex flex-col h-[400px] ${flowchartLightMode ? 'bg-white border-zinc-200' : 'bg-zinc-900/60 border-zinc-850'}`}>
-                                <div className={`flex-1 overflow-y-auto planner-scroll space-y-4 mb-4 p-3 rounded-2xl shadow-inner flex flex-col border ${flowchartLightMode ? 'bg-zinc-50 border-zinc-200' : 'bg-zinc-950/80 border-zinc-900'}`}>
-                                    {displayMessages.slice(1).map((msg, idx) => {
-                                        const isUser = msg.role === 'user';
-                                        return (
-                                            <div key={idx} className={`flex max-w-[85%] rounded-2xl p-3 shadow-md leading-relaxed text-xs font-semibold ${isUser ? 'bg-emerald-600 text-white ml-auto rounded-tr-none' : (flowchartLightMode ? 'bg-white border border-zinc-200 text-zinc-800 mr-auto rounded-tl-none shadow-sm whitespace-pre-wrap' : 'bg-zinc-800 text-zinc-100 mr-auto rounded-tl-none border border-zinc-700/50 whitespace-pre-wrap')}`}>
-                                                {msg.text}
-                                            </div>
-                                        );
-                                    })}
-                                    
-                                    {isEvaluating && (
-                                        <div className={`mr-auto rounded-2xl rounded-tl-none border p-3 shadow-md text-xs font-bold flex items-center gap-2 ${flowchartLightMode ? 'bg-white border-zinc-200 text-zinc-700' : 'bg-zinc-800 border-zinc-700/50 text-zinc-300'}`}>
-                                            <i className="fa-solid fa-spinner animate-spin text-indigo-400"></i>
-                                            <span>O mentor está analisando...</span>
-                                        </div>
-                                    )}
-                                    
-                                    {!hasMessages && (
-                                        <div className="flex-1 flex flex-col items-center justify-center text-center p-6 space-y-3">
-                                            <i className="fa-solid fa-circle-notch animate-spin text-2xl text-indigo-400"></i>
-                                            <p className="text-zinc-500 text-xs font-bold">Gerando o caso clínico com IA...</p>
-                                        </div>
-                                    )}
-                                </div>
-                                
-                                {/* INTERACTIVE CONTROLS (VOICE / TEXT INPUT) */}
-                                {simulationMode === 'voice' ? (
-                                    <div className={`flex flex-col items-center justify-center py-2 space-y-3 border rounded-2xl p-4 shadow-inner ${flowchartLightMode ? 'bg-zinc-50 border-zinc-200 shadow-zinc-100/50' : 'bg-zinc-950 border-zinc-900'}`}>
-                                        
-                                        {/* LEGENDS / SUBTITLES OVERLAY */}
-                                        {isVoiceSynthesizing && currentSpeechSentence && (
-                                            <div className={`text-center px-4 py-2.5 rounded-2xl text-[11px] font-bold max-w-[90%] mx-auto shadow-md leading-relaxed animate-in fade-in ${
-                                                flowchartLightMode 
-                                                    ? 'bg-indigo-55 border border-indigo-200 text-indigo-850' 
-                                                    : 'bg-indigo-950/40 border border-indigo-500/20 text-indigo-300'
-                                            }`}>
-                                                <i className="fa-solid fa-volume-high mr-1 text-[10px] animate-pulse"></i> "{currentSpeechSentence}"
-                                            </div>
-                                        )}
 
-                                        {/* VISUALIZER DYNAMIC WAVE / AUDIO LEVEL EQUALIZER */}
-                                        {isVoiceSynthesizing ? (
-                                            <div className="flex items-center justify-center gap-1.5 h-8">
-                                                <span className="w-1.5 bg-indigo-500 rounded-full animate-bar1"></span>
-                                                <span className="w-1.5 bg-purple-500 rounded-full animate-bar2"></span>
-                                                <span className="w-1.5 bg-pink-500 rounded-full animate-bar3"></span>
-                                                <span className="w-1.5 bg-purple-400 rounded-full animate-bar4"></span>
-                                                <span className="w-1.5 bg-indigo-400 rounded-full animate-bar5"></span>
-                                            </div>
-                                        ) : isRecognitionActive ? (
-                                            /* REAL AUDIO DYNAMIC FREQUENCY METER */
-                                            <div className="flex items-center gap-1 h-8 pt-1 justify-center">
-                                                {[...Array(12)].map((_, i) => {
-                                                    const active = speechMicLevel > (i * 10);
-                                                    return (
-                                                        <div 
-                                                            key={i} 
-                                                            className={`w-1.5 rounded-full transition-all duration-75 ${
-                                                                active 
-                                                                    ? (i < 7 ? 'bg-emerald-500' : (i < 10 ? 'bg-amber-500' : 'bg-rose-500')) 
-                                                                    : (flowchartLightMode ? 'bg-zinc-200' : 'bg-zinc-800')
-                                                            }`}
-                                                            style={{
-                                                                height: active ? `${Math.min(10 + (speechMicLevel / 6) * (1 + Math.sin(i * 0.8)), 32)}px` : '6px'
-                                                            }}
-                                                        />
-                                                    );
-                                                })}
-                                            </div>
-                                        ) : (
-                                            <div className="flex items-center justify-center gap-1 h-1.5 w-16 bg-zinc-800 rounded-full"></div>
-                                        )}
-                                        
-                                        <p className="text-[10px] font-black uppercase text-zinc-500 tracking-wider">
-                                            {isVoiceSynthesizing ? "IA Falando..." : isRecognitionActive ? "Gravando... Fale agora!" : "Aguardando sua resposta por voz"}
-                                        </p>
-                                        
-                                        {isRecognitionActive && (
-                                            <div className="flex flex-col items-center gap-1">
-                                            <p className="text-xs text-rose-500 dark:text-rose-455 font-bold text-center px-6 py-1 max-w-[280px] line-clamp-2 min-h-[1.5rem] select-none italic leading-snug">
-                                                {interimTranscript ? `"${interimTranscript}"` : "Sua fala aparecerá aqui em tempo real..."}
-                                            </p>
-                                            {voiceAutoCorrect && (
-                                                <span className="text-[9px] font-black uppercase text-emerald-600 dark:text-emerald-400 flex items-center gap-1 tracking-widest animate-pulse select-none">
-                                                    <i className="fa-solid fa-wand-magic-sparkles text-[8px]"></i> Corretor Cl&iacute;nico Ativo
+                            {/* TOP BAR / HEADER: SIMULATION INFO & CONTROLS */}
+                            <div className={`rounded-3xl border p-5 flex flex-col md:flex-row items-center justify-between gap-4 shadow-md ${flowchartLightMode ? 'bg-white border-zinc-200' : 'bg-zinc-900 border-zinc-800'}`}>
+                                <div className="flex items-center gap-3.5 min-w-0 self-start md:self-auto">
+                                    <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-indigo-600 to-purple-600 flex items-center justify-center shrink-0 shadow-lg shadow-indigo-950/30">
+                                        <i className="fa-solid fa-stethoscope text-white text-lg animate-pulse"></i>
+                                    </div>
+                                    <div className="min-w-0">
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                            <span className={`text-[9px] font-black uppercase tracking-widest leading-none ${flowchartLightMode ? 'text-indigo-600' : 'text-indigo-400'}`}>Simulação Clínica Ativa</span>
+                                            {(selectedFocusId !== 'full' || (selectedFocusId === 'custom' && customFocusText)) && (
+                                                <span className={`px-2 py-0.5 rounded-full border text-[8px] font-black flex items-center gap-1 leading-none ${flowchartLightMode ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-indigo-950/60 border-indigo-500/30 text-indigo-300'}`}>
+                                                    <i className="fa-solid fa-crosshairs text-[8px]"></i>
+                                                    {selectedFocusId === 'custom' ? 'Foco Personalizado' : (focusSuggestions.find(s => s.id === selectedFocusId)?.label || 'Foco Ativo')}
                                                 </span>
                                             )}
+                                        </div>
+                                        <h3 className={`text-base font-black truncate mt-1 ${flowchartLightMode ? 'text-zinc-900' : 'text-white'}`}>{selectedFlow?.title || 'Caso Clínico'}</h3>
+                                    </div>
+                                </div>
+                                
+                                {/* HEADER CONTROLS (Novo Caso / Cancelar) */}
+                                <div className="flex items-center gap-2.5 w-full md:w-auto">
+                                    <button 
+                                        onClick={() => {
+                                            if (window.confirm("Deseja gerar um novo caso clínico para este tema? O progresso do caso atual será descartado.")) {
+                                                handleStartSimulation(simulationMode);
+                                            }
+                                        }}
+                                        className={`flex-1 md:flex-none px-4 py-2.5 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 active:scale-95 border ${flowchartLightMode ? 'bg-zinc-100 hover:bg-zinc-200 border-zinc-200 text-zinc-700' : 'bg-zinc-800 hover:bg-zinc-750 border-zinc-700 text-zinc-300'}`}
+                                    >
+                                        <i className="fa-solid fa-arrows-rotate text-xs"></i> Reiniciar Caso
+                                    </button>
+                                    <button 
+                                        onClick={() => {
+                                            if (window.confirm("Deseja realmente cancelar esta simulação? Seu progresso será descartado.")) {
+                                                stopSpeaking(); stopSpeechRecognition(); setIsSimulating(false);
+                                            }
+                                        }}
+                                        className={`flex-1 md:flex-none px-4 py-2.5 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 active:scale-95 border ${flowchartLightMode ? 'bg-rose-50 hover:bg-rose-100 border-rose-200 text-rose-700' : 'bg-rose-950/30 hover:bg-rose-900/40 border-rose-500/30 text-rose-400'}`}
+                                    >
+                                        <i className="fa-solid fa-xmark text-xs"></i> Cancelar
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            {/* MAIN GRID */}
+                            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                                
+                                {/* LEFT COLUMN: PATIENT CLINICAL CHART (Prontuário) */}
+                                <div className="lg:col-span-5 lg:sticky lg:top-6 space-y-4">
+                                    <div className={`border rounded-[32px] overflow-hidden shadow-2xl relative ${flowchartLightMode ? 'bg-white border-zinc-200 text-zinc-800' : 'bg-gradient-to-b from-zinc-900 to-zinc-950 border-indigo-500/15 text-zinc-100'}`}>
+                                        <div className="h-1.5 w-full bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500"></div>
+                                        <div className="p-6 md:p-8 space-y-5">
+                                            <div className="flex items-center justify-between border-b pb-4 border-zinc-800/10 dark:border-zinc-800/50">
+                                                <div className="flex items-center gap-3">
+                                                    <div className={`w-11 h-11 rounded-2xl flex items-center justify-center border shadow-inner shrink-0 ${flowchartLightMode ? 'bg-red-50 border-red-200 text-red-650' : 'bg-red-950/40 border-red-500/20 text-red-400'}`}>
+                                                        <i className="fa-solid fa-file-medical text-lg"></i>
+                                                    </div>
+                                                    <div>
+                                                        <h3 className={`text-sm font-black uppercase tracking-widest leading-none ${flowchartLightMode ? 'text-zinc-900' : 'text-white'}`}>Prontuário Médico</h3>
+                                                        <p className={`text-[10px] font-bold mt-1 ${flowchartLightMode ? 'text-zinc-400' : 'text-zinc-500'}`}>Caso clínico gerado por IA</p>
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-center gap-1.5 bg-rose-500/10 px-3 py-1 rounded-full border border-rose-500/20">
+                                                    <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse"></span>
+                                                    <span className="text-[9px] font-black text-rose-550 uppercase tracking-widest">Ativo</span>
+                                                </div>
                                             </div>
-                                        )}
-                                        
-                                        {/* BIG MIC BUTTON & TOOLS BAR */}
-                                        <div className="flex items-center gap-4">
-                                            <button 
-                                                type="button"
-                                                onClick={() => setShowVoiceConfig(!showVoiceConfig)} 
-                                                className={`w-10 h-10 rounded-full border flex items-center justify-center transition-all active:scale-90 ${
-                                                    showVoiceConfig 
-                                                        ? 'bg-indigo-600 border-indigo-500 text-white shadow-md' 
-                                                        : (flowchartLightMode ? 'bg-white border-zinc-200 text-zinc-650 hover:bg-zinc-100' : 'bg-zinc-800/80 border-zinc-700 text-zinc-400 hover:text-white')
-                                                }`}
-                                                title="Configurações de Áudio e Voz"
-                                            >
-                                                <i className="fa-solid fa-sliders text-xs"></i>
-                                            </button>
 
-                                            <button 
-                                                onClick={isRecognitionActive ? stopSpeechRecognition : startSpeechRecognition} 
-                                                disabled={isEvaluating}
-                                                className={`w-16 h-16 rounded-full flex items-center justify-center text-white border-4 shadow-xl transition-all active:scale-90 disabled:opacity-40 disabled:pointer-events-none ${isRecognitionActive ? 'bg-rose-600 border-rose-500 animate-pulse shadow-rose-900/40' : 'bg-indigo-600 border-indigo-500 hover:bg-indigo-500 shadow-indigo-950/50'}`}
-                                                title="Falar resposta"
-                                            >
-                                                <i className={`fa-solid ${isRecognitionActive ? 'fa-microphone-lines text-xl animate-bounce' : 'fa-microphone text-xl'}`}></i>
-                                            </button>
+                                            {/* Patient Presentation Box - LARGE READABLE TEXT */}
+                                            <div className={`p-5 rounded-2xl border text-sm md:text-base leading-relaxed md:leading-8 font-semibold shadow-inner ${flowchartLightMode ? 'bg-zinc-50 border-zinc-200 text-zinc-850' : 'bg-zinc-950/60 border-zinc-850 text-zinc-200'}`}>
+                                                {activeReviewChat[1] ? (
+                                                    <p className="whitespace-pre-line">
+                                                        {activeReviewChat[1].text}
+                                                    </p>
+                                                ) : (
+                                                    <div className="flex flex-col items-center justify-center py-12 gap-3 text-center">
+                                                        <i className="fa-solid fa-circle-notch animate-spin text-indigo-500 text-2xl"></i>
+                                                        <p className={`text-sm font-bold ${flowchartLightMode ? 'text-zinc-500' : 'text-zinc-400'}`}>Gerando o caso clínico com IA...</p>
+                                                        <p className="text-[10px] text-zinc-550 max-w-[200px]">Aguarde enquanto estruturamos os dados do paciente.</p>
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            {/* Telemetry/Vitals Mock Box for enhanced clinical immersion */}
+                                            <div className={`grid grid-cols-3 gap-3 p-4 rounded-2xl border text-center ${flowchartLightMode ? 'bg-zinc-50/50 border-zinc-150' : 'bg-zinc-950/30 border-zinc-850/60'}`}>
+                                                <div>
+                                                    <span className="text-[8px] font-black uppercase text-zinc-500 tracking-wider">Status Fisiológico</span>
+                                                    <div className="text-xs font-black text-emerald-500 mt-1"><i className="fa-solid fa-heart-pulse mr-1"></i> Monitorado</div>
+                                                </div>
+                                                <div>
+                                                    <span className="text-[8px] font-black uppercase text-zinc-500 tracking-wider">Referência</span>
+                                                    <div className="text-xs font-black text-indigo-400 mt-1"><i className="fa-solid fa-book-medical mr-1"></i> Protocolo</div>
+                                                </div>
+                                                <div>
+                                                    <span className="text-[8px] font-black uppercase text-zinc-500 tracking-wider">Modo Simulação</span>
+                                                    <div className="text-xs font-black text-amber-500 mt-1">
+                                                        {simulationMode === 'voice' ? <><i className="fa-solid fa-microphone mr-1"></i> Voz</> : <><i className="fa-solid fa-keyboard mr-1"></i> Chat</>}
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                {/* RIGHT COLUMN: DIALOGUE & INPUTS */}
+                                <div className="lg:col-span-7 space-y-6">
+                                    <div className={`border rounded-[32px] overflow-hidden shadow-xl ${flowchartLightMode ? 'bg-white border-zinc-200' : 'bg-zinc-900 border-zinc-800'}`}>
+                                        
+                                        {/* Dialog Header */}
+                                        <div className={`px-6 py-4 border-b flex items-center justify-between ${flowchartLightMode ? 'border-zinc-100 bg-zinc-50' : 'border-zinc-800 bg-zinc-950/60'}`}>
+                                            <div className="flex items-center gap-2">
+                                                <i className={`fa-solid fa-comments text-base ${flowchartLightMode ? 'text-indigo-500' : 'text-indigo-400'}`}></i>
+                                                <span className={`text-xs font-black ${flowchartLightMode ? 'text-zinc-800' : 'text-white'}`}>Diálogo Clínico / Condutas</span>
+                                            </div>
+                                            <span className={`text-[10px] font-black border px-3 py-1 rounded-full ${flowchartLightMode ? 'text-zinc-650 bg-zinc-100 border-zinc-200' : 'text-zinc-400 bg-zinc-800 border-zinc-700/50'}`}>
+                                                {displayMessages.filter(m => m.role === 'user').length} Interações
+                                            </span>
+                                        </div>
+
+                                        {/* Scrollable chat body */}
+                                        <div className={`flex flex-col gap-6 p-6 min-h-[380px] max-h-[500px] overflow-y-auto planner-scroll ${flowchartLightMode ? 'bg-zinc-50/20' : 'bg-zinc-950/10'}`}>
+                                            {/* Note: we skip displayMessages[0] as it is the system prompt, and displayMessages[1] as it is the case presentation displayed in the left column */}
+                                            {displayMessages.slice(2).map((msg, idx) => {
+                                                const isUser = msg.role === 'user';
+                                                return (
+                                                    <div key={idx} className={`flex flex-col gap-1.5 ${isUser ? 'items-end' : 'items-start'} animate-in fade-in slide-in-from-bottom-2 duration-200`}>
+                                                        <span className={`text-[9px] font-black uppercase tracking-widest px-1.5 ${isUser ? (flowchartLightMode ? 'text-emerald-600' : 'text-emerald-400') : (flowchartLightMode ? 'text-indigo-600' : 'text-indigo-400')}`}>
+                                                            {isUser ? '👨‍⚕️ Você (Médico)' : '🤖 Mentor Clínico'}
+                                                        </span>
+                                                        <div className={`max-w-[90%] rounded-2xl px-5 py-4 shadow-sm leading-relaxed text-sm font-medium whitespace-pre-wrap ${
+                                                            isUser 
+                                                                ? 'bg-gradient-to-br from-emerald-600 to-teal-600 text-white rounded-tr-none shadow-emerald-950/20' 
+                                                                : (flowchartLightMode 
+                                                                    ? 'bg-white border border-zinc-200 text-zinc-850 rounded-tl-none' 
+                                                                    : 'bg-zinc-800 text-zinc-100 rounded-tl-none border border-zinc-700/60 shadow-lg')
+                                                        }`}>
+                                                            {msg.text}
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
                                             
-                                            {isVoiceSynthesizing ? (
-                                                <button onClick={stopSpeaking} className="w-10 h-10 rounded-full bg-zinc-850 hover:bg-zinc-800 text-rose-400 border border-zinc-800 flex items-center justify-center transition-colors shadow-md active:scale-90" title="Pausar voz da IA">
-                                                    <i className="fa-solid fa-volume-xmark text-xs"></i>
-                                                </button>
-                                            ) : (
-                                                <div className="w-10" /> /* Spacer alignment helper */
+                                            {/* Evaluating/Loading State */}
+                                            {isEvaluating && (
+                                                <div className="items-start flex flex-col gap-1.5 animate-pulse">
+                                                    <span className={`text-[9px] font-black uppercase tracking-widest px-1.5 ${flowchartLightMode ? 'text-indigo-600' : 'text-indigo-400'}`}>🤖 Mentor Clínico</span>
+                                                    <div className={`rounded-2xl rounded-tl-none px-5 py-4 shadow-md flex items-center gap-3 ${flowchartLightMode ? 'bg-white border border-zinc-200 text-zinc-600' : 'bg-zinc-800 border border-zinc-700/60 text-zinc-300'}`}>
+                                                        <i className="fa-solid fa-spinner animate-spin text-indigo-500"></i>
+                                                        <span className="text-sm font-semibold">O mentor está processando sua conduta...</span>
+                                                    </div>
+                                                </div>
+                                            )}
+                                            
+                                            {/* Empty Conversation State */}
+                                            {(!hasMessages || displayMessages.length <= 2) && !isEvaluating && activeReviewChat[1] && (
+                                                <div className="flex-1 flex flex-col items-center justify-center text-center py-12 gap-4">
+                                                    <div className={`w-16 h-16 rounded-2xl border flex items-center justify-center shadow-lg ${flowchartLightMode ? 'bg-indigo-50 border-indigo-200 text-indigo-500 animate-bounce' : 'bg-indigo-950/40 border-indigo-500/20 text-indigo-400 animate-bounce'}`}>
+                                                        <i className="fa-solid fa-arrow-left text-2xl"></i>
+                                                    </div>
+                                                    <div className="space-y-1">
+                                                        <p className={`text-base font-black ${flowchartLightMode ? 'text-zinc-800' : 'text-zinc-200'}`}>Estude o prontuário ao lado</p>
+                                                        <p className={`text-xs font-semibold max-w-[280px] mx-auto leading-relaxed ${flowchartLightMode ? 'text-zinc-500' : 'text-zinc-400'}`}>Após analisar a queixa principal e história, escreva ou fale sua conduta médica inicial.</p>
+                                                    </div>
+                                                </div>
                                             )}
                                         </div>
 
-                                        {/* VOICE CONFIG PANEL (TOOLS) */}
-                                        {showVoiceConfig && (
-                                            <div className={`w-full p-5 rounded-2xl border text-left space-y-4 animate-in slide-in-from-top-4 duration-200 mt-2 ${
-                                                flowchartLightMode 
-                                                    ? 'bg-white border-zinc-200 shadow-sm' 
-                                                    : 'bg-zinc-900/95 border-zinc-800 shadow-2xl'
-                                            }`}>
-                                                <h4 className={`text-xs font-black uppercase tracking-wider flex items-center gap-1.5 ${flowchartLightMode ? 'text-zinc-800' : 'text-white'}`}>
-                                                    <i className="fa-solid fa-gears text-indigo-500"></i> Ferramentas e Configurações de Voz
-                                                </h4>
-                                                
-                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                                    {/* ENGINE SELECTION */}
-                                                    <div className="space-y-1.5">
-                                                        <label className="text-[10px] font-black uppercase text-zinc-500 tracking-wider">Mecanismo de Voz (TTS)</label>
-                                                        <div className={`flex p-0.5 rounded-xl border ${flowchartLightMode ? 'bg-zinc-100 border-zinc-200' : 'bg-zinc-950 border-zinc-850'}`}>
-                                                            <button 
-                                                                type="button"
-                                                                onClick={() => setVoiceEngine('cloud')}
-                                                                className={`flex-1 py-1.5 rounded-lg text-[9px] font-black transition-all ${
-                                                                    voiceEngine === 'cloud' 
-                                                                        ? 'bg-indigo-600 text-white shadow-sm' 
-                                                                        : 'text-zinc-500 hover:text-zinc-400'
-                                                                }`}
-                                                            >
-                                                                ☁️ Nuvem (Natural)
+                                        {/* Interactive Controls Area */}
+                                        <div className={`border-t p-6 space-y-4 ${flowchartLightMode ? 'border-zinc-100 bg-zinc-50' : 'border-zinc-800 bg-zinc-950/60'}`}>
+                                            
+                                            {/* VOICE MODE SPECIFIC UI */}
+                                            {simulationMode === 'voice' && (
+                                                <div className="space-y-4">
+                                                    {/* Speech subtitles */}
+                                                    {isVoiceSynthesizing && currentSpeechSentence && (
+                                                        <div className={`text-center px-5 py-4 rounded-2xl text-sm font-semibold max-w-full mx-auto shadow-md leading-relaxed animate-in fade-in border ${
+                                                            flowchartLightMode 
+                                                                ? 'bg-indigo-50 border-indigo-150 text-indigo-850' 
+                                                                : 'bg-indigo-950/40 border-indigo-500/20 text-indigo-200'
+                                                        }`}>
+                                                            <i className="fa-solid fa-volume-high mr-2 text-xs text-indigo-500 animate-pulse"></i> "{currentSpeechSentence}"
+                                                        </div>
+                                                    )}
+
+                                                    {/* Voice state and meter visualizer */}
+                                                    <div className="flex flex-col items-center gap-3">
+                                                        {isVoiceSynthesizing ? (
+                                                            <div className="flex items-center justify-center gap-1.5 h-10">
+                                                                <span className="w-1.5 h-8 bg-indigo-500 rounded-full animate-bar1"></span>
+                                                                <span className="w-1.5 h-6 bg-purple-500 rounded-full animate-bar2"></span>
+                                                                <span className="w-1.5 h-8 bg-pink-500 rounded-full animate-bar3"></span>
+                                                                <span className="w-1.5 h-5 bg-purple-400 rounded-full animate-bar4"></span>
+                                                                <span className="w-1.5 h-7 bg-indigo-400 rounded-full animate-bar5"></span>
+                                                            </div>
+                                                        ) : isRecognitionActive ? (
+                                                            <div className="flex items-center gap-1.5 h-10 justify-center">
+                                                                {[...Array(12)].map((_, i) => {
+                                                                    const active = speechMicLevel > (i * 8);
+                                                                    return (
+                                                                        <div 
+                                                                            key={i} 
+                                                                            className={`w-1.5 rounded-full transition-all duration-75 ${
+                                                                                active 
+                                                                                    ? (i < 7 ? 'bg-emerald-500' : (i < 10 ? 'bg-amber-500' : 'bg-rose-500')) 
+                                                                                    : (flowchartLightMode ? 'bg-zinc-200' : 'bg-zinc-800')
+                                                                            }`}
+                                                                            style={{
+                                                                                height: active ? `${Math.min(10 + (speechMicLevel / 5) * (1 + Math.sin(i * 0.8)), 36)}px` : '6px'
+                                                                            }}
+                                                                        />
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                        ) : (
+                                                            <div className="flex items-center justify-center gap-1 h-2 w-16 bg-zinc-800 rounded-full"></div>
+                                                        )}
+                                                        
+                                                        <p className={`text-xs font-black uppercase tracking-wider ${flowchartLightMode ? 'text-zinc-500' : 'text-zinc-400'}`}>
+                                                            {isVoiceSynthesizing ? "IA Falando..." : isRecognitionActive ? "Gravando... Fale agora!" : "Aguardando sua resposta por voz"}
+                                                        </p>
+                                                    </div>
+                                                    
+                                                    {/* Recognition Transcript Area */}
+                                                    {isRecognitionActive && (
+                                                        <div className="flex flex-col items-center gap-2">
+                                                            <p className={`text-sm font-semibold text-center px-6 py-2.5 max-w-[360px] min-h-[2.5rem] select-none italic leading-relaxed ${flowchartLightMode ? 'text-rose-600' : 'text-rose-455'}`}>
+                                                                {interimTranscript ? `"${interimTranscript}"` : "Sua fala aparecerá aqui em tempo real..."}
+                                                            </p>
+                                                            {voiceAutoCorrect && (
+                                                                <span className={`text-[9px] font-black uppercase flex items-center gap-1.5 tracking-widest animate-pulse select-none ${flowchartLightMode ? 'text-emerald-600' : 'text-emerald-400'}`}>
+                                                                    <i className="fa-solid fa-wand-magic-sparkles text-[8px]"></i> Corretor Clínico Ativo
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    )}
+                                                    
+                                                    {/* Voice synthesis controls */}
+                                                    <div className="flex items-center justify-center gap-5">
+                                                        <button 
+                                                            type="button"
+                                                            onClick={() => setShowVoiceConfig(!showVoiceConfig)} 
+                                                            className={`w-12 h-12 rounded-full border flex items-center justify-center transition-all active:scale-90 shadow-md ${
+                                                                showVoiceConfig 
+                                                                    ? 'bg-indigo-600 border-indigo-500 text-white shadow-lg' 
+                                                                    : (flowchartLightMode ? 'bg-white border-zinc-200 text-zinc-650 hover:bg-zinc-100' : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-white')
+                                                            }`}
+                                                            title="Configurações de Áudio e Voz"
+                                                        >
+                                                            <i className="fa-solid fa-sliders text-sm"></i>
+                                                        </button>
+ 
+                                                        <button 
+                                                            onClick={isRecognitionActive ? stopSpeechRecognition : startSpeechRecognition} 
+                                                            disabled={isEvaluating}
+                                                            className={`w-20 h-20 rounded-full flex items-center justify-center text-white border-4 shadow-2xl transition-all active:scale-90 disabled:opacity-40 disabled:pointer-events-none ${isRecognitionActive ? 'bg-rose-600 border-rose-500 animate-pulse shadow-rose-900/30' : 'bg-indigo-600 border-indigo-500 hover:bg-indigo-500 shadow-indigo-950/40'}`}
+                                                            title="Gravar resposta"
+                                                        >
+                                                            <i className={`fa-solid ${isRecognitionActive ? 'fa-microphone-lines text-3xl animate-bounce' : 'fa-microphone text-3xl'}`}></i>
+                                                        </button>
+                                                        
+                                                        {isVoiceSynthesizing ? (
+                                                            <button onClick={stopSpeaking} className={`w-12 h-12 rounded-full flex items-center justify-center transition-colors shadow-md active:scale-90 border ${flowchartLightMode ? 'bg-white border-zinc-200 text-rose-500 hover:bg-rose-50' : 'bg-zinc-800 hover:bg-zinc-700 text-rose-450 border-zinc-700'}`} title="Parar voz da IA">
+                                                                <i className="fa-solid fa-volume-xmark text-sm"></i>
                                                             </button>
-                                                            <button 
-                                                                type="button"
-                                                                onClick={() => setVoiceEngine('system')}
-                                                                className={`flex-1 py-1.5 rounded-lg text-[9px] font-black transition-all ${
-                                                                    voiceEngine === 'system' 
-                                                                        ? 'bg-indigo-600 text-white shadow-sm' 
-                                                                        : 'text-zinc-500 hover:text-zinc-400'
-                                                                }`}
-                                                            >
-                                                                🖥️ Sistema (Offline)
-                                                            </button>
-                                                        </div>
+                                                        ) : (
+                                                            <div className="w-12" />
+                                                        )}
                                                     </div>
 
-                                                    {/* AUTO SEND TOGGLE */}
-                                                    <div className="space-y-1.5">
-                                                        <label className="text-[10px] font-black uppercase text-zinc-500 tracking-wider">Envio de Mensagem</label>
-                                                        <div className={`flex p-0.5 rounded-xl border ${flowchartLightMode ? 'bg-zinc-100 border-zinc-200' : 'bg-zinc-950 border-zinc-850'}`}>
-                                                            <button 
-                                                                type="button"
-                                                                onClick={() => setVoiceAutoSend(true)}
-                                                                className={`flex-1 py-1.5 rounded-lg text-[9px] font-black transition-all ${
-                                                                    voiceAutoSend 
-                                                                        ? 'bg-indigo-600 text-white shadow-sm' 
-                                                                        : 'text-zinc-500 hover:text-zinc-400'
-                                                                }`}
-                                                            >
-                                                                ⚡ Auto (Silêncio)
-                                                            </button>
-                                                            <button 
-                                                                type="button"
-                                                                onClick={() => setVoiceAutoSend(false)}
-                                                                className={`flex-1 py-1.5 rounded-lg text-[9px] font-black transition-all ${
-                                                                    !voiceAutoSend 
-                                                                        ? 'bg-indigo-600 text-white shadow-sm' 
-                                                                        : 'text-zinc-500 hover:text-zinc-400'
-                                                                }`}
-                                                            >
-                                                                ⌨️ Manual (Enter)
-                                                            </button>
-                                                        </div>
-                                                    </div>
+                                                    {/* Voice Settings Panel (inside voice mode) */}
+                                                    {showVoiceConfig && (
+                                                        <div className={`w-full p-5 rounded-2xl border text-left space-y-4 animate-in slide-in-from-top-4 duration-250 ${
+                                                            flowchartLightMode 
+                                                                ? 'bg-white border-zinc-200 shadow-sm' 
+                                                                : 'bg-zinc-900 border-zinc-800 shadow-2xl'
+                                                        }`}>
+                                                            <h4 className={`text-xs font-black uppercase tracking-wider flex items-center gap-1.5 ${flowchartLightMode ? 'text-zinc-850' : 'text-white'}`}>
+                                                                <i className="fa-solid fa-gears text-indigo-500"></i> Ferramentas e Configurações de Voz
+                                                            </h4>
+                                                            
+                                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                                <div className="space-y-1.5">
+                                                                    <label className="text-[10px] font-black uppercase text-zinc-500 tracking-wider">Mecanismo de Voz (TTS)</label>
+                                                                    <div className={`flex p-0.5 rounded-xl border ${flowchartLightMode ? 'bg-zinc-100 border-zinc-200' : 'bg-zinc-950 border-zinc-850'}`}>
+                                                                        <button 
+                                                                            type="button"
+                                                                            onClick={() => setVoiceEngine('cloud')}
+                                                                            className={`flex-1 py-1.5 rounded-lg text-[9px] font-black transition-all ${
+                                                                                voiceEngine === 'cloud' ? 'bg-indigo-600 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-400'
+                                                                            }`}
+                                                                        >
+                                                                            ☁️ Nuvem (Natural)
+                                                                        </button>
+                                                                        <button 
+                                                                            type="button"
+                                                                            onClick={() => setVoiceEngine('system')}
+                                                                            className={`flex-1 py-1.5 rounded-lg text-[9px] font-black transition-all ${
+                                                                                voiceEngine === 'system' ? 'bg-indigo-600 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-400'
+                                                                            }`}
+                                                                        >
+                                                                            🖥️ Sistema (Offline)
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
 
-                                                    {/* CLINICAL SPEECH CORRECTOR TOGGLE */}
-                                                    <div className="space-y-1.5">
-                                                        <label className="text-[10px] font-black uppercase text-zinc-500 tracking-wider">Corretor Cl&iacute;nico (Voz)</label>
-                                                        <div className={`flex p-0.5 rounded-xl border ${flowchartLightMode ? 'bg-zinc-100 border-zinc-200' : 'bg-zinc-950 border-zinc-850'}`}>
-                                                            <button 
-                                                                type="button"
-                                                                onClick={() => setVoiceAutoCorrect(true)}
-                                                                className={`flex-1 py-1.5 rounded-lg text-[9px] font-black transition-all ${
-                                                                    voiceAutoCorrect 
-                                                                        ? 'bg-indigo-600 text-white shadow-sm' 
-                                                                        : 'text-zinc-500 hover:text-zinc-400'
-                                                                }`}
-                                                            >
-                                                                ✨ Ativo
-                                                            </button>
-                                                            <button 
-                                                                type="button"
-                                                                onClick={() => setVoiceAutoCorrect(false)}
-                                                                className={`flex-1 py-1.5 rounded-lg text-[9px] font-black transition-all ${
-                                                                    !voiceAutoCorrect 
-                                                                        ? 'bg-indigo-600 text-white shadow-sm' 
-                                                                        : 'text-zinc-500 hover:text-zinc-400'
-                                                                }`}
-                                                            >
-                                                                🚫 Inativo
-                                                            </button>
-                                                        </div>
-                                                    </div>
+                                                                <div className="space-y-1.5">
+                                                                    <label className="text-[10px] font-black uppercase text-zinc-500 tracking-wider">Envio de Mensagem</label>
+                                                                    <div className={`flex p-0.5 rounded-xl border ${flowchartLightMode ? 'bg-zinc-100 border-zinc-200' : 'bg-zinc-950 border-zinc-850'}`}>
+                                                                        <button 
+                                                                            type="button"
+                                                                            onClick={() => setVoiceAutoSend(true)}
+                                                                            className={`flex-1 py-1.5 rounded-lg text-[9px] font-black transition-all ${
+                                                                                voiceAutoSend ? 'bg-indigo-600 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-400'
+                                                                            }`}
+                                                                        >
+                                                                            ⚡ Auto (Silêncio)
+                                                                        </button>
+                                                                        <button 
+                                                                            type="button"
+                                                                            onClick={() => setVoiceAutoSend(false)}
+                                                                            className={`flex-1 py-1.5 rounded-lg text-[9px] font-black transition-all ${
+                                                                                !voiceAutoSend ? 'bg-indigo-600 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-400'
+                                                                            }`}
+                                                                        >
+                                                                            ⌨️ Manual (Enter)
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
 
-                                                    {/* SILENCE DETECTION AUTO-SEND TIMEOUT */}
-                                                    <div className={`space-y-1.5 ${!voiceAutoSend ? 'opacity-40 pointer-events-none' : ''}`}>
-                                                        <div className="flex justify-between items-center">
-                                                            <label className="text-[10px] font-black uppercase text-zinc-500 tracking-wider">Silêncio de Envio</label>
-                                                            <span className="text-[10px] font-black text-indigo-500">{(silenceThreshold / 1000).toFixed(1)}s</span>
-                                                        </div>
-                                                        <input 
-                                                            type="range" 
-                                                            disabled={!voiceAutoSend}
-                                                            min="1000" 
-                                                            max="4000" 
-                                                            step="200"
-                                                            value={silenceThreshold}
-                                                            onChange={(e) => setSilenceThreshold(Number(e.target.value))}
-                                                            className="w-full accent-indigo-600 cursor-pointer"
-                                                        />
-                                                        <span className="text-[8px] font-semibold text-zinc-500 block leading-none">Atraso antes de enviar sua resposta ao parar de falar.</span>
-                                                    </div>
+                                                                <div className="space-y-1.5">
+                                                                    <label className="text-[10px] font-black uppercase text-zinc-500 tracking-wider">Corretor Clínico (Voz)</label>
+                                                                    <div className={`flex p-0.5 rounded-xl border ${flowchartLightMode ? 'bg-zinc-100 border-zinc-200' : 'bg-zinc-950 border-zinc-850'}`}>
+                                                                        <button 
+                                                                            type="button"
+                                                                            onClick={() => setVoiceAutoCorrect(true)}
+                                                                            className={`flex-1 py-1.5 rounded-lg text-[9px] font-black transition-all ${
+                                                                                voiceAutoCorrect ? 'bg-indigo-600 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-400'
+                                                                            }`}
+                                                                        >
+                                                                            ✨ Ativo
+                                                                        </button>
+                                                                        <button 
+                                                                            type="button"
+                                                                            onClick={() => setVoiceAutoCorrect(false)}
+                                                                            className={`flex-1 py-1.5 rounded-lg text-[9px] font-black transition-all ${
+                                                                                !voiceAutoCorrect ? 'bg-indigo-600 text-white shadow-sm' : 'text-zinc-500 hover:text-zinc-400'
+                                                                            }`}
+                                                                        >
+                                                                            🚫 Inativo
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
 
-                                                    {/* SPEED SLIDER */}
-                                                    <div className="space-y-1.5">
-                                                        <div className="flex justify-between items-center">
-                                                            <label className="text-[10px] font-black uppercase text-zinc-500 tracking-wider">Velocidade da Voz</label>
-                                                            <span className="text-[10px] font-black text-indigo-500">{voiceRate}x</span>
-                                                        </div>
-                                                        <input 
-                                                            type="range" 
-                                                            min="0.6" 
-                                                            max="1.5" 
-                                                            step="0.05"
-                                                            value={voiceRate}
-                                                            onChange={(e) => setVoiceRate(Number(e.target.value))}
-                                                            className="w-full accent-indigo-600 cursor-pointer"
-                                                        />
-                                                    </div>
+                                                                <div className={`space-y-1.5 ${!voiceAutoSend ? 'opacity-40 pointer-events-none' : ''}`}>
+                                                                    <div className="flex justify-between items-center">
+                                                                        <label className="text-[10px] font-black uppercase text-zinc-500 tracking-wider">Silêncio de Envio</label>
+                                                                        <span className="text-[10px] font-black text-indigo-500">{(silenceThreshold / 1000).toFixed(1)}s</span>
+                                                                    </div>
+                                                                    <input 
+                                                                        type="range" 
+                                                                        disabled={!voiceAutoSend}
+                                                                        min="1000" 
+                                                                        max="4000" 
+                                                                        step="200"
+                                                                        value={silenceThreshold}
+                                                                        onChange={(e) => setSilenceThreshold(Number(e.target.value))}
+                                                                        className="w-full accent-indigo-600 cursor-pointer"
+                                                                    />
+                                                                </div>
 
-                                                    {/* PITCH SLIDER */}
-                                                    <div className="space-y-1.5">
-                                                        <div className="flex justify-between items-center">
-                                                            <label className="text-[10px] font-black uppercase text-zinc-500 tracking-wider">Tom da Voz (Pitch)</label>
-                                                            <span className="text-[10px] font-black text-indigo-500">{voicePitch}</span>
-                                                        </div>
-                                                        <input 
-                                                            type="range" 
-                                                            disabled={voiceEngine === 'cloud'}
-                                                            min="0.5" 
-                                                            max="1.5" 
-                                                            step="0.05"
-                                                            value={voicePitch}
-                                                            onChange={(e) => setVoicePitch(Number(e.target.value))}
-                                                            className="w-full accent-indigo-600 cursor-pointer disabled:opacity-40"
-                                                        />
-                                                    </div>
+                                                                <div className="space-y-1.5">
+                                                                    <div className="flex justify-between items-center">
+                                                                        <label className="text-[10px] font-black uppercase text-zinc-500 tracking-wider">Velocidade da Voz</label>
+                                                                        <span className="text-[10px] font-black text-indigo-500">{voiceRate}x</span>
+                                                                    </div>
+                                                                    <input 
+                                                                        type="range" 
+                                                                        min="0.6" 
+                                                                        max="1.5" 
+                                                                        step="0.05"
+                                                                        value={voiceRate}
+                                                                        onChange={(e) => setVoiceRate(Number(e.target.value))}
+                                                                        className="w-full accent-indigo-600 cursor-pointer"
+                                                                    />
+                                                                </div>
 
-                                                    {/* VOLUME SLIDER */}
-                                                    <div className="space-y-1.5">
-                                                        <div className="flex justify-between items-center">
-                                                            <label className="text-[10px] font-black uppercase text-zinc-500 tracking-wider">Volume</label>
-                                                            <span className="text-[10px] font-black text-indigo-500">{Math.round(voiceVolume * 100)}%</span>
-                                                        </div>
-                                                        <input 
-                                                            type="range" 
-                                                            min="0" 
-                                                            max="1" 
-                                                            step="0.05"
-                                                            value={voiceVolume}
-                                                            onChange={(e) => setVoiceVolume(Number(e.target.value))}
-                                                            className="w-full accent-indigo-600 cursor-pointer"
-                                                        />
-                                                    </div>
+                                                                <div className="space-y-1.5">
+                                                                    <div className="flex justify-between items-center">
+                                                                        <label className="text-[10px] font-black uppercase text-zinc-500 tracking-wider">Tom da Voz (Pitch)</label>
+                                                                        <span className="text-[10px] font-black text-indigo-500">{voicePitch}</span>
+                                                                    </div>
+                                                                    <input 
+                                                                        type="range" 
+                                                                        disabled={voiceEngine === 'cloud'}
+                                                                        min="0.5" 
+                                                                        max="1.5" 
+                                                                        step="0.05"
+                                                                        value={voicePitch}
+                                                                        onChange={(e) => setVoicePitch(Number(e.target.value))}
+                                                                        className="w-full accent-indigo-600 cursor-pointer disabled:opacity-40"
+                                                                    />
+                                                                </div>
 
-                                                    {/* BROWSER VOICE SELECTOR (Visible only if system selected) */}
-                                                    {voiceEngine === 'system' && (
-                                                        <div className="space-y-1.5 md:col-span-2">
-                                                            <label className="text-[10px] font-black uppercase text-zinc-500 tracking-wider block">Selecione a Voz do Sistema</label>
-                                                            <select 
-                                                                value={selectedVoiceName}
-                                                                onChange={(e) => setSelectedVoiceName(e.target.value)}
-                                                                className={`w-full p-2.5 border rounded-xl outline-none text-[11px] font-bold ${
-                                                                    flowchartLightMode 
-                                                                        ? 'bg-zinc-100 border-zinc-200 text-zinc-800' 
-                                                                        : 'bg-zinc-950 border-zinc-850 text-white'
-                                                                }`}
-                                                            >
-                                                                <option value="">Voz Padrão Otimizada</option>
-                                                                {availableVoices.filter(v => v.lang.startsWith('pt')).map(v => (
-                                                                    <option key={v.name} value={v.name}>{v.name} ({v.lang})</option>
-                                                                ))}
-                                                            </select>
+                                                                <div className="space-y-1.5">
+                                                                    <div className="flex justify-between items-center">
+                                                                        <label className="text-[10px] font-black uppercase text-zinc-500 tracking-wider">Volume</label>
+                                                                        <span className="text-[10px] font-black text-indigo-500">{Math.round(voiceVolume * 100)}%</span>
+                                                                    </div>
+                                                                    <input 
+                                                                        type="range" 
+                                                                        min="0" 
+                                                                        max="1" 
+                                                                        step="0.05"
+                                                                        value={voiceVolume}
+                                                                        onChange={(e) => setVoiceVolume(Number(e.target.value))}
+                                                                        className="w-full accent-indigo-600 cursor-pointer"
+                                                                    />
+                                                                </div>
+
+                                                                {voiceEngine === 'system' && (
+                                                                    <div className="space-y-1.5 md:col-span-2">
+                                                                        <label className="text-[10px] font-black uppercase text-zinc-500 tracking-wider block">Selecione a Voz do Sistema</label>
+                                                                        <select 
+                                                                            value={selectedVoiceName}
+                                                                            onChange={(e) => setSelectedVoiceName(e.target.value)}
+                                                                            className={`w-full p-2.5 border rounded-xl outline-none text-[11px] font-bold ${
+                                                                                flowchartLightMode ? 'bg-zinc-100 border-zinc-200 text-zinc-800' : 'bg-zinc-950 border-zinc-850 text-white'
+                                                                            }`}
+                                                                        >
+                                                                            <option value="">Voz Padrão Otimizada</option>
+                                                                            {availableVoices.filter(v => v.lang.startsWith('pt')).map(v => (
+                                                                                <option key={v.name} value={v.name}>{v.name} ({v.lang})</option>
+                                                                            ))}
+                                                                        </select>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+
+                                                            <div className="flex gap-2 pt-2.5 border-t border-zinc-800/20 justify-between items-center flex-wrap">
+                                                                <span className="text-[8px] font-bold text-zinc-500 max-w-[200px]">Para melhor performance de voz, utilize o Google Chrome ou Edge.</span>
+                                                                <div className="flex gap-1.5">
+                                                                    <button 
+                                                                        type="button"
+                                                                        onClick={handleTestVoice}
+                                                                        className={`px-2.5 py-1.5 rounded-xl border text-[9px] font-black uppercase tracking-wider transition-all flex items-center gap-1 active:scale-95 ${
+                                                                            flowchartLightMode ? 'bg-zinc-100 hover:bg-zinc-200 border-zinc-200 text-zinc-700' : 'bg-zinc-800 hover:bg-zinc-750 border-zinc-700 text-zinc-300'
+                                                                        }`}
+                                                                    >
+                                                                        <i className="fa-solid fa-volume-high"></i> Testar Voz
+                                                                    </button>
+                                                                    <button 
+                                                                        type="button"
+                                                                        onClick={async () => {
+                                                                            try {
+                                                                                await navigator.mediaDevices.getUserMedia({ audio: true });
+                                                                                alert("🎤 Microfone autorizado!");
+                                                                            } catch(err) {
+                                                                                alert("❌ Erro de microfone: " + err.message);
+                                                                            }
+                                                                        }}
+                                                                        className={`px-2.5 py-1.5 rounded-xl border text-[9px] font-black uppercase tracking-wider transition-all flex items-center gap-1 active:scale-95 ${
+                                                                            flowchartLightMode ? 'bg-zinc-100 hover:bg-zinc-200 border-zinc-200 text-zinc-700' : 'bg-zinc-800 hover:bg-zinc-750 border-zinc-700 text-zinc-300'
+                                                                        }`}
+                                                                    >
+                                                                        <i className="fa-solid fa-microphone"></i> Testar Mic
+                                                                    </button>
+                                                                </div>
+                                                            </div>
                                                         </div>
                                                     )}
                                                 </div>
+                                            )}
 
-                                                <div className="flex gap-2 pt-2.5 border-t border-zinc-800/20 justify-between items-center flex-wrap">
-                                                    <span className="text-[8px] font-bold text-zinc-500 max-w-[200px]">Para melhor performance de voz, utilize o Google Chrome ou Edge.</span>
-                                                    <div className="flex gap-1.5">
-                                                        <button 
-                                                            type="button"
-                                                            onClick={handleTestVoice}
-                                                            className={`px-2.5 py-1.5 rounded-xl border text-[9px] font-black uppercase tracking-wider transition-all flex items-center gap-1 active:scale-95 ${
-                                                                flowchartLightMode 
-                                                                    ? 'bg-zinc-100 hover:bg-zinc-200 border-zinc-200 text-zinc-700' 
-                                                                    : 'bg-zinc-800 hover:bg-zinc-750 border-zinc-700 text-zinc-300 hover:text-white'
-                                                            }`}
-                                                        >
-                                                            <i className="fa-solid fa-volume-high"></i> Testar Voz
-                                                        </button>
-                                                        <button 
-                                                            type="button"
-                                                            onClick={async () => {
-                                                                try {
-                                                                    await navigator.mediaDevices.getUserMedia({ audio: true });
-                                                                    alert("🎤 Microfone autorizado e ativo!");
-                                                                } catch(err) {
-                                                                    alert("❌ Microfone negado ou ocupado: " + err.message);
-                                                                }
-                                                            }}
-                                                            className={`px-2.5 py-1.5 rounded-xl border text-[9px] font-black uppercase tracking-wider transition-all flex items-center gap-1 active:scale-95 ${
-                                                                flowchartLightMode 
-                                                                    ? 'bg-zinc-100 hover:bg-zinc-200 border-zinc-200 text-zinc-700' 
-                                                                    : 'bg-zinc-800 hover:bg-zinc-750 border-zinc-700 text-zinc-300 hover:text-white'
-                                                            }`}
-                                                        >
-                                                            <i className="fa-solid fa-microphone"></i> Testar Mic
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            </div>
+                                            {/* PDF UPLOAD INPUT ELEMENT (hidden) */}
+                                            <input type="file" id="sim-pdf-upload" accept="application/pdf" className="hidden" onChange={async (e) => {
+                                                const file = e.target.files?.[0];
+                                                if (!file) return;
+                                                setSimulationPdfFile(file);
+                                                setIsReadingPdf(true);
+                                                try {
+                                                    const arrayBuffer = await file.arrayBuffer();
+                                                    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+                                                    let fullText = '';
+                                                    for (let i = 1; i <= Math.min(pdf.numPages, 30); i++) {
+                                                        const page = await pdf.getPage(i);
+                                                        const tc = await page.getTextContent();
+                                                        fullText += tc.items.map(item => item.str).join(' ') + '\n';
+                                                    }
+                                                    setSimulationPdfText(fullText);
+                                                } catch(err) {
+                                                    console.error('PDF read error:', err);
+                                                    alert('Erro ao ler o PDF. Tente novamente.');
+                                                    setSimulationPdfFile(null);
+                                                } finally {
+                                                    setIsReadingPdf(false);
+                                                }
+                                            }} />
+
+                                            {/* TEXT CHAT INPUT FORM */}
+                                            <form 
+                                                onSubmit={(e) => { e.preventDefault(); handleSendReviewChatMessage(chatInputText); }}
+                                                className="flex gap-2.5"
+                                            >
+                                                <input 
+                                                    type="text" 
+                                                    value={chatInputText} 
+                                                    onChange={(e) => {
+                                                        setChatInputText(e.target.value);
+                                                        if (isRecognitionActive) stopSpeechRecognition();
+                                                    }} 
+                                                    onFocus={() => { if (isRecognitionActive) stopSpeechRecognition(); }}
+                                                    disabled={isEvaluating}
+                                                    placeholder={simulationMode === 'voice' ? "Ou digite sua conduta/pergunta aqui..." : "Digite sua conduta médica ou pergunta..."}
+                                                    className={`flex-1 px-5 py-3.5 border rounded-2xl text-sm font-medium outline-none focus:border-indigo-500 shadow-inner disabled:opacity-50 ${flowchartLightMode ? 'bg-white border-zinc-200 text-zinc-900 placeholder-zinc-400 focus:ring-1 focus:ring-indigo-500' : 'bg-zinc-950 border-zinc-800 text-white placeholder-zinc-500'}`}
+                                                />
+                                                <button 
+                                                    type="submit" 
+                                                    disabled={isEvaluating || !chatInputText.trim()}
+                                                    className="px-5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-zinc-850 disabled:text-zinc-650 disabled:pointer-events-none text-white rounded-2xl font-black text-sm shadow-lg transition-colors flex items-center justify-center gap-1.5 shrink-0 active:scale-95"
+                                                >
+                                                    <i className="fa-solid fa-paper-plane text-sm"></i>
+                                                </button>
+                                            </form>
+
+                                            {/* PDF ATTACHMENT ROW */}
+                                            <div className="flex gap-2 items-center">
+                                                <button 
+                                                    type="button" 
+                                                    onClick={() => document.getElementById('sim-pdf-upload').click()} 
+                                                    disabled={isReadingPdf}
+                                                    className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 ${simulationPdfFile ? 'bg-indigo-600 text-white' : (flowchartLightMode ? 'bg-zinc-150 hover:bg-zinc-250 border border-zinc-255 text-zinc-600 animate-pulse' : 'bg-zinc-850 hover:bg-zinc-800 border border-zinc-800 text-zinc-400')}`}
+                                                >
+                                                    {isReadingPdf ? (
+                                                        <><i className="fa-solid fa-spinner animate-spin"></i> Lendo...</>
+                                                    ) : simulationPdfFile ? (
+                                                        <><i className="fa-solid fa-file-pdf text-emerald-300"></i> {simulationPdfFile.name.substring(0, 18)}...</>
+                                                    ) : (
+                                                        <><i className="fa-solid fa-file-pdf"></i> Anexar PDF Diretriz</>
+                                                    )}
+                                                </button>
+                                                {simulationPdfFile && (
+                                                    <button 
+                                                        type="button" 
+                                                        onClick={() => {
+                                                            setSimulationPdfFile(null);
+                                                            setSimulationPdfText('');
+                                                            document.getElementById('sim-pdf-upload').value = '';
+                                                        }}
+                                                        className="p-2.5 bg-rose-500/10 hover:bg-rose-600 text-rose-450 hover:text-white rounded-xl transition-colors border border-rose-500/25"
+                                                        title="Remover PDF"
+                                                    >
+                                                        <i className="fa-solid fa-trash text-xs"></i>
+                                                    </button>
+                                            onClick={() => document.getElementById('sim-pdf-upload').click()} 
+                                            disabled={isReadingPdf}
+                                            className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 ${simulationPdfFile ? 'bg-indigo-600 text-white' : (flowchartLightMode ? 'bg-zinc-100 hover:bg-zinc-200 border border-zinc-200 text-zinc-600' : 'bg-zinc-800 hover:bg-zinc-700 border border-zinc-700 text-zinc-400')}`}
+                                        >
+                                            {isReadingPdf ? (
+                                                <><i className="fa-solid fa-spinner animate-spin"></i> Lendo...</>
+                                            ) : simulationPdfFile ? (
+                                                <><i className="fa-solid fa-file-pdf text-emerald-300"></i> {simulationPdfFile.name.substring(0, 18)}...</>
+                                            ) : (
+                                                <><i className="fa-solid fa-file-pdf"></i> Anexar PDF Diretriz</>
+                                            )}
+                                        </button>
+                                        {simulationPdfFile && (
+                                            <button 
+                                                type="button" 
+                                                onClick={() => {
+                                                    setSimulationPdfFile(null);
+                                                    setSimulationPdfText('');
+                                                    document.getElementById('sim-pdf-upload').value = '';
+                                                }}
+                                                className="p-2.5 bg-rose-500/10 hover:bg-rose-600 text-rose-450 hover:text-white rounded-xl transition-colors border border-rose-500/25"
+                                                title="Remover PDF"
+                                            >
+                                                <i className="fa-solid fa-trash text-xs"></i>
+                                            </button>
                                         )}
                                     </div>
-                                ) : null}
-                                
-                                {/* STANDARD TEXT FIELD INPUT (Active in both modes) */}
-                                <form 
-                                    onSubmit={(e) => { e.preventDefault(); handleSendReviewChatMessage(chatInputText); }}
-                                    className="flex gap-2 mt-3"
-                                >
-                                    <input 
-                                        type="text" 
-                                        value={chatInputText} 
-                                        onChange={(e) => {
-                                            setChatInputText(e.target.value);
-                                            if (isRecognitionActive) {
-                                                stopSpeechRecognition();
-                                            }
-                                        }} 
-                                        onFocus={() => {
-                                            if (isRecognitionActive) {
-                                                stopSpeechRecognition();
-                                            }
-                                        }}
-                                        disabled={isEvaluating}
-                                        placeholder={simulationMode === 'voice' ? "Ou digite sua conduta/pergunta aqui..." : "Digite sua conduta médica ou pergunta..."}
-                                        className={`flex-1 px-4 py-3 border rounded-2xl text-xs font-bold outline-none focus:border-indigo-500 shadow-inner disabled:opacity-50 animate-in fade-in ${flowchartLightMode ? 'bg-white border-zinc-200 text-zinc-850 placeholder-zinc-400 focus:ring-1 focus:ring-indigo-500' : 'bg-zinc-950 border-zinc-855 text-white placeholder-zinc-500'}`}
-                                    />
-                                    <button 
-                                        type="submit" 
-                                        disabled={isEvaluating || !chatInputText.trim()}
-                                        className="px-5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-zinc-850 disabled:text-zinc-600 disabled:pointer-events-none text-white rounded-2xl font-black text-xs shadow-lg transition-colors flex items-center justify-center gap-1.5 shrink-0 active:scale-95"
-                                    >
-                                        <i className="fa-solid fa-paper-plane text-xs"></i> Enviar
-                                    </button>
-                                </form>
+                                </div>
                             </div>
                             
-                            {/* EVALUATOR TERMINATION BOX */}
+                            {/* ═══════════════════════════════════════════════════════════ */}
+                            {/* BOTÕES DE AÇÃO                                             */}
+                            {/* ═══════════════════════════════════════════════════════════ */}
                             <div className="flex gap-3">
                                 <button 
                                     onClick={() => {
@@ -4344,12 +4557,6 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                             stopSpeaking(); stopSpeechRecognition(); setIsSimulating(false);
                                         }
                                     }}
-                                    className="flex-1 py-3.5 bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 text-zinc-400 hover:text-white font-black rounded-2xl text-xs transition-colors active:scale-95 flex items-center justify-center gap-1.5"
-                                >
-                                    <i className="fa-solid fa-xmark text-xs"></i> Cancelar Caso
-                                </button>
-                                
-                                <button 
                                     onClick={() => {
                                         if (window.confirm("Deseja gerar um novo caso clínico para este tema? O progresso do caso atual será descartado.")) {
                                             handleStartSimulation(simulationMode);
@@ -4620,6 +4827,46 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                                 </button>
                                             );
                                         })}
+                                        
+                                        {/* Custom Focus Option */}
+                                        <button
+                                            onClick={() => setSelectedFocusId('custom')}
+                                            className={`w-full text-left p-4 rounded-2xl border-2 transition-all duration-200 flex items-start gap-3.5 group ${
+                                                selectedFocusId === 'custom' 
+                                                    ? 'bg-indigo-500/15 border-indigo-500 shadow-lg' 
+                                                    : `${flowchartLightMode ? 'bg-zinc-50 border-zinc-200 hover:border-zinc-300' : 'bg-zinc-950/50 border-zinc-800 hover:border-zinc-700'}`
+                                            }`}
+                                        >
+                                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 transition-colors ${selectedFocusId === 'custom' ? 'bg-indigo-500/20' : (flowchartLightMode ? 'bg-zinc-100' : 'bg-zinc-900')}`}>
+                                                <i className={`fa-solid fa-pen-to-square text-sm ${selectedFocusId === 'custom' ? 'text-indigo-400' : 'text-zinc-500'}`}></i>
+                                            </div>
+                                            <div className="flex-1 min-w-0">
+                                                <div className="flex items-center gap-2">
+                                                    <span className={`font-black text-xs ${selectedFocusId === 'custom' ? (flowchartLightMode ? 'text-zinc-900' : 'text-white') : (flowchartLightMode ? 'text-zinc-750' : 'text-zinc-300')}`}>✏️ Escrever meu próprio foco</span>
+                                                    {selectedFocusId === 'custom' && (
+                                                        <span className="text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400">Selecionado</span>
+                                                    )}
+                                                </div>
+                                                <p className={`text-[10px] font-semibold mt-1 leading-relaxed ${flowchartLightMode ? 'text-zinc-500' : 'text-zinc-500'}`}>Descreva em texto livre qual conduta ou trecho específico do fluxograma você quer revisar.</p>
+                                            </div>
+                                            <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 mt-0.5 transition-all ${
+                                                selectedFocusId === 'custom' ? 'border-indigo-500 bg-indigo-500/10' : (flowchartLightMode ? 'border-zinc-300' : 'border-zinc-700')
+                                            }`}>
+                                                {selectedFocusId === 'custom' && <div className="w-2 h-2 rounded-full bg-indigo-500"></div>}
+                                            </div>
+                                        </button>
+
+                                        {selectedFocusId === 'custom' && (
+                                            <div className="mt-3 animate-in slide-in-from-top-2 duration-200">
+                                                <textarea
+                                                    value={customFocusText}
+                                                    onChange={(e) => setCustomFocusText(e.target.value)}
+                                                    placeholder="Ex: Quero focar na abordagem de choque obstrutivo e na escolha de drogas vasoativas..."
+                                                    className={`w-full p-4 border rounded-2xl outline-none text-xs font-black shadow-inner focus:border-indigo-500 transition-colors ${flowchartLightMode ? 'bg-white border-zinc-200 text-zinc-800' : 'bg-zinc-950 border-zinc-850 text-white'}`}
+                                                    rows="3"
+                                                />
+                                            </div>
+                                        )}
                                     </div>
                                     
                                     {/* Footer */}
@@ -4629,7 +4876,7 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                             className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-black py-3.5 rounded-2xl shadow-xl shadow-indigo-950/40 border border-indigo-400/20 transition-all hover:shadow-indigo-500/20 active:scale-95 flex items-center justify-center gap-2 text-sm"
                                         >
                                             <i className="fa-solid fa-play"></i> 
-                                            {selectedFocusId === 'full' ? 'Iniciar Revisão Completa' : `Iniciar com Foco: ${focusSuggestions.find(s => s.id === selectedFocusId)?.label || ''}`}
+                                            {selectedFocusId === 'full' ? 'Iniciar Revisão Completa' : (selectedFocusId === 'custom' ? 'Iniciar com Foco Personalizado' : `Iniciar com Foco: ${focusSuggestions.find(s => s.id === selectedFocusId)?.label || ''}`)}
                                         </button>
                                     </div>
                                 </div>
