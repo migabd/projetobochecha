@@ -759,7 +759,7 @@
             );
         });
 
-const FluxogramasTab = React.memo(({ fluxogramas = [], setDb, callIA, extractTextFromPDF, aiConfig, setAiConfig, availableModels = [] }) => {
+const FluxogramasTab = React.memo(({ db, fluxogramas = [], setDb, callIA, extractTextFromPDF, aiConfig, setAiConfig, availableModels = [] }) => {
             const [view, setView] = React.useState('decks');
             const [selectedDeck, setSelectedDeck] = React.useState(null);
             const [selectedFlow, setSelectedFlow] = React.useState(null);
@@ -17342,7 +17342,7 @@ ${(obj.questoesAnalisadas || []).map(q => `### ${q.identificacao}
                     );
                     case 'resumos_html': return renderResumosHtmlTab();
                     case 'analise_reversa': return renderReverseAnalysisTab();
-                    case 'fluxogramas': return <FluxogramasTab fluxogramas={db.fluxogramas} setDb={setDb} callIA={callIA} extractTextFromPDF={window.extractTextFromPDF || extractTextFromPDF} aiConfig={aiConfig} setAiConfig={setAiConfig} availableModels={availableModels} />;
+                    case 'fluxogramas': return <FluxogramasTab db={db} fluxogramas={db.fluxogramas} setDb={setDb} callIA={callIA} extractTextFromPDF={window.extractTextFromPDF || extractTextFromPDF} aiConfig={aiConfig} setAiConfig={setAiConfig} availableModels={availableModels} />;
                     case 'desafio_diario': return <DesafioDiarioTab db={db} setDb={setDb} callIA={callIA} aiConfig={aiConfig} availableModels={availableModels} setActiveTab={setActiveTab} onActiveChallengeChange={setActiveChallengeInfo} notionConfig={notionConfig} generateAndSendToNotion={generateAndSendToNotion} />;
                     default: return renderErrorList();
                 }
