@@ -759,6 +759,92 @@
             );
         });
 
+        const MEDICAL_AUTO_CORRECT_DICT = {
+            // Siglas e Termos Médicos Comuns (Erros de áudio comuns em português)
+            "desfribilador": "desfibrilador",
+            "desfribilar": "desfibrilar",
+            "desfribilação": "desfibrilação",
+            "desfribilacao": "desfibrilação",
+            "ressucitação": "ressuscitação",
+            "ressucitacao": "ressuscitação",
+            "ressucitar": "ressuscitar",
+            "entubação": "intubação",
+            "entubacao": "intubação",
+            "entubar": "intubar",
+            "cefaléia": "cefaleia",
+            "cefaleia": "cefaleia",
+            "pneumotorax": "pneumotórax",
+            "hemotorax": "hemotórax",
+            "oxigenio": "oxigênio",
+            "hipotensao": "hipotensão",
+            "hipertensao": "hipertensão",
+            "saturacao": "saturação",
+            "ventilacao": "ventilação",
+            "traquiostomia": "traqueostomia",
+            "traquio": "traqueostomia",
+            "soro fisiologico": "soro fisiológico",
+            "dor toracica": "dor torácica",
+            "murmurio": "murmúrio",
+            "puncao": "punção",
+            "eletro": "eletrocardiograma",
+            "ecg": "ECG (Eletrocardiograma)",
+            "iot": "IOT (Intubação Orotraqueal)",
+            "glicemia capilar": "glicemia capilar",
+            "marca passo": "marcapasso",
+            "marca-passo": "marcapasso",
+            "heparinização": "heparinização",
+            "heparinizacao": "heparinização",
+            "trombolise": "trombólise",
+            "trombolisar": "trombolisar",
+            "hidratação venosa": "hidratação venosa",
+            "hidratacao": "hidratação",
+            "ringer lactato": "Ringer Lactato",
+            "dor toracica": "dor torácica",
+            "dispneia": "dispneia",
+            "cianose": "cianose",
+            "taquicardico": "taquicárdico",
+            "bradicardico": "bradicárdico",
+            "arritmia": "arritmia",
+            "ausculta": "ausculta",
+            "sibilancia": "sibilância",
+            "sedação": "sedação",
+            "sedacao": "sedação",
+            "puncionar": "puncionar",
+            "punção": "punção",
+            
+            // Correções gerais de escrita
+            "concerteza": "com certeza",
+            "derrepente": "de repente",
+            "menas": "menos",
+            "pra": "para",
+            "pro": "para o",
+            "pras": "para as",
+            "pros": "para os",
+            "vc": "você",
+            "tb": "também",
+            "tbm": "também",
+            "pq": "porque",
+            "oq": "o que",
+            "q": "que",
+            "ta": "está",
+            "tá": "está"
+        };
+
+        const autoCorrectText = (text) => {
+            if (!text) return text;
+            let corrected = text;
+            Object.entries(MEDICAL_AUTO_CORRECT_DICT).forEach(([wrong, right]) => {
+                const escapedWrong = wrong.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+                const regex = new RegExp('\\b' + escapedWrong + '\\b', 'gi');
+                corrected = corrected.replace(regex, (match) => {
+                    if (match === match.toUpperCase()) return right.toUpperCase();
+                    if (match[0] === match[0].toUpperCase()) return right[0].toUpperCase() + right.slice(1);
+                    return right;
+                });
+            });
+            return corrected;
+        };
+
 const FluxogramasTab = React.memo(({ db, fluxogramas = [], setDb, callIA, extractTextFromPDF, aiConfig, setAiConfig, availableModels = [] }) => {
             const [view, setView] = React.useState('decks');
             const [selectedDeck, setSelectedDeck] = React.useState(null);
@@ -820,6 +906,13 @@ const FluxogramasTab = React.memo(({ db, fluxogramas = [], setDb, callIA, extrac
             const [isVoiceSynthesizing, setIsVoiceSynthesizing] = React.useState(false);
             const [gradingScorecard, setGradingScorecard] = React.useState(null);
             
+            // Focus Selector States (escolher parte do fluxograma antes da revisão)
+            const [showFocusSelector, setShowFocusSelector] = React.useState(false);
+            const [focusSuggestions, setFocusSuggestions] = React.useState([]);
+            const [selectedFocusId, setSelectedFocusId] = React.useState('full');
+            const [pendingSimMode, setPendingSimMode] = React.useState('voice');
+            const [pendingDirectFlow, setPendingDirectFlow] = React.useState(null);
+
             // New Advanced Voice Tools States
             const [voiceVolume, setVoiceVolume] = React.useState(1.0);
             const [voiceRate, setVoiceRate] = React.useState(0.95);
@@ -832,6 +925,7 @@ const FluxogramasTab = React.memo(({ db, fluxogramas = [], setDb, callIA, extrac
             const [speechMicLevel, setSpeechMicLevel] = React.useState(0);
             const [showVoiceConfig, setShowVoiceConfig] = React.useState(false);
             const [voiceAutoSend, setVoiceAutoSend] = React.useState(() => localStorage.getItem('flowchart_voice_autosend') === 'true');
+            const [voiceAutoCorrect, setVoiceAutoCorrect] = React.useState(() => localStorage.getItem('flowchart_voice_autocorrect') !== 'false');
 
             const simulationModeRef = React.useRef('voice');
             const cloudAudioRef = React.useRef(null);
@@ -839,6 +933,7 @@ const FluxogramasTab = React.memo(({ db, fluxogramas = [], setDb, callIA, extrac
             const audioContextRef = React.useRef(null);
             const animationFrameRef = React.useRef(null);
             const voiceAutoSendRef = React.useRef(voiceAutoSend);
+            const voiceAutoCorrectRef = React.useRef(voiceAutoCorrect);
             const silenceThresholdRef = React.useRef(silenceThreshold);
 
             // Sync refs to avoid stale closures
@@ -850,6 +945,11 @@ const FluxogramasTab = React.memo(({ db, fluxogramas = [], setDb, callIA, extrac
                 voiceAutoSendRef.current = voiceAutoSend;
                 localStorage.setItem('flowchart_voice_autosend', voiceAutoSend);
             }, [voiceAutoSend]);
+
+            React.useEffect(() => {
+                voiceAutoCorrectRef.current = voiceAutoCorrect;
+                localStorage.setItem('flowchart_voice_autocorrect', voiceAutoCorrect);
+            }, [voiceAutoCorrect]);
 
             React.useEffect(() => {
                 silenceThresholdRef.current = silenceThreshold;
@@ -1328,9 +1428,14 @@ const FluxogramasTab = React.memo(({ db, fluxogramas = [], setDb, callIA, extrac
                     
                     // Se houver texto finalizado, escreve no input de texto
                     if (finalText.trim()) {
+                        let processedText = finalText.trim();
+                        if (voiceAutoCorrectRef.current) {
+                            processedText = autoCorrectText(processedText);
+                        }
+                        
                         setChatInputText(prev => {
                             const cleanPrev = prev.trim();
-                            return cleanPrev ? cleanPrev + ' ' + finalText.trim() : finalText.trim();
+                            return cleanPrev ? cleanPrev + ' ' + processedText : processedText;
                         });
                         
                         // Envio automático se ativado
@@ -1431,22 +1536,133 @@ const FluxogramasTab = React.memo(({ db, fluxogramas = [], setDb, callIA, extrac
                 return p[contextType] || p['chat'];
             };
 
-            // Generate clinical case scenario
+            // --- FOCUS SUGGESTIONS GENERATOR ---
+            // Analisa os nós do fluxograma e gera sugestões de foco agrupadas por tema
+            const generateFocusSuggestions = (flow) => {
+                if (!flow?.data?.nodes?.length) return [{ id: 'full', icon: 'fa-sitemap', label: 'Fluxograma Completo', desc: 'Revisar todo o protocolo sem foco específico.', nodes: flow?.data?.nodes || [], color: 'indigo' }];
+                
+                const nodes = flow.data.nodes;
+                const suggestions = [];
+                
+                // Sempre incluir opção completa
+                suggestions.push({
+                    id: 'full',
+                    icon: 'fa-sitemap',
+                    label: 'Fluxograma Completo',
+                    desc: 'Revisar todo o protocolo clínico sem foco específico.',
+                    nodes: nodes,
+                    color: 'indigo'
+                });
+                
+                // Agrupar nós por tipo
+                const startNodes = nodes.filter(n => n.type === 'start');
+                const decisionNodes = nodes.filter(n => n.type === 'decision');
+                const warningNodes = nodes.filter(n => n.type === 'warning');
+                const successNodes = nodes.filter(n => n.type === 'success' || n.type === 'end');
+                const actionNodes = nodes.filter(n => !['start', 'decision', 'warning', 'success', 'end'].includes(n.type));
+                
+                // Diagnóstico / Avaliação Inicial (start + primeiros nós de ação)
+                const diagNodes = [...startNodes, ...actionNodes.slice(0, Math.ceil(actionNodes.length * 0.35))];
+                if (diagNodes.length >= 2) {
+                    suggestions.push({
+                        id: 'diagnosis',
+                        icon: 'fa-stethoscope',
+                        label: 'Diagnóstico e Avaliação Inicial',
+                        desc: `Foco em anamnese, exame físico e investigação diagnóstica. ${diagNodes.length} etapas.`,
+                        nodes: diagNodes,
+                        color: 'sky'
+                    });
+                }
+                
+                // Decisões Críticas
+                if (decisionNodes.length >= 1) {
+                    suggestions.push({
+                        id: 'decisions',
+                        icon: 'fa-code-branch',
+                        label: 'Decisões Críticas e Triagem',
+                        desc: `Foco nos pontos de decisão clínica do protocolo. ${decisionNodes.length} decisões.`,
+                        nodes: decisionNodes,
+                        color: 'amber'
+                    });
+                }
+                
+                // Conduta e Tratamento (segunda metade dos nós de ação)
+                const treatmentNodes = actionNodes.slice(Math.ceil(actionNodes.length * 0.35));
+                if (treatmentNodes.length >= 2) {
+                    suggestions.push({
+                        id: 'treatment',
+                        icon: 'fa-syringe',
+                        label: 'Conduta e Tratamento',
+                        desc: `Foco nas intervenções terapêuticas e prescrições. ${treatmentNodes.length} etapas.`,
+                        nodes: treatmentNodes,
+                        color: 'emerald'
+                    });
+                }
+                
+                // Alertas e Sinais de Perigo
+                if (warningNodes.length >= 1) {
+                    suggestions.push({
+                        id: 'warnings',
+                        icon: 'fa-triangle-exclamation',
+                        label: 'Alertas e Sinais de Perigo',
+                        desc: `Foco nos alertas, red flags e critérios de gravidade. ${warningNodes.length} alertas.`,
+                        nodes: warningNodes,
+                        color: 'rose'
+                    });
+                }
+                
+                // Desfechos e Alta
+                if (successNodes.length >= 1) {
+                    const desfechoNodes = [...successNodes, ...treatmentNodes.slice(-2)];
+                    suggestions.push({
+                        id: 'outcomes',
+                        icon: 'fa-flag-checkered',
+                        label: 'Desfechos e Critérios de Alta',
+                        desc: `Foco nos desfechos finais, critérios de alta e seguimento. ${desfechoNodes.length} etapas.`,
+                        nodes: desfechoNodes,
+                        color: 'violet'
+                    });
+                }
+                
+                return suggestions;
+            };
+
+            // --- INTERCEPTOR: Mostra modal de foco antes de iniciar ---
             const handleStartSimulation = async (mode = 'voice', directFlow = null) => {
                 if (!aiConfig?.key) {
                     alert("Chave API do Google Gemini não encontrada. Por favor, insira-a nas Configurações da plataforma (ícone de engrenagem) antes de iniciar.");
                     return;
                 }
                 
-                const flowToSimulate = directFlow || selectedFlow;
-                if (!flowToSimulate) return;
+                const flowToUse = directFlow || selectedFlow;
+                if (!flowToUse) return;
 
                 if (directFlow) {
                     setSelectedFlow(directFlow);
                     setView('canvas');
                     setCanvasViewMode('ia_review');
                 }
+
+                // Gerar sugestões e mostrar modal de foco
+                const suggestions = generateFocusSuggestions(flowToUse);
+                setFocusSuggestions(suggestions);
+                setSelectedFocusId('full');
+                setPendingSimMode(mode);
+                setPendingDirectFlow(directFlow);
+                setShowFocusSelector(true);
+            };
+
+            // --- EXECUTA A SIMULAÇÃO APÓS FOCO SELECIONADO ---
+            const handleConfirmFocusAndStart = async () => {
+                setShowFocusSelector(false);
+                const mode = pendingSimMode;
+                const directFlow = pendingDirectFlow;
+
+                const flowToSimulate = directFlow || selectedFlow;
+                if (!flowToSimulate) return;
                 
+                const chosenFocus = focusSuggestions.find(s => s.id === selectedFocusId);
+
                 setIsSimulating(true);
                 setSimulationMode(mode);
                 setGradingScorecard(null);
@@ -1517,8 +1733,14 @@ Desenvolva os sintomas, a anamnese e os achados físicos iniciais com base estri
                     ? `DIRETRIZ MÉDICA (PDF ANEXADO PELO USUÁRIO):\n${simulationPdfText.substring(0, 15000)}` 
                     : `TÍTULO DO FLUXOGRAMA: "${flowTitle}"\nDESCRIÇÃO: "${flowDesc}"\nETAPAS DO PROTOCOLO:\n${flowNodes}`;
 
-                const customFlowInstructions = db.customFlowchartPromptEnabled && db.customFlowchartPrompt
-                    ? `\nINSTRUÇÕES PERSONALIZADAS ADICIONAIS DO USUÁRIO (ATENÇÃO: crie o caso clínico inicial respeitando rigorosamente estas diretrizes adicionais):\n${db.customFlowchartPrompt}\n`
+                const focusBlock = (chosenFocus && chosenFocus.id !== 'full')
+                    ? `\nFOCO ESPECÍFICO DA REVISÃO (ATENÇÃO — OBRIGATÓRIO):
+O estudante escolheu focar na seguinte parte do fluxograma: "${chosenFocus.label}".
+O caso clínico DEVE obrigatoriamente focar nos seguintes aspectos e etapas do protocolo:
+${chosenFocus.nodes.map(n => `- [${(n.type || 'action').toUpperCase()}] ${n.label}: ${n.description || ''}`).join('\n')}
+
+Você DEVE criar o caso de forma que o estudante precise navegar especificamente por essas etapas do protocolo.
+As demais etapas do fluxograma podem aparecer como contexto, mas o FOCO principal e as perguntas devem girar em torno dos nós listados acima.\n`
                     : '';
 
                 const initialPrompt = `Você é um Mentor de Simulação Clínica Avançada extremamente competente e puramente clínico.
@@ -1527,7 +1749,7 @@ Sua missão é conduzir uma simulação clínica interativa (Caso Clínico) onde
 ${guidelineContext}
 ${pastCasesBlock}
 ${diversityBlock}
-${customFlowInstructions}
+${focusBlock}
 INSTRUÇÕES IMPORTANTES DA SIMULAÇÃO:
 1. Crie uma apresentação inicial do paciente (caso clínico INÉDITO, realista, compatível com a diretriz e DIFERENTE de todos os casos anteriores listados acima). O caso DEVE ser 100% compatível com a referência e usar a demografia/variação da diretriz de diversidade acima.
 2. NUNCA diga o diagnóstico, o nome das condutas corretas ou o caminho ideal diretamente. O estudante deve investigar e tomar as decisões.
@@ -3805,9 +4027,16 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                         </p>
                                         
                                         {isRecognitionActive && (
+                                            <div className="flex flex-col items-center gap-1">
                                             <p className="text-xs text-rose-500 dark:text-rose-455 font-bold text-center px-6 py-1 max-w-[280px] line-clamp-2 min-h-[1.5rem] select-none italic leading-snug">
                                                 {interimTranscript ? `"${interimTranscript}"` : "Sua fala aparecerá aqui em tempo real..."}
                                             </p>
+                                            {voiceAutoCorrect && (
+                                                <span className="text-[9px] font-black uppercase text-emerald-600 dark:text-emerald-400 flex items-center gap-1 tracking-widest animate-pulse select-none">
+                                                    <i className="fa-solid fa-wand-magic-sparkles text-[8px]"></i> Corretor Cl&iacute;nico Ativo
+                                                </span>
+                                            )}
+                                            </div>
                                         )}
                                         
                                         {/* BIG MIC BUTTON & TOOLS BAR */}
@@ -3909,6 +4138,35 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                                                 }`}
                                                             >
                                                                 ⌨️ Manual (Enter)
+                                                            </button>
+                                                        </div>
+                                                    </div>
+
+                                                    {/* CLINICAL SPEECH CORRECTOR TOGGLE */}
+                                                    <div className="space-y-1.5">
+                                                        <label className="text-[10px] font-black uppercase text-zinc-500 tracking-wider">Corretor Cl&iacute;nico (Voz)</label>
+                                                        <div className={`flex p-0.5 rounded-xl border ${flowchartLightMode ? 'bg-zinc-100 border-zinc-200' : 'bg-zinc-950 border-zinc-850'}`}>
+                                                            <button 
+                                                                type="button"
+                                                                onClick={() => setVoiceAutoCorrect(true)}
+                                                                className={`flex-1 py-1.5 rounded-lg text-[9px] font-black transition-all ${
+                                                                    voiceAutoCorrect 
+                                                                        ? 'bg-indigo-600 text-white shadow-sm' 
+                                                                        : 'text-zinc-500 hover:text-zinc-400'
+                                                                }`}
+                                                            >
+                                                                ✨ Ativo
+                                                            </button>
+                                                            <button 
+                                                                type="button"
+                                                                onClick={() => setVoiceAutoCorrect(false)}
+                                                                className={`flex-1 py-1.5 rounded-lg text-[9px] font-black transition-all ${
+                                                                    !voiceAutoCorrect 
+                                                                        ? 'bg-indigo-600 text-white shadow-sm' 
+                                                                        : 'text-zinc-500 hover:text-zinc-400'
+                                                                }`}
+                                                            >
+                                                                🚫 Inativo
                                                             </button>
                                                         </div>
                                                     </div>
@@ -4274,10 +4532,109 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                     onClick={() => handleStartSimulation(simulationMode)}
                                     className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-black py-4 rounded-2xl shadow-xl shadow-indigo-950/40 border border-indigo-400/20 transition-all hover:shadow-indigo-500/20 active:scale-95 flex items-center justify-center gap-2 mt-6 text-sm"
                                 >
-                                    <i className="fa-solid fa-play"></i> Iniciar Revisão Clínica
+                                    <i className="fa-solid fa-crosshairs"></i> Escolher Foco e Iniciar
                                 </button>
                             </div>
                         </div>
+                        
+                        {/* FOCUS SELECTOR MODAL */}
+                        {showFocusSelector && (
+                            <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4" style={{background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)'}}>
+                                <div className={`w-full max-w-lg rounded-[32px] border shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-300 ${flowchartLightMode ? 'bg-white border-zinc-200' : 'bg-zinc-900 border-zinc-800'}`}>
+                                    {/* Header */}
+                                    <div className="p-6 pb-4 border-b border-zinc-800/50">
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-purple-600 to-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-950/40">
+                                                    <i className="fa-solid fa-crosshairs text-white text-lg"></i>
+                                                </div>
+                                                <div>
+                                                    <h3 className={`font-black text-base ${flowchartLightMode ? 'text-zinc-900' : 'text-white'}`}>Escolha seu Foco</h3>
+                                                    <p className={`text-[10px] font-bold mt-0.5 ${flowchartLightMode ? 'text-zinc-500' : 'text-zinc-400'}`}>Em qual parte do fluxograma você quer focar?</p>
+                                                </div>
+                                            </div>
+                                            <button 
+                                                onClick={() => setShowFocusSelector(false)} 
+                                                className={`w-8 h-8 rounded-xl flex items-center justify-center transition-colors ${flowchartLightMode ? 'hover:bg-zinc-100 text-zinc-400' : 'hover:bg-zinc-800 text-zinc-500'}`}
+                                            >
+                                                <i className="fa-solid fa-xmark"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    
+                                    {/* Focus Options */}
+                                    <div className="p-5 space-y-2.5 max-h-[55vh] overflow-y-auto">
+                                        {focusSuggestions.map((s) => {
+                                            const isSelected = selectedFocusId === s.id;
+                                            const colorMap = {
+                                                indigo: { bg: 'bg-indigo-500/10', border: 'border-indigo-500/30', activeBg: 'bg-indigo-600/20', activeBorder: 'border-indigo-500', text: 'text-indigo-400', icon: 'text-indigo-400' },
+                                                sky: { bg: 'bg-sky-500/10', border: 'border-sky-500/30', activeBg: 'bg-sky-600/20', activeBorder: 'border-sky-500', text: 'text-sky-400', icon: 'text-sky-400' },
+                                                amber: { bg: 'bg-amber-500/10', border: 'border-amber-500/30', activeBg: 'bg-amber-600/20', activeBorder: 'border-amber-500', text: 'text-amber-400', icon: 'text-amber-400' },
+                                                emerald: { bg: 'bg-emerald-500/10', border: 'border-emerald-500/30', activeBg: 'bg-emerald-600/20', activeBorder: 'border-emerald-500', text: 'text-emerald-400', icon: 'text-emerald-400' },
+                                                rose: { bg: 'bg-rose-500/10', border: 'border-rose-500/30', activeBg: 'bg-rose-600/20', activeBorder: 'border-rose-500', text: 'text-rose-400', icon: 'text-rose-400' },
+                                                violet: { bg: 'bg-violet-500/10', border: 'border-violet-500/30', activeBg: 'bg-violet-600/20', activeBorder: 'border-violet-500', text: 'text-violet-400', icon: 'text-violet-400' }
+                                            };
+                                            const c = colorMap[s.color] || colorMap.indigo;
+                                            
+                                            return (
+                                                <button
+                                                    key={s.id}
+                                                    onClick={() => setSelectedFocusId(s.id)}
+                                                    className={`w-full text-left p-4 rounded-2xl border-2 transition-all duration-200 flex items-start gap-3.5 group ${
+                                                        isSelected 
+                                                            ? `${c.activeBg} ${c.activeBorder} shadow-lg` 
+                                                            : `${flowchartLightMode ? 'bg-zinc-50 border-zinc-200 hover:border-zinc-300' : 'bg-zinc-950/50 border-zinc-800 hover:border-zinc-700'}`
+                                                    }`}
+                                                >
+                                                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 transition-colors ${isSelected ? c.bg : (flowchartLightMode ? 'bg-zinc-100' : 'bg-zinc-900')}`}>
+                                                        <i className={`fa-solid ${s.icon} text-sm ${isSelected ? c.icon : 'text-zinc-500'}`}></i>
+                                                    </div>
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="flex items-center gap-2">
+                                                            <span className={`font-black text-xs ${isSelected ? (flowchartLightMode ? 'text-zinc-900' : 'text-white') : (flowchartLightMode ? 'text-zinc-700' : 'text-zinc-300')}`}>{s.label}</span>
+                                                            {isSelected && (
+                                                                <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full ${c.bg} ${c.text}`}>Selecionado</span>
+                                                            )}
+                                                        </div>
+                                                        <p className={`text-[10px] font-semibold mt-1 leading-relaxed ${flowchartLightMode ? 'text-zinc-500' : 'text-zinc-500'}`}>{s.desc}</p>
+                                                        {s.id !== 'full' && (
+                                                            <div className="flex flex-wrap gap-1 mt-2">
+                                                                {s.nodes.slice(0, 4).map((n, i) => (
+                                                                    <span key={i} className={`text-[8px] font-bold px-2 py-0.5 rounded-full ${flowchartLightMode ? 'bg-zinc-100 text-zinc-500' : 'bg-zinc-800 text-zinc-400'}`}>
+                                                                        {n.label?.substring(0, 25)}{n.label?.length > 25 ? '…' : ''}
+                                                                    </span>
+                                                                ))}
+                                                                {s.nodes.length > 4 && (
+                                                                    <span className={`text-[8px] font-bold px-2 py-0.5 rounded-full ${flowchartLightMode ? 'bg-zinc-100 text-zinc-400' : 'bg-zinc-800 text-zinc-500'}`}>
+                                                                        +{s.nodes.length - 4} mais
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                    <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 mt-0.5 transition-all ${
+                                                        isSelected ? `${c.activeBorder} ${c.bg}` : (flowchartLightMode ? 'border-zinc-300' : 'border-zinc-700')
+                                                    }`}>
+                                                        {isSelected && <div className={`w-2 h-2 rounded-full ${c.activeBorder.replace('border-', 'bg-')}`}></div>}
+                                                    </div>
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                    
+                                    {/* Footer */}
+                                    <div className={`p-5 pt-3 border-t ${flowchartLightMode ? 'border-zinc-200 bg-zinc-50' : 'border-zinc-800 bg-zinc-950/50'}`}>
+                                        <button 
+                                            onClick={handleConfirmFocusAndStart}
+                                            className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-black py-3.5 rounded-2xl shadow-xl shadow-indigo-950/40 border border-indigo-400/20 transition-all hover:shadow-indigo-500/20 active:scale-95 flex items-center justify-center gap-2 text-sm"
+                                        >
+                                            <i className="fa-solid fa-play"></i> 
+                                            {selectedFocusId === 'full' ? 'Iniciar Revisão Completa' : `Iniciar com Foco: ${focusSuggestions.find(s => s.id === selectedFocusId)?.label || ''}`}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
                         
                         {/* RIGHT COLUMN: REVISION TIMELINE / HISTORY */}
                         <div className="col-span-1 lg:col-span-7 space-y-6">
@@ -17534,31 +17891,6 @@ ${(obj.questoesAnalisadas || []).map(q => `### ${q.identificacao}
                                                     value={db.customDailyChallengePrompt || ''}
                                                     onChange={e => setDb(p => ({ ...p, customDailyChallengePrompt: e.target.value }))}
                                                     placeholder="Como você quer o Desafio Clínico do dia seguinte? (Ex: Focar em pediatria, casos raros, etc.)"
-                                                    className="w-full p-3 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl outline-none text-xs font-bold font-sans resize-none text-zinc-800 dark:text-white"
-                                                    rows="3"
-                                                />
-                                            )}
-                                        </div>
-
-                                        {/* 2. Caso de Fluxograma */}
-                                        <div className="space-y-3">
-                                            <div className="flex justify-between items-center">
-                                                <label className="text-[10px] font-bold text-zinc-550 dark:text-zinc-400 uppercase tracking-wider">Caso de Fluxograma</label>
-                                                <label className="flex items-center gap-2 cursor-pointer select-none">
-                                                    <span className={`text-[9px] font-black uppercase tracking-widest ${db.customFlowchartPromptEnabled ? 'text-emerald-600 dark:text-emerald-400' : 'text-zinc-400'}`}>{db.customFlowchartPromptEnabled ? 'Personalizado' : 'Padrão'}</span>
-                                                    <div
-                                                        onClick={() => setDb(p => ({ ...p, customFlowchartPromptEnabled: !p.customFlowchartPromptEnabled }))}
-                                                        className={`relative w-9 h-5 rounded-full transition-all cursor-pointer ${db.customFlowchartPromptEnabled ? 'bg-emerald-500' : 'bg-zinc-300 dark:bg-zinc-700'}`}
-                                                    >
-                                                        <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow-md transition-all ${db.customFlowchartPromptEnabled ? 'left-[18px]' : 'left-0.5'}`}></div>
-                                                    </div>
-                                                </label>
-                                            </div>
-                                            {db.customFlowchartPromptEnabled && (
-                                                <textarea
-                                                    value={db.customFlowchartPrompt || ''}
-                                                    onChange={e => setDb(p => ({ ...p, customFlowchartPrompt: e.target.value }))}
-                                                    placeholder="Como você quer o Caso Clínico da revisão do fluxograma? (Ex: Paciente idoso, comorbidade diabetes, sintomas atípicos...)"
                                                     className="w-full p-3 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl outline-none text-xs font-bold font-sans resize-none text-zinc-800 dark:text-white"
                                                     rows="3"
                                                 />
