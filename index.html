@@ -891,6 +891,13 @@ const FluxogramasTab = React.memo(({ db, fluxogramas = [], setDb, callIA, extrac
             const [isSimulating, setIsSimulating] = React.useState(false);
             const [simulationMode, setSimulationMode] = React.useState('voice'); // 'voice' | 'text'
             const [simulationModel, setSimulationModel] = React.useState(localStorage.getItem('gemini_model') || 'gemini-3.5-flash');
+            const [isInternshipMode, setIsInternshipMode] = React.useState(() => localStorage.getItem('flowchart_internship_mode') === 'true');
+            const [internNotesText, setInternNotesText] = React.useState('');
+            const [internNotesSaved, setInternNotesSaved] = React.useState(false);
+
+            React.useEffect(() => {
+                localStorage.setItem('flowchart_internship_mode', isInternshipMode);
+            }, [isInternshipMode]);
             React.useEffect(() => {
                 if (aiConfig?.model) {
                     setSimulationModel(aiConfig.model);
@@ -1772,7 +1779,23 @@ As demais etapas do fluxograma podem aparecer como contexto, mas o FOCO principa
                     return '';
                 })();
 
-                const initialPrompt = `Você é um Mentor de Simulação Clínica Avançada extremamente competente e puramente clínico.
+                const initialPrompt = isInternshipMode
+                    ? `Você é um Preceptor Médico (Mentor de Simulação Clínica) no MODO ESTÁGIO de aprendizado.
+Sua missão é conduzir uma discussão de Caso Clínico interativa com o estudante, que está atuando como seu ESTAGIÁRIO.
+Siga rigorosamente a seguinte referência médica (fluxograma):
+
+${guidelineContext}
+${pastCasesBlock}
+${diversityBlock}
+${focusBlock}
+REGRAS DO MODO ESTÁGIO:
+1. Crie uma apresentação inicial do paciente (caso clínico INÉDITO, realista e compatível com a diretriz).
+2. Diferente da simulação padrão, no MODO ESTÁGIO você (a IA preceptor) é quem conduz o atendimento médico principal. Você deve ir progredindo e tomando as condutas corretas baseadas no fluxograma.
+3. A cada evolução ou passo do protocolo, você deve apresentar os novos dados clínicos do paciente, explicar para o estagiário a conduta que você está tomando de acordo com o fluxograma e a justificativa clínica por trás dela.
+4. Mantenha um diálogo constante com o estagiário. Faça perguntas a ele sobre o raciocínio clínico, peça a opinião dele ou instigue-o a pensar sobre as condutas, mas NUNCA o avalie com notas. O clima é de aprendizado e tutoria clínica.
+5. Sempre responda em português, usando a personalidade de preceptor: "${getLocalPersonaInstruction(aiConfig?.persona || 'amigavel', 'chat')}".
+6. Apenas na sua primeira resposta você deve apresentar a introdução do caso clínico inicial do paciente (anamnese e exame físico inicial), explicar brevemente o contexto de atendimento e fazer uma pergunta inicial ao estagiário para começar a discussão do caso. Nas respostas seguintes, prossiga com a evolução clínica de acordo com o protocolo ou respondendo às dúvidas do estagiário.`
+                    : `Você é um Mentor de Simulação Clínica Avançada extremamente competente e puramente clínico.
 Sua missão é conduzir uma simulação clínica interativa (Caso Clínico) onde o diagnóstico correto e a conduta terapêutica ideal seguem RIGOROSAMENTE as recomendações da seguinte referência médica:
 
 ${guidelineContext}
@@ -2014,6 +2037,97 @@ Você deve retornar APENAS um objeto JSON válido, sem qualquer bloco de código
                 } catch (e) {
                     console.error("Erro na avaliação do caso:", e);
                     alert("Ocorreu um erro ao gerar a nota e avaliação com a IA: " + e.message);
+                    setIsEvaluating(false);
+                }
+            };
+            
+            const handleFinishInternship = async () => {
+                stopSpeaking();
+                stopSpeechRecognition();
+                setIsEvaluating(true);
+                
+                const protocolDoc = simulationPdfText 
+                    ? `Diretriz médica fornecida pelo usuário (PDF):\n${simulationPdfText.substring(0, 12000)}`
+                    : `fluxograma "${selectedFlow.title}"`;
+
+                const evaluationPrompt = `Você concluiu a discussão de caso clínico com o seu estagiário. Agora, faça uma breve síntese de encerramento da discussão de caso clínico (máximo 4 linhas), em português.
+Escreva incorporando com precisão extrema a personalidade de preceptor: "${getLocalPersonaInstruction(aiConfig?.persona || 'amigavel', 'chat')}". Se a personalidade for irônica ou arrogante, seja irônico ou rude/impaciente, mas se for amigável ou compreensivo, seja muito didático e motivador.
+Também destaque os 3 principais aprendizados práticos ou lições clínicas deste caso para a formação do estagiário.
+
+RETORNO ESPERADO:
+Você deve retornar APENAS um objeto JSON válido, sem qualquer bloco de código markdown ou texto ao redor, iniciando com { e terminando com }, no seguinte formato:
+{
+    "mentorComment": "Seu comentário final na persona...",
+    "learningPoints": [
+        "Ponto de aprendizado 1...",
+        "Ponto de aprendizado 2...",
+        "Ponto de aprendizado 3..."
+    ]
+}`;
+
+                const updatedChat = [...activeReviewChatRef.current, { role: 'user', text: "[AÇÃO DO ESTÁGIO]: Concluir discussão de caso de estágio e gerar síntese de aprendizado." }];
+                
+                const msgsToApi = updatedChat.map(m => ({
+                    role: m.role === 'model' ? 'model' : 'user',
+                    parts: [{ text: m.text }]
+                }));
+                
+                msgsToApi.push({
+                    role: 'user',
+                    parts: [{ text: evaluationPrompt }]
+                });
+                
+                try {
+                    const responseText = await callIA(msgsToApi, simulationModel);
+                    
+                    const jsonString = responseText.replace(/```json|```/g, '').trim();
+                    const match = jsonString.match(/\{[\s\S]*\}/);
+                    if (!match) throw new Error("JSON inválido retornado pela IA.");
+                    
+                    const evaluation = robustJSONParse(match[0]);
+                    
+                    const reviewLog = {
+                        id: Date.now(),
+                        date: new Date().toISOString(),
+                        scenario: activeReviewChat[1]?.text || 'Discussão de estágio',
+                        chatHistory: activeReviewChat.filter(m => m.role !== 'system'),
+                        isInternship: true,
+                        comment: evaluation.mentorComment || 'Discussão concluída com sucesso.',
+                        learningPoints: evaluation.learningPoints || [],
+                        internNotes: internNotesText,
+                        persona: aiConfig?.persona || 'amigavel',
+                        model: simulationModel,
+                        mode: simulationMode
+                    };
+                    
+                    // Save to DB
+                    setDb(prev => {
+                        const updated = (prev.fluxogramas || []).map(f => {
+                            if (f.id !== selectedFlow.id) return f;
+                            return {
+                                ...f,
+                                aiReviews: [reviewLog, ...(f.aiReviews || [])]
+                            };
+                        });
+                        return { ...prev, fluxogramas: updated };
+                    });
+                    
+                    setSelectedFlow(prev => ({
+                        ...prev,
+                        aiReviews: [reviewLog, ...(prev.aiReviews || [])]
+                    }));
+                    
+                    setGradingScorecard(reviewLog);
+                    setIsSimulating(false);
+                    setIsEvaluating(false);
+                    setInternNotesText('');
+                    
+                    if (simulationMode === 'voice') {
+                        speakText(`Discussão de estágio finalizada. Comentário do seu preceptor: ${reviewLog.comment}`);
+                    }
+                } catch (e) {
+                    console.error("Erro na finalização do estágio:", e);
+                    alert("Ocorreu um erro ao gerar a síntese de estágio com a IA: " + e.message);
                     setIsEvaluating(false);
                 }
             };
@@ -3749,8 +3863,79 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
 
                 // VIEW: CURRENT EVALUATION / SCORECARD (after finishing a case)
                 if (gradingScorecard) {
-                    const colors = getScoreColor(gradingScorecard.score);
                     const personaStyle = getPersonaAvatar(gradingScorecard.persona);
+                    
+                    if (gradingScorecard.isInternship) {
+                        return (
+                            <div className="max-w-2xl mx-auto space-y-6 animate-in fade-in zoom-in-95 duration-300">
+                                {customStyleBlock}
+                                <div className={`border rounded-[32px] p-6 md:p-8 shadow-2xl relative overflow-hidden space-y-6 ${flowchartLightMode ? 'bg-white border-zinc-200 text-zinc-800 shadow-zinc-200/20' : 'bg-gradient-to-br from-zinc-900 to-zinc-950 border-zinc-800/80 text-white'}`}>
+                                    <div className="absolute top-0 right-0 w-36 h-36 bg-indigo-500/5 blur-3xl rounded-full"></div>
+                                    
+                                    <div className="text-center space-y-2">
+                                        <span className={`text-[10px] font-black uppercase border px-3.5 py-1 rounded-full shrink-0 tracking-widest ${flowchartLightMode ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20'}`}>Discussão de Estágio Clínico</span>
+                                        <h3 className={`text-2xl font-black leading-tight ${flowchartLightMode ? 'text-zinc-900' : 'text-white'}`}>Discussão Concluída!</h3>
+                                        <p className={`text-xs font-semibold ${flowchartLightMode ? 'text-zinc-500' : 'text-zinc-505'}`}>Você participou como estagiário assistente do preceptor médico.</p>
+                                    </div>
+                                    
+                                    <div className={`h-px ${flowchartLightMode ? 'bg-zinc-200' : 'bg-zinc-850'}`}></div>
+                                    
+                                    {/* PRECEPTOR COMMENT */}
+                                    <div className={`p-5 rounded-2xl border flex gap-4 relative ${
+                                        flowchartLightMode 
+                                            ? 'bg-zinc-50 border-zinc-200 text-zinc-800' 
+                                            : `bg-gradient-to-br ${personaStyle.color} border-zinc-850/60 text-white`
+                                    }`}>
+                                        <div className={`w-12 h-12 rounded-xl shrink-0 flex items-center justify-center shadow-lg border ${flowchartLightMode ? 'bg-white border-zinc-200 text-indigo-650' : 'bg-black/40 border-zinc-800'}`}><i className={`fa-solid ${personaStyle.icon} text-lg`}></i></div>
+                                        <div className="space-y-1">
+                                            <div className="flex items-center gap-2">
+                                                <span className={`text-xs font-black ${flowchartLightMode ? 'text-zinc-900' : 'text-white'}`}>{personaStyle.label} (Preceptor)</span>
+                                                <span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded-full border ${flowchartLightMode ? 'bg-zinc-200/50 border-zinc-300 text-zinc-650' : 'bg-black/40 border-zinc-800 text-zinc-450'}`}>Feedback e Fechamento</span>
+                                            </div>
+                                            <p className={`text-xs font-semibold leading-relaxed text-justify-custom italic ${flowchartLightMode ? 'text-zinc-650' : 'text-zinc-300'}`}>"{gradingScorecard.comment}"</p>
+                                        </div>
+                                    </div>
+
+                                    {/* LEARNING POINTS */}
+                                    {gradingScorecard.learningPoints && gradingScorecard.learningPoints.length > 0 && (
+                                        <div className={`p-5 rounded-2xl border ${flowchartLightMode ? 'bg-indigo-50/40 border-indigo-200' : 'bg-indigo-950/10 border-indigo-500/20'}`}>
+                                            <h4 className={`text-xs font-black uppercase tracking-widest mb-3 flex items-center gap-1.5 ${flowchartLightMode ? 'text-indigo-800' : 'text-indigo-400'}`}>
+                                                <i className="fa-solid fa-lightbulb text-indigo-500 animate-pulse"></i> Lições Clínicas Aprendidas
+                                            </h4>
+                                            <ul className="space-y-2.5">
+                                                {gradingScorecard.learningPoints.map((pt, i) => (
+                                                    <li key={i} className="flex items-start gap-2.5 text-xs font-semibold leading-relaxed text-justify-custom">
+                                                        <span className="w-5 h-5 rounded-full bg-indigo-500/10 border border-indigo-500/25 flex items-center justify-center shrink-0 text-[10px] font-black text-indigo-450">{i + 1}</span>
+                                                        <span className={flowchartLightMode ? 'text-zinc-700' : 'text-zinc-300'}>{pt}</span>
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        </div>
+                                    )}
+
+                                    {/* SAVED NOTES BY THE INTERN */}
+                                    {gradingScorecard.internNotes && (
+                                        <div className={`p-5 rounded-2xl border ${flowchartLightMode ? 'bg-zinc-50 border-zinc-250/80' : 'bg-zinc-950/50 border-zinc-850'}`}>
+                                            <h4 className={`text-xs font-black uppercase tracking-widest mb-2 flex items-center gap-1.5 ${flowchartLightMode ? 'text-zinc-800' : 'text-zinc-400'}`}>
+                                                <i className="fa-solid fa-pen-nib text-indigo-500"></i> Anotações do seu Diário de Estágio
+                                            </h4>
+                                            <p className={`text-xs font-semibold leading-relaxed whitespace-pre-wrap ${flowchartLightMode ? 'text-zinc-650' : 'text-zinc-300'}`}>
+                                                {gradingScorecard.internNotes}
+                                            </p>
+                                        </div>
+                                    )}
+
+                                    <div className="h-px bg-zinc-850 my-2"></div>
+                                    
+                                    <button onClick={() => setGradingScorecard(null)} className="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-black py-4 rounded-2xl shadow-xl transition-all flex items-center justify-center gap-2 text-sm border border-indigo-400/20 active:scale-95">
+                                        <i className="fa-solid fa-circle-check"></i> Concluir Discussão de Estágio
+                                    </button>
+                                </div>
+                            </div>
+                        );
+                    }
+
+                    const colors = getScoreColor(gradingScorecard.score);
                     
                     return (
                         <div className="max-w-2xl mx-auto space-y-6 animate-in fade-in zoom-in-95 duration-300">
@@ -4462,6 +4647,122 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                                 }
                                             }} />
 
+                                            {/* INTERNSHIP TOOL PANEL */}
+                                            {isInternshipMode && (
+                                                <div className="space-y-2.5 border-b border-zinc-200/50 dark:border-zinc-850/60 pb-4">
+                                                    <div className="flex items-center justify-between">
+                                                        <span className="text-[10px] font-black uppercase text-indigo-500 dark:text-indigo-400 tracking-wider flex items-center gap-1.5">
+                                                            <i className="fa-solid fa-screwdriver-wrench animate-pulse"></i> Maleta de Ferramentas do Estagiário
+                                                        </span>
+                                                        <span className="text-[8px] font-bold text-zinc-500">Ações rápidas com o preceptor</span>
+                                                    </div>
+                                                    <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleSendReviewChatMessage("[AÇÃO DO ESTÁGIO]: Preceptor, avance para o próximo passo lógico do protocolo do fluxograma. Apresente a evolução do paciente, a conduta a ser tomada e me faça uma pergunta ou explique a decisão.")}
+                                                            disabled={isEvaluating}
+                                                            className={`py-2 px-2 rounded-xl border text-[10px] font-bold flex items-center justify-center gap-1.5 transition-all active:scale-95 ${
+                                                                flowchartLightMode 
+                                                                    ? 'bg-emerald-50 border-emerald-200 text-emerald-800 hover:bg-emerald-100/70' 
+                                                                    : 'bg-emerald-950/20 border-emerald-500/30 text-emerald-300 hover:bg-emerald-950/30'
+                                                            }`}
+                                                            title="Avançar conduta"
+                                                        >
+                                                            <i className="fa-solid fa-arrow-right-long text-[9px]"></i> Avançar Conduta
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleSendReviewChatMessage("[FERRAMENTA: EXPLICAÇÃO] Preceptor, por favor, me dê uma explicação didática e detalhada sobre o raciocínio médico por trás da conduta atual.")}
+                                                            disabled={isEvaluating}
+                                                            className={`py-2 px-2 rounded-xl border text-[10px] font-bold flex items-center justify-center gap-1.5 transition-all active:scale-95 ${
+                                                                flowchartLightMode 
+                                                                    ? 'bg-indigo-50 border-indigo-200 text-indigo-800 hover:bg-indigo-100/70' 
+                                                                    : 'bg-indigo-950/20 border-indigo-500/30 text-indigo-300 hover:bg-indigo-950/30'
+                                                            }`}
+                                                            title="Pedir explicação didática"
+                                                        >
+                                                            <i className="fa-solid fa-chalkboard-user text-[9px]"></i> Pedir Explicação
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleSendReviewChatMessage("[FERRAMENTA: DIAGNÓSTICO DIFERENCIAL] Preceptor, quais seriam os principais diagnósticos diferenciais que devemos ter em mente para este paciente e como excluí-los?")}
+                                                            disabled={isEvaluating}
+                                                            className={`py-2 px-2 rounded-xl border text-[10px] font-bold flex items-center justify-center gap-1.5 transition-all active:scale-95 ${
+                                                                flowchartLightMode 
+                                                                    ? 'bg-amber-50 border-amber-200 text-amber-800 hover:bg-amber-100/70' 
+                                                                    : 'bg-amber-950/20 border-amber-500/30 text-amber-300 hover:bg-amber-950/30'
+                                                            }`}
+                                                            title="Ver diagnósticos diferenciais"
+                                                        >
+                                                            <i className="fa-solid fa-network-wired text-[9px]"></i> D. Diferencial
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleSendReviewChatMessage("[FERRAMENTA: FISIOPATOLOGIA] Preceptor, pode me explicar de forma detalhada a fisiopatologia subjacente a este quadro clínico e por que ela justifica a nossa conduta?")}
+                                                            disabled={isEvaluating}
+                                                            className={`py-2 px-2 rounded-xl border text-[10px] font-bold flex items-center justify-center gap-1.5 transition-all active:scale-95 ${
+                                                                flowchartLightMode 
+                                                                    ? 'bg-rose-50 border-rose-200 text-rose-800 hover:bg-rose-100/70' 
+                                                                    : 'bg-rose-950/20 border-rose-500/30 text-rose-300 hover:bg-rose-950/30'
+                                                            }`}
+                                                            title="Explicar fisiopatologia"
+                                                        >
+                                                            <i className="fa-solid fa-dna text-[9px]"></i> Fisiopatologia
+                                                        </button>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleSendReviewChatMessage("[FERRAMENTA: REFERÊNCIA] Preceptor, quais são as principais diretrizes, referências bibliográficas ou estudos clínicos recentes que embasam esta conduta?")}
+                                                            disabled={isEvaluating}
+                                                            className={`py-2 px-2 rounded-xl border text-[10px] font-bold flex items-center justify-center gap-1.5 transition-all active:scale-95 ${
+                                                                flowchartLightMode 
+                                                                    ? 'bg-purple-50 border-purple-200 text-purple-800 hover:bg-purple-100/70' 
+                                                                    : 'bg-purple-950/20 border-purple-500/30 text-purple-300 hover:bg-purple-950/30'
+                                                            }`}
+                                                            title="Pedir referências"
+                                                        >
+                                                            <i className="fa-solid fa-book-open-reader text-[9px]"></i> Referências
+                                                        </button>
+                                                    </div>
+
+                                                    {/* Bloco de notas local */}
+                                                    <div className={`mt-2 p-3 rounded-2xl border text-left ${flowchartLightMode ? 'bg-zinc-100/50 border-zinc-200' : 'bg-zinc-950/40 border-zinc-850'}`}>
+                                                        <div className="flex items-center justify-between mb-1.5">
+                                                            <span className="text-[9px] font-black text-zinc-500 uppercase tracking-wider flex items-center gap-1">
+                                                                <i className="fa-solid fa-pen-nib text-indigo-500"></i> Bloco de Notas do Estagiário (Local)
+                                                            </span>
+                                                            {internNotesSaved && (
+                                                                <span className="text-[8px] font-black text-emerald-500 uppercase tracking-wider animate-pulse flex items-center gap-1">
+                                                                    <i className="fa-solid fa-circle-check"></i> Salvo!
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        <div className="flex gap-2">
+                                                            <textarea
+                                                                value={internNotesText}
+                                                                onChange={(e) => setInternNotesText(e.target.value)}
+                                                                placeholder="Registre observações importantes, doses de medicamentos ou dúvidas para guardar no diário de estágio deste caso..."
+                                                                className={`flex-1 p-2.5 border rounded-xl outline-none text-[11px] font-medium resize-none planner-scroll ${
+                                                                    flowchartLightMode ? 'bg-white border-zinc-200 text-zinc-800 placeholder-zinc-400' : 'bg-zinc-950 border-zinc-850 text-white placeholder-zinc-650'
+                                                                }`}
+                                                                rows="2"
+                                                            />
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => {
+                                                                    setInternNotesSaved(true);
+                                                                    setTimeout(() => setInternNotesSaved(false), 2000);
+                                                                }}
+                                                                className="px-3.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-black text-[10px] shadow transition-colors flex flex-col items-center justify-center gap-1 shrink-0 active:scale-95 border border-indigo-400/20"
+                                                                title="Salvar temporariamente"
+                                                            >
+                                                                <i className="fa-solid fa-floppy-disk text-xs"></i>
+                                                                <span>Salvar</span>
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            )}
+
                                             {/* TEXT CHAT INPUT FORM */}
                                             <form 
                                                 onSubmit={(e) => { e.preventDefault(); handleSendReviewChatMessage(chatInputText); }}
@@ -4538,11 +4839,23 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                 </button>
                                 
                                 <button 
-                                    onClick={handleFinishAndEvaluate}
+                                    onClick={isInternshipMode ? handleFinishInternship : handleFinishAndEvaluate}
                                     disabled={!hasMessages || isEvaluating}
-                                    className="flex-[2] bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 disabled:from-zinc-850 disabled:to-zinc-850 disabled:text-zinc-600 disabled:pointer-events-none text-white font-black py-3.5 rounded-2xl shadow-xl transition-all flex items-center justify-center gap-2 text-xs border border-rose-400/20 active:scale-95"
+                                    className={`flex-[2] disabled:from-zinc-850 disabled:to-zinc-850 disabled:text-zinc-600 disabled:pointer-events-none text-white font-black py-3.5 rounded-2xl shadow-xl transition-all flex items-center justify-center gap-2 text-xs active:scale-95 ${
+                                        isInternshipMode 
+                                            ? 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 border border-purple-400/20' 
+                                            : 'bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 border border-rose-400/20'
+                                    }`}
                                 >
-                                    <i className="fa-solid fa-graduation-cap text-sm"></i> Concluir e Avaliar
+                                    {isInternshipMode ? (
+                                        <>
+                                            <i className="fa-solid fa-user-doctor text-sm animate-pulse"></i> Concluir Discussão
+                                        </>
+                                    ) : (
+                                        <>
+                                            <i className="fa-solid fa-graduation-cap text-sm"></i> Concluir e Avaliar
+                                        </>
+                                    )}
                                 </button>
                             </div>
                         </div>
@@ -4552,11 +4865,12 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
         }
 
                 // VIEW: GENERAL DASHBOARD
-                const averageScore = aiReviews.length > 0 
-                    ? Number((aiReviews.reduce((acc, r) => acc + r.score, 0) / aiReviews.length).toFixed(2)) 
+                const gradedReviews = aiReviews.filter(r => !r.isInternship && typeof r.score === 'number');
+                const averageScore = gradedReviews.length > 0 
+                    ? Number((gradedReviews.reduce((acc, r) => acc + r.score, 0) / gradedReviews.length).toFixed(2)) 
                     : 0;
-                const maxScore = aiReviews.length > 0 
-                    ? Math.max(...aiReviews.map(r => r.score)) 
+                const maxScore = gradedReviews.length > 0 
+                    ? Math.max(...gradedReviews.map(r => r.score)) 
                     : 0;
                 
                 const avgColors = getScoreColor(averageScore);
@@ -4609,6 +4923,38 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                             {simulationMode === 'voice' 
                                                 ? "A IA conversa usando voz em tempo real e captura suas respostas via microfone do navegador." 
                                                 : "A IA responderá e avaliará estritamente por mensagens escritas digitadas."}
+                                        </p>
+                                    </div>
+                                    
+                                    {/* SIMULATION TYPE SELECTOR */}
+                                    <div className="space-y-2">
+                                        <label className="block text-[9px] font-black text-zinc-400 uppercase tracking-widest ml-1">Modalidade da Simulação</label>
+                                        <div className={`grid grid-cols-2 gap-2 p-1 rounded-2xl border ${flowchartLightMode ? 'bg-zinc-100 border-zinc-200' : 'bg-zinc-950 border-zinc-855'}`}>
+                                            <button 
+                                                onClick={() => setIsInternshipMode(false)}
+                                                className={`py-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 ${
+                                                    !isInternshipMode 
+                                                        ? 'bg-indigo-600 text-white shadow-md' 
+                                                        : (flowchartLightMode ? 'text-zinc-500 hover:text-zinc-850' : 'text-zinc-500 hover:text-zinc-350')
+                                                }`}
+                                            >
+                                                <i className="fa-solid fa-graduation-cap text-xs"></i> Prática Padrão
+                                            </button>
+                                            <button 
+                                                onClick={() => setIsInternshipMode(true)}
+                                                className={`py-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 ${
+                                                    isInternshipMode 
+                                                        ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-md' 
+                                                        : (flowchartLightMode ? 'text-zinc-500 hover:text-zinc-855' : 'text-zinc-500 hover:text-zinc-350')
+                                                }`}
+                                            >
+                                                <i className="fa-solid fa-user-doctor text-xs"></i> Modo Estágio
+                                            </button>
+                                        </div>
+                                        <p className="text-[10px] font-semibold text-zinc-500 leading-relaxed ml-1.5">
+                                            {isInternshipMode 
+                                                ? "A IA preceptor resolve o caso e discute as condutas com você (estagiário). Sem notas." 
+                                                : "Você toma as decisões e a IA avalia seu desempenho com nota de 0 a 10 no final."}
                                         </p>
                                     </div>
                                     
@@ -4862,7 +5208,9 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                     <div>
                                         <h3 className={`font-black text-sm md:text-base ${flowchartLightMode ? 'text-zinc-900' : 'text-white'}`}><i className="fa-solid fa-chart-line text-indigo-400 mr-2"></i> Histórico de Casos Clínicos</h3>
                                     </div>
-                                    <span className={`text-[10px] font-black border px-3 py-1 rounded-full shrink-0 ${flowchartLightMode ? 'text-zinc-650 bg-zinc-100 border-zinc-200' : 'text-zinc-400 bg-zinc-800 border-zinc-700/50'}`}>{aiReviews.length} Tentativas</span>
+                                    <span className={`text-[10px] font-black border px-3 py-1 rounded-full shrink-0 ${flowchartLightMode ? 'text-zinc-650 bg-zinc-100 border-zinc-200' : 'text-zinc-400 bg-zinc-800 border-zinc-700/50'}`}>
+                                        {gradedReviews.length} Avaliações / {aiReviews.length - gradedReviews.length} Estágios
+                                    </span>
                                 </div>
                                 
                                 {aiReviews.length === 0 ? (
@@ -4946,9 +5294,109 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                                     );
                                                 }
                                                 return filtered.map((rev) => {
-                                                    const revColors = getScoreColor(rev.score);
                                                     const isExpanded = showTranscriptId === rev.id;
                                                     const revPersona = getPersonaAvatar(rev.persona);
+                                                    
+                                                    if (rev.isInternship) {
+                                                        return (
+                                                            <div 
+                                                                key={rev.id} 
+                                                                className={`p-4 md:p-5 rounded-[24px] border transition-all shadow-md relative overflow-hidden space-y-4 ${flowchartLightMode ? 'bg-zinc-50/50 border-zinc-200 hover:border-zinc-300 shadow-sm' : 'bg-zinc-950/40 border-zinc-850 hover:border-zinc-800'}`}
+                                                            >
+                                                                <div className="flex justify-between items-start gap-3">
+                                                                    <div className="space-y-1">
+                                                                        <h4 className={`text-xs font-black leading-snug line-clamp-1 ${flowchartLightMode ? 'text-zinc-900' : 'text-white'}`}>Estágio Médico: {selectedFlow.title}</h4>
+                                                                        <p className="text-[9px] font-bold text-zinc-500">
+                                                                            <i className="fa-solid fa-calendar-day mr-1"></i>
+                                                                            {new Date(rev.date).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                                                        </p>
+                                                                    </div>
+                                                                    <span className={`px-2.5 py-1 rounded-full text-[8px] font-black uppercase tracking-wider leading-none border ${
+                                                                        flowchartLightMode 
+                                                                            ? 'bg-purple-50 border-purple-200 text-purple-700' 
+                                                                            : 'bg-purple-500/10 border-purple-500/20 text-purple-400'
+                                                                    }`}>
+                                                                        <i className="fa-solid fa-user-doctor mr-1"></i> Estágio
+                                                                    </span>
+                                                                </div>
+                                                                
+                                                                <div className="h-px bg-zinc-850/60 my-1"></div>
+                                                                
+                                                                {/* COMMENT FROM MENTOR BUBBLE */}
+                                                                <div className={`p-3.5 rounded-xl border flex gap-3 ${
+                                                                    flowchartLightMode 
+                                                                        ? 'bg-zinc-100/50 border-zinc-200 text-zinc-800 shadow-sm' 
+                                                                        : `bg-gradient-to-br ${revPersona.color} border-zinc-850 text-white`
+                                                                }`}>
+                                                                    <div className={`w-8 h-8 rounded-lg shrink-0 flex items-center justify-center shadow-inner border ${flowchartLightMode ? 'bg-white border-zinc-250 text-indigo-650' : 'bg-black/40 border-zinc-800'}`}><i className={`fa-solid ${revPersona.icon} text-xs`}></i></div>
+                                                                    <div className="space-y-0.5 min-w-0">
+                                                                        <span className={`text-[9px] font-black leading-none block ${flowchartLightMode ? 'text-zinc-800' : 'text-white'}`}>{revPersona.label} (Preceptor)</span>
+                                                                        <p className={`text-[10px] font-semibold leading-relaxed text-justify-custom italic line-clamp-2 hover:line-clamp-none transition-all ${flowchartLightMode ? 'text-zinc-550' : 'text-zinc-400'}`}>"{rev.comment}"</p>
+                                                                    </div>
+                                                                </div>
+
+                                                                {/* LEARNING POINTS */}
+                                                                {rev.learningPoints && rev.learningPoints.length > 0 && (
+                                                                    <div className={`p-3.5 rounded-xl border ${flowchartLightMode ? 'bg-indigo-50/20 border-indigo-200' : 'bg-indigo-950/10 border-indigo-500/15'}`}>
+                                                                        <h5 className={`text-[9px] font-black uppercase tracking-wider mb-2 flex items-center gap-1.5 ${flowchartLightMode ? 'text-indigo-800' : 'text-indigo-400'}`}>
+                                                                            <i className="fa-solid fa-lightbulb text-indigo-500"></i> Lições Clínicas
+                                                                        </h5>
+                                                                        <ul className="space-y-1.5">
+                                                                            {rev.learningPoints.map((pt, i) => (
+                                                                                <li key={i} className="flex items-start gap-2 text-[10px] font-semibold leading-relaxed">
+                                                                                    <span className="w-4.5 h-4.5 rounded-full bg-indigo-500/10 flex items-center justify-center shrink-0 text-[8px] font-black text-indigo-450">{i + 1}</span>
+                                                                                    <span className={flowchartLightMode ? 'text-zinc-650' : 'text-zinc-350'}>{pt}</span>
+                                                                                </li>
+                                                                            ))}
+                                                                        </ul>
+                                                                    </div>
+                                                                )}
+
+                                                                {/* INTERN NOTES */}
+                                                                {rev.internNotes && (
+                                                                    <div className={`p-3.5 rounded-xl border ${flowchartLightMode ? 'bg-zinc-100 border-zinc-200' : 'bg-zinc-950/50 border-zinc-850'}`}>
+                                                                        <h5 className={`text-[9px] font-black uppercase tracking-wider mb-1 flex items-center gap-1.5 ${flowchartLightMode ? 'text-zinc-750' : 'text-zinc-400'}`}>
+                                                                            <i className="fa-solid fa-pen-nib text-indigo-550"></i> Suas Notas de Estudo
+                                                                        </h5>
+                                                                        <p className={`text-[10px] font-semibold leading-relaxed whitespace-pre-wrap ${flowchartLightMode ? 'text-zinc-650' : 'text-zinc-350'}`}>
+                                                                            {rev.internNotes}
+                                                                        </p>
+                                                                    </div>
+                                                                )}
+                                                                
+                                                                {/* EXPANDABLE TRANSCRIPT VIEW ACCORDION */}
+                                                                <div className="pt-1.5 flex justify-end">
+                                                                    <button 
+                                                                        onClick={() => setShowTranscriptId(isExpanded ? null : rev.id)}
+                                                                        className="text-[9px] font-black uppercase text-indigo-400 hover:text-indigo-300 transition-colors flex items-center gap-1"
+                                                                    >
+                                                                        <i className={`fa-solid ${isExpanded ? 'fa-folder-open' : 'fa-folder'} text-xs`}></i>
+                                                                        {isExpanded ? "Ocultar Histórico de Conversa" : "Ver Transcrito da Conversa"}
+                                                                    </button>
+                                                                </div>
+                                                                
+                                                                {isExpanded && rev.chatHistory && (
+                                                                    <div className={`mt-3 border rounded-xl p-3.5 space-y-3.5 max-h-[250px] overflow-y-auto planner-scroll shadow-inner ${flowchartLightMode ? 'bg-white border-zinc-200 text-zinc-800' : 'bg-zinc-950/80 border-zinc-900'}`}>
+                                                                        {rev.chatHistory.map((ch, idx) => {
+                                                                            const isUser = ch.role === 'user';
+                                                                            return (
+                                                                                <div key={idx} className="space-y-1">
+                                                                                    <span className={`text-[7px] font-black uppercase tracking-widest block ${isUser ? 'text-emerald-400 text-right' : 'text-indigo-400'}`}>
+                                                                                        {isUser ? "Estagiário" : "Preceptor Médico"}
+                                                                                    </span>
+                                                                                    <div className={`p-2.5 rounded-xl text-[10px] font-bold leading-relaxed whitespace-pre-wrap ${isUser ? (flowchartLightMode ? 'bg-emerald-50 text-emerald-900 border border-emerald-200 text-right ml-auto max-w-[90%]' : 'bg-emerald-950/30 text-white border border-emerald-900/30 text-right ml-auto max-w-[90%]') : (flowchartLightMode ? 'bg-zinc-100 text-zinc-850 border border-zinc-200 mr-auto max-w-[90%]' : 'bg-zinc-900 text-zinc-200 border border-zinc-800 mr-auto max-w-[90%]')}`}>
+                                                                                        {ch.text}
+                                                                                    </div>
+                                                                                </div>
+                                                                            );
+                                                                        })}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        );
+                                                    }
+
+                                                    const revColors = getScoreColor(rev.score);
                                                     
                                                     return (
                                                         <div 
