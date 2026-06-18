@@ -1882,6 +1882,15 @@ Para iniciar a simulação, responda agora APENAS com a introdução do caso cl�
             const handleFinishAndEvaluate = async () => {
                 stopSpeaking();
                 stopSpeechRecognition();
+                
+                // Se não há mensagens reais do usuário (erro na inicialização), apenas encerra
+                const hasUserMessages = activeReviewChatRef.current.some(m => m.role === 'user');
+                if (!hasUserMessages) {
+                    setIsSimulating(false);
+                    setIsEvaluating(false);
+                    return;
+                }
+                
                 setIsEvaluating(true);
                 
                 const protocolDoc = simulationPdfText 
@@ -2044,6 +2053,16 @@ Você deve retornar APENAS um objeto JSON válido, sem qualquer bloco de código
             const handleFinishInternship = async () => {
                 stopSpeaking();
                 stopSpeechRecognition();
+                
+                // Se não há mensagens reais (erro na inicialização), apenas encerra sem gerar síntese
+                const hasUserMessages = activeReviewChatRef.current.some(m => m.role === 'user');
+                if (!hasUserMessages) {
+                    setIsSimulating(false);
+                    setIsEvaluating(false);
+                    setInternNotesText('');
+                    return;
+                }
+                
                 setIsEvaluating(true);
                 
                 const protocolDoc = simulationPdfText 
@@ -4938,6 +4957,7 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                 <button 
                                     onClick={() => {
                                         if (window.confirm("Deseja gerar um novo caso clínico para este tema? O progresso do caso atual será descartado.")) {
+                                            setIsEvaluating(false);
                                             handleStartSimulation(simulationMode);
                                         }
                                     }}
@@ -4948,7 +4968,7 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                 
                                 <button 
                                     onClick={isInternshipMode ? handleFinishInternship : handleFinishAndEvaluate}
-                                    disabled={!hasMessages || isEvaluating}
+                                    disabled={isEvaluating}
                                     className={`flex-[2] disabled:from-zinc-850 disabled:to-zinc-850 disabled:text-zinc-600 disabled:pointer-events-none text-white font-black py-3.5 rounded-2xl shadow-xl transition-all flex items-center justify-center gap-2 text-xs active:scale-95 ${
                                         isInternshipMode 
                                             ? 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 border border-purple-400/20' 
