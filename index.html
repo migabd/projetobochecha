@@ -2254,7 +2254,7 @@ Você deve retornar APENAS um objeto JSON válido, sem qualquer bloco de código
                 nextDate.setHours(0, 0, 0, 0);
                 
                 const diffTime = nextDate.getTime() - today.getTime();
-                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
                 
                 if (diffDays < 0) {
                     return {
@@ -2299,7 +2299,7 @@ Você deve retornar APENAS um objeto JSON válido, sem qualquer bloco de código
                         nextDate.setHours(0, 0, 0, 0);
                         
                         const diffTime = nextDate.getTime() - today.getTime();
-                        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                        const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
                         
                         if (diffDays < 0) {
                             // Overdue. The more overdue, the higher the score.
@@ -3101,6 +3101,10 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
             // ==========================================
             if (view === 'shift_setup') {
                 const prioritizedList = getPrioritizedFlows;
+                const overdueCount = prioritizedList.filter(f => {
+                    const info = getReviewInfo(f);
+                    return info.isOverdue || info.isDueToday;
+                }).length;
                 const totalAvailable = prioritizedList.length;
                 const activeQueue = prioritizedList.slice(0, Math.min(shiftTotalCases, totalAvailable));
 
@@ -3134,6 +3138,15 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                     {/* Quick Selection Buttons */}
                                     <div className="space-y-2">
                                         <label className="block text-[9px] font-black text-zinc-500 dark:text-zinc-400 uppercase tracking-widest">Número de Pacientes (Casos)</label>
+                                        {overdueCount > 0 && (
+                                            <button
+                                                type="button"
+                                                onClick={() => setShiftTotalCases(overdueCount)}
+                                                className={`w-full py-2.5 px-4 rounded-xl text-xs font-black transition-all mb-2 flex items-center justify-center gap-2 ${shiftTotalCases === overdueCount ? 'bg-purple-600 text-white shadow-md' : 'bg-purple-50 dark:bg-purple-950/20 text-purple-600 dark:text-purple-400 border border-purple-200 dark:border-purple-800/40 hover:bg-purple-100 dark:hover:bg-purple-950/40'}`}
+                                            >
+                                                <i className="fa-solid fa-calendar-check text-[10px]"></i> Todos os Atrasados ({overdueCount})
+                                            </button>
+                                        )}
                                         <div className="grid grid-cols-4 gap-2">
                                             {[2, 3, 5, 8].map(n => (
                                                 <button 
@@ -3268,7 +3281,9 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                         <div className="flex justify-between items-center">
                                             <div>
                                                 <h3 className="font-black text-sm text-zinc-900 dark:text-white flex items-center"><i className="fa-solid fa-list-ol text-purple-600 dark:text-purple-400 mr-2"></i> Pacientes do Plantão</h3>
-                                                <p className="text-zinc-600 dark:text-zinc-400 text-[10px] font-semibold leading-relaxed">Fila de atendimento priorizada pelo método de repetição espaçada.</p>
+                                                <p className="text-zinc-600 dark:text-zinc-400 text-[10px] font-semibold leading-relaxed">
+                                                    Fila priorizada. {overdueCount > 0 ? `Você tem ${overdueCount} ${overdueCount === 1 ? 'paciente atrasado' : 'pacientes atrasados'}.` : 'Nenhum paciente atrasado hoje.'}
+                                                </p>
                                             </div>
                                             <span className="text-[10px] font-black text-purple-700 dark:text-purple-300 bg-purple-100 dark:bg-purple-500/10 border border-purple-300 dark:border-purple-500/25 px-3 py-1 rounded-full shrink-0">{activeQueue.length} Temas</span>
                                         </div>
@@ -3512,6 +3527,16 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                             {fluxogramas.length > 0 && (
                                 <div 
                                     onClick={() => {
+                                        const prioritizedList = getPrioritizedFlows;
+                                        const overdueCount = prioritizedList.filter(f => {
+                                            const info = getReviewInfo(f);
+                                            return info.isOverdue || info.isDueToday;
+                                        }).length;
+                                        if (overdueCount > 0) {
+                                            setShiftTotalCases(overdueCount);
+                                        } else {
+                                            setShiftTotalCases(Math.min(3, prioritizedList.length));
+                                        }
                                         setView('shift_setup');
                                         setShiftView('setup');
                                     }} 
