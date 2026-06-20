@@ -845,7 +845,7 @@
             return corrected;
         };
 
-const FluxogramasTab = React.memo(({ db, fluxogramas = [], setDb, callIA, extractTextFromPDF, aiConfig, setAiConfig, availableModels = [] }) => {
+const FluxogramasTab = React.memo(({ db, fluxogramas = [], setDb, callIA, extractTextFromPDF, aiConfig, setAiConfig, availableModels = [], pendingFlowchartImport, setPendingFlowchartImport }) => {
             const [view, setView] = React.useState('decks');
             const [selectedDeck, setSelectedDeck] = React.useState(null);
             const [selectedFlow, setSelectedFlow] = React.useState(null);
@@ -912,6 +912,32 @@ const FluxogramasTab = React.memo(({ db, fluxogramas = [], setDb, callIA, extrac
             const [isRecognitionActive, setIsRecognitionActive] = React.useState(false);
             const [isVoiceSynthesizing, setIsVoiceSynthesizing] = React.useState(false);
             const [gradingScorecard, setGradingScorecard] = React.useState(null);
+            const [isQuickReview, setIsQuickReview] = React.useState(false);
+            const [quickReviewTimeLeft, setQuickReviewTimeLeft] = React.useState(300);
+
+            React.useEffect(() => {
+                let timer;
+                if (isSimulating && isQuickReview && quickReviewTimeLeft > 0) {
+                    timer = setInterval(() => {
+                        setQuickReviewTimeLeft(prev => {
+                            if (prev <= 1) {
+                                clearInterval(timer);
+                                return 0;
+                            }
+                            return prev - 1;
+                        });
+                    }, 1000);
+                }
+                return () => {
+                    if (timer) clearInterval(timer);
+                };
+            }, [isSimulating, isQuickReview, quickReviewTimeLeft]);
+
+            React.useEffect(() => {
+                if (isSimulating && isQuickReview && quickReviewTimeLeft === 0 && !isEvaluating) {
+                    handleFinishAndEvaluate();
+                }
+            }, [isSimulating, isQuickReview, quickReviewTimeLeft, isEvaluating]);
             
             // Focus Selector States (escolher parte do fluxograma antes da revisão)
             const [showFocusSelector, setShowFocusSelector] = React.useState(false);
@@ -1032,6 +1058,18 @@ const FluxogramasTab = React.memo(({ db, fluxogramas = [], setDb, callIA, extrac
             const [creatorFocus, setCreatorFocus] = React.useState('');
             const [pdfFile, setPdfFile] = React.useState(null);
             const [generatingStatus, setGeneratingStatus] = React.useState('');
+            
+            React.useEffect(() => {
+                if (pendingFlowchartImport) {
+                    setCreatorMode('text');
+                    setCreatorTitle(`Fluxograma: ${pendingFlowchartImport.title}`);
+                    setCreatorCategory(pendingFlowchartImport.category || 'Geral');
+                    setCreatorPrompt(pendingFlowchartImport.prompt);
+                    setCreatorFocus('Focar em criar um algoritmo clínico completo e condutas detalhadas com base no caso clínico fornecido.');
+                    setIsCreating(true);
+                    setPendingFlowchartImport(null);
+                }
+            }, [pendingFlowchartImport]);
             
             // Mobile Optimization States
             const [checklistSearch, setChecklistSearch] = React.useState('');
@@ -1695,6 +1733,7 @@ const FluxogramasTab = React.memo(({ db, fluxogramas = [], setDb, callIA, extrac
                 setGradingScorecard(null);
                 setIsEvaluating(false);
                 setChatInputText('');
+                setQuickReviewTimeLeft(300);
                 
                 const flowTitle = flowToSimulate.title;
                 const flowDesc = flowToSimulate.description || '';
@@ -1779,6 +1818,15 @@ As demais etapas do fluxograma podem aparecer como contexto, mas o FOCO principa
                     return '';
                 })();
 
+                const quickReviewPromptInstructions = isQuickReview 
+                    ? `\nATENÇÃO - MODO REVISÃO RÁPIDA (MÁXIMO 5 MINUTOS):
+Você está conduzindo uma Revisão Rápida e focada no essencial do protocolo.
+- O tempo limite total da simulação é de 5 minutos, então as interações devem ser rápidas e diretas.
+- Foque apenas nas etapas críticas e tomadas de decisão cruciais do fluxograma.
+- Apresente informações sucintas, sem enrolação. As falas do paciente e da equipe devem ser curtas e objetivas.
+- Conduza o estudante diretamente aos pontos fundamentais do fluxograma.`
+                    : '';
+
                 const initialPrompt = isInternshipMode
                     ? `Você é um Preceptor Médico (Mentor de Simulação Clínica) no MODO ESTÁGIO de aprendizado.
 Sua missão é conduzir uma discussão de Caso Clínico interativa com o estudante, que está atuando como seu ESTAGIÁRIO.
@@ -1787,7 +1835,7 @@ Siga rigorosamente a seguinte referência médica (fluxograma):
 ${guidelineContext}
 ${pastCasesBlock}
 ${diversityBlock}
-${focusBlock}
+${focusBlock}${quickReviewPromptInstructions}
 REGRAS DO MODO ESTÁGIO:
 1. Crie uma apresentação inicial do paciente (caso clínico INÉDITO, realista e compatível com a diretriz).
 2. Diferente da simulação padrão, no MODO ESTÁGIO você (a IA preceptor) é quem conduz o atendimento médico principal. Você deve ir progredindo e tomando as condutas corretas baseadas no fluxograma.
@@ -1801,7 +1849,7 @@ Sua missão é conduzir uma simulação clínica interativa (Caso Clínico) onde
 ${guidelineContext}
 ${pastCasesBlock}
 ${diversityBlock}
-${focusBlock}
+${focusBlock}${quickReviewPromptInstructions}
 INSTRUÇÕES IMPORTANTES DA SIMULAÇÃO:
 1. Crie uma apresentação inicial do paciente (caso clínico INÉDITO, realista, compatível com a diretriz e DIFERENTE de todos os casos anteriores listados acima). O caso DEVE ser 100% compatível com a referência e usar a demografia/variação da diretriz de diversidade acima.
 2. NUNCA diga o diagnóstico, o nome das condutas corretas ou o caminho ideal diretamente. O estudante deve investigar e tomar as decisões.
@@ -1809,6 +1857,11 @@ INSTRUÇÕES IMPORTANTES DA SIMULAÇÃO:
 4. Mantenha as respostas curtas e objetivas, agindo como a equipe de enfermagem ou o próprio paciente, estimulando o raciocínio socrático.
 5. Se o usuário escolher o Modo Voz (você está nesse modo se \`mode === 'voice'\`), suas falas devem ser curtas e dinâmicas, prontas para serem lidas em voz alta.
 6. A personalidade do seu mentor clínico deve seguir o tom: "${getLocalPersonaInstruction(aiConfig?.persona || 'amigavel', 'chat')}".
+7. ATENÇÃO: Apenas na sua primeira resposta você deve apresentar a introdução do caso clínico do paciente. Nas respostas e interações seguintes, prossiga com a simulação fornecendo exames, respostas clínicas e reações de acordo com o que o estudante solicitar, sem NUNCA mais repetir a introdução ou o caso clínico inicial.
+
+Para iniciar a simulação, responda agora APENAS com a introdução do caso clínico inicial do paciente e pergunte qual é a primeira conduta ou pergunta do estudante.`;
+
+                const initialMessages = [{ role: 'system', text: initialPrompt }];om: "${getLocalPersonaInstruction(aiConfig?.persona || 'amigavel', 'chat')}".
 7. ATENÇÃO: Apenas na sua primeira resposta você deve apresentar a introdução do caso clínico do paciente. Nas respostas e interações seguintes, prossiga com a simulação fornecendo exames, respostas clínicas e reações de acordo com o que o estudante solicitar, sem NUNCA mais repetir a introdução ou o caso clínico inicial.
 
 Para iniciar a simulação, responda agora APENAS com a introdução do caso clínico inicial do paciente e pergunte qual é a primeira conduta ou pergunta do estudante.`;
@@ -1897,6 +1950,10 @@ Para iniciar a simulação, responda agora APENAS com a introdução do caso cl�
                     ? `Diretriz médica fornecida pelo usuário (PDF):\n${simulationPdfText.substring(0, 12000)}`
                     : `fluxograma "${selectedFlow.title}"`;
 
+                const quickReviewEvalInstructions = isQuickReview
+                    ? `\nATENÇÃO: Esta foi uma REVISÃO RÁPIDA (tempo limite de 5 minutos, focada no essencial). Avalie o desempenho considerando o foco no essencial e o tempo reduzido.`
+                    : '';
+
                 const evaluationPrompt = `Você concluiu a simulação. Agora, realize uma avaliação clínica extremamente criteriosa baseada nos diálogos acima, seguindo rigorosamente as diretrizes da "Escala de Avaliação Médica de 0 a 10" do PDF:
 
 DOMÍNIOS DE AVALIAÇÃO:
@@ -1912,6 +1969,7 @@ CLASSIFICAÇÃO FINAL DA NOTA PONDERADA (calculada como D1*0.15 + D2*0.15 + D3*0
 - 6.0 – 7.4: Bom
 - 7.5 – 8.9: Muito bom
 - 9.0 – 10.0: Excelente
+${quickReviewEvalInstructions}
 
 COMENTÁRIO DO MENTOR:
 Escreva um comentário de avaliação personalizado em português, com no máximo 4 linhas.
@@ -3132,6 +3190,27 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                         </div>
                                     </div>
 
+                                    {/* Shift Review Duration Selector */}
+                                    <div className="space-y-2">
+                                        <label className="block text-[9px] font-black text-zinc-500 dark:text-zinc-400 uppercase tracking-widest">Duração por Paciente</label>
+                                        <div className="grid grid-cols-2 gap-2 bg-zinc-100 dark:bg-zinc-950 p-1 rounded-2xl border border-zinc-200 dark:border-zinc-800">
+                                            <button 
+                                                type="button"
+                                                onClick={() => setIsQuickReview(false)}
+                                                className={`py-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 ${!isQuickReview ? 'bg-purple-600 text-white shadow-md' : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200'}`}
+                                            >
+                                                <i className="fa-solid fa-hourglass-three-quarters text-xs"></i> Completa (Padrão)
+                                            </button>
+                                            <button 
+                                                type="button"
+                                                onClick={() => setIsQuickReview(true)}
+                                                className={`py-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 ${isQuickReview ? 'bg-purple-600 text-white shadow-md' : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200'}`}
+                                            >
+                                                <i className="fa-solid fa-bolt text-xs"></i> Rápida (5 min)
+                                            </button>
+                                        </div>
+                                    </div>
+
                                     {/* Model selector */}
                                     <div className="space-y-2">
                                         <label className="block text-[9px] font-black text-zinc-500 dark:text-zinc-400 uppercase tracking-widest">Modelo de Inteligência</label>
@@ -4284,6 +4363,11 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                     <div className="min-w-0">
                                         <div className="flex items-center gap-2 flex-wrap">
                                             <span className={`text-[9px] font-black uppercase tracking-widest leading-none ${flowchartLightMode ? 'text-indigo-600' : 'text-indigo-400'}`}>Simulação Clínica Ativa</span>
+                                            {isQuickReview && (
+                                                <span className="px-2 py-0.5 rounded-full border text-[8px] font-black flex items-center gap-1 leading-none bg-amber-500/10 border-amber-500/25 text-amber-600 dark:text-amber-400 animate-pulse">
+                                                    <i className="fa-solid fa-bolt text-[8px]"></i> Revisão Rápida
+                                                </span>
+                                            )}
                                             {(selectedFocusId !== 'full' || (selectedFocusId === 'custom' && customFocusText)) && (
                                                 <span className={`px-2 py-0.5 rounded-full border text-[8px] font-black flex items-center gap-1 leading-none ${flowchartLightMode ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-indigo-950/60 border-indigo-500/30 text-indigo-300'}`}>
                                                     <i className="fa-solid fa-crosshairs text-[8px]"></i>
@@ -4294,6 +4378,17 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                         <h3 className={`text-base font-black truncate mt-1 ${flowchartLightMode ? 'text-zinc-900' : 'text-white'}`}>{selectedFlow?.title || 'Caso Clínico'}</h3>
                                     </div>
                                 </div>
+                                
+                                {isQuickReview && (
+                                    <div className={`px-4 py-2 rounded-2xl border text-xs font-black flex items-center gap-2 ${
+                                        quickReviewTimeLeft <= 60 
+                                            ? 'bg-rose-500/10 border-rose-500/30 text-rose-650 dark:text-rose-455 animate-pulse shadow-lg shadow-rose-900/10' 
+                                            : (flowchartLightMode ? 'bg-zinc-50 border-zinc-200 text-zinc-700 shadow-sm' : 'bg-zinc-950/50 border-zinc-850 text-amber-450')
+                                    }`}>
+                                        <i className={`fa-solid ${quickReviewTimeLeft <= 60 ? 'fa-triangle-exclamation' : 'fa-stopwatch'} text-xs`}></i>
+                                        <span>Tempo Restante: {Math.floor(quickReviewTimeLeft / 60)}:{(quickReviewTimeLeft % 60).toString().padStart(2, '0')}</span>
+                                    </div>
+                                )}
                                 
                                 {/* HEADER CONTROLS (Novo Caso / Cancelar) */}
                                 <div className="flex items-center gap-2.5 w-full md:w-auto">
@@ -5317,6 +5412,33 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                     
                                     {/* Footer */}
                                     <div className={`p-5 pt-3 border-t ${flowchartLightMode ? 'border-zinc-200 bg-zinc-50' : 'border-zinc-800 bg-zinc-950/50'}`}>
+                                        <div className="mb-4">
+                                            <label className="block text-[9px] font-black text-zinc-500 dark:text-zinc-400 uppercase tracking-widest mb-2">Duração da Revisão</label>
+                                            <div className={`flex p-0.5 rounded-xl border ${flowchartLightMode ? 'bg-zinc-100 border-zinc-200' : 'bg-zinc-950 border-zinc-850'}`}>
+                                                <button 
+                                                    type="button"
+                                                    onClick={() => setIsQuickReview(false)}
+                                                    className={`flex-1 py-2 rounded-lg text-[10px] font-black transition-all flex items-center justify-center gap-1.5 ${
+                                                        !isQuickReview 
+                                                            ? 'bg-indigo-650 text-white shadow-sm' 
+                                                            : 'text-zinc-550 dark:text-zinc-450 hover:text-zinc-700 dark:hover:text-zinc-300'
+                                                    }`}
+                                                >
+                                                    <i className="fa-solid fa-hourglass-three-quarters text-[9px]"></i> Completa (Padrão)
+                                                </button>
+                                                <button 
+                                                    type="button"
+                                                    onClick={() => setIsQuickReview(true)}
+                                                    className={`flex-1 py-2 rounded-lg text-[10px] font-black transition-all flex items-center justify-center gap-1.5 ${
+                                                        isQuickReview 
+                                                            ? 'bg-indigo-650 text-white shadow-sm' 
+                                                            : 'text-zinc-550 dark:text-zinc-450 hover:text-zinc-700 dark:hover:text-zinc-300'
+                                                    }`}
+                                                >
+                                                    <i className="fa-solid fa-bolt text-[9px]"></i> Rápida (5 min)
+                                                </button>
+                                            </div>
+                                        </div>
                                         <button 
                                             onClick={handleConfirmFocusAndStart}
                                             className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-black py-3.5 rounded-2xl shadow-xl shadow-indigo-950/40 border border-indigo-400/20 transition-all hover:shadow-indigo-500/20 active:scale-95 flex items-center justify-center gap-2 text-sm"
@@ -6355,7 +6477,7 @@ className="flex-1 w-full h-full relative cursor-grab active:cursor-grabbing over
         };
 
         // --- ABA DESAFIO CLÍNICO DIÁRIO ---
-        const DesafioDiarioTab = React.memo(({ db, setDb, callIA, aiConfig, availableModels, setActiveTab, onActiveChallengeChange, notionConfig, generateAndSendToNotion }) => {
+        const DesafioDiarioTab = React.memo(({ db, setDb, callIA, aiConfig, availableModels, setActiveTab, onActiveChallengeChange, notionConfig, generateAndSendToNotion, setPendingFlowchartImport }) => {
             const [viewMode, setViewMode] = useState('dashboard');
             const [activeChallenge, setActiveChallenge] = useState(null);
             const [answer, setAnswer] = useState('');
@@ -8000,7 +8122,24 @@ Retorne a resposta refinada em formato Markdown profissional e limpo. Retorne AP
                                     
                                     <div className="h-px bg-zinc-200 dark:bg-zinc-800"></div>
 
-                                    <div className="prose dark:prose-invert max-w-none text-zinc-700 dark:text-zinc-300 font-semibold leading-relaxed text-sm text-justify-custom font-sans" dangerouslySetInnerHTML={{ __html: parseMarkdown(challengeToRender.caseReport) }} />
+                                    <div className="prose dark:prose-invert max-w-none text-zinc-700 dark:text-zinc-300 font-semibold leading-relaxed text-sm text-justify-custom font-sans mb-4" dangerouslySetInnerHTML={{ __html: parseMarkdown(challengeToRender.caseReport) }} />
+                                    
+                                    <div className="flex justify-end pt-2 border-t border-zinc-100 dark:border-zinc-850">
+                                        <button
+                                            onClick={() => {
+                                                setPendingFlowchartImport({
+                                                    title: challengeToRender.title,
+                                                    category: challengeToRender.specialty,
+                                                    prompt: `Caso Clínico:\n${challengeToRender.caseReport}\n\nEspecialidade: ${challengeToRender.specialty}\n\nGabarito e Condutas Esperadas:\n- Diagnóstico Final: ${challengeToRender.gabarito?.diagnostico_final || 'Não disponível'}\n- Pontos de Anamnese: ${challengeToRender.gabarito?.pontos_anamnese || 'Não disponível'}\n- Pontos de Exame Físico: ${challengeToRender.gabarito?.pontos_exame_fisico || 'Não disponível'}\n- Pontos de Raciocínio: ${challengeToRender.gabarito?.pontos_raciocinio || 'Não disponível'}\n- Pontos de Conduta: ${challengeToRender.gabarito?.pontos_conduta || 'Não disponível'}`
+                                                });
+                                                setActiveTab('fluxogramas');
+                                            }}
+                                            className="px-4 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white rounded-xl font-black text-xs transition-all active:scale-95 shadow-md flex items-center gap-2 font-sans"
+                                            title="Transformar este desafio clínico em um fluxograma de condutas"
+                                        >
+                                            <i className="fa-solid fa-diagram-project"></i> Transformar em Fluxograma
+                                        </button>
+                                    </div>
                                 </div>
 
                                 {/* Lado Direito - Imagens, Resposta e Avaliação */}
@@ -9896,6 +10035,7 @@ Retorne apenas o texto da resposta, sem JSON ou tags explicativas.`;
             // --- ESTADO DO ASSISTENTE FLUTUANTE ---
             const [floatingAi, setFloatingAi] = useState({ isOpen: false, query: '', result: '', isLoading: false, includeScreen: true });
             const [activeChallengeInfo, setActiveChallengeInfo] = useState(null);
+            const [pendingFlowchartImport, setPendingFlowchartImport] = useState(null);
 
             useEffect(() => {
                 if (chatMessages.length === 0) {
@@ -11369,16 +11509,21 @@ Gere um resumo PROFUNDO e PERSONALIZADO para este caso clínico. O resumo deve s
                         }
 
                         // Inserir imagens após a seção de análise de imagens
-                        // (Tenta fazer upload da imagem base64 para o Catbox via Worker; se falhar, usa o proxy limpo do EuropePMC)
-                        if (secao.heading && (secao.heading.includes('Imagem') || secao.heading.includes('imagem') || secao.heading.includes('🖼'))) {
+                        // (Tenta fazer upload da imagem base64 para o Catbox via Worker; se falhar, usa a URL original do EuropePMC)
+                        const headingLower = (secao.heading || '').toLowerCase();
+                        if (headingLower.includes('imagem') || headingLower.includes('imagens') || headingLower.includes('figura') || headingLower.includes('exame') || headingLower.includes('🖼')) {
                             for (const fig of challengeFigures) {
-                                const imageUrl = fig.url;
-                                if (imageUrl && !imageUrl.startsWith('data:')) {
+                                const imageUrl = fig.url || fig.dataUrl;
+                                if (imageUrl) {
                                     try {
                                         const captionText = `${fig.label || 'Imagem'}${fig.caption ? ' — ' + fig.caption.substring(0, 200) : ''}`;
                                         const cleanProxyUrl = notionConfig.proxyUrl.endsWith('/') ? notionConfig.proxyUrl.slice(0, -1) : notionConfig.proxyUrl;
-                                        const urlParts = imageUrl.split('/');
-                                        const fileName = urlParts[urlParts.length - 1];
+                                        
+                                        let fileName = `imagem_${fig.id || Math.random().toString(36).substring(7)}.jpg`;
+                                        if (fig.url && !fig.url.startsWith('data:')) {
+                                            const urlParts = fig.url.split('/');
+                                            fileName = urlParts[urlParts.length - 1];
+                                        }
 
                                         let finalImageUrl = null;
                                         
@@ -11413,6 +11558,12 @@ Gere um resumo PROFUNDO e PERSONALIZADO para este caso clínico. O resumo deve s
                                             console.warn('[Notion] ⚠️ Sem dataUrl para:', fileName);
                                         }
 
+                                        // Fallback: se o upload falhou mas temos uma URL original pública válida, usamos ela
+                                        if (!finalImageUrl && fig.url && fig.url.startsWith('http')) {
+                                            finalImageUrl = fig.url;
+                                            console.log('[Notion] 🔄 Fallback: usando URL pública original:', finalImageUrl);
+                                        }
+
                                         if (finalImageUrl) {
                                             notionChildren.push({
                                                 object: 'block', type: 'image',
@@ -11426,7 +11577,7 @@ Gere um resumo PROFUNDO e PERSONALIZADO para este caso clínico. O resumo deve s
                                             notionChildren.push({
                                                 object: 'block', type: 'callout',
                                                 callout: {
-                                                    rich_text: [{ type: 'text', text: { content: `📷 ${fig.label || 'Imagem'}: Upload falhou. Ver original: ${imageUrl}` } }],
+                                                    rich_text: [{ type: 'text', text: { content: `📷 ${fig.label || 'Imagem'}: Upload falhou e sem URL pública. Ver original: ${imageUrl.substring(0, 200)}...` } }],
                                                     icon: { type: 'emoji', emoji: '🖼️' },
                                                     color: 'gray_background'
                                                 }
@@ -18494,8 +18645,8 @@ ${(obj.questoesAnalisadas || []).map(q => `### ${q.identificacao}
                     );
                     case 'resumos_html': return renderResumosHtmlTab();
                     case 'analise_reversa': return renderReverseAnalysisTab();
-                    case 'fluxogramas': return <FluxogramasTab db={db} fluxogramas={db.fluxogramas} setDb={setDb} callIA={callIA} extractTextFromPDF={window.extractTextFromPDF || extractTextFromPDF} aiConfig={aiConfig} setAiConfig={setAiConfig} availableModels={availableModels} />;
-                    case 'desafio_diario': return <DesafioDiarioTab db={db} setDb={setDb} callIA={callIA} aiConfig={aiConfig} availableModels={availableModels} setActiveTab={setActiveTab} onActiveChallengeChange={setActiveChallengeInfo} notionConfig={notionConfig} generateAndSendToNotion={generateAndSendToNotion} />;
+                    case 'fluxogramas': return <FluxogramasTab db={db} fluxogramas={db.fluxogramas} setDb={setDb} callIA={callIA} extractTextFromPDF={window.extractTextFromPDF || extractTextFromPDF} aiConfig={aiConfig} setAiConfig={setAiConfig} availableModels={availableModels} pendingFlowchartImport={pendingFlowchartImport} setPendingFlowchartImport={setPendingFlowchartImport} />;
+                    case 'desafio_diario': return <DesafioDiarioTab db={db} setDb={setDb} callIA={callIA} aiConfig={aiConfig} availableModels={availableModels} setActiveTab={setActiveTab} onActiveChallengeChange={setActiveChallengeInfo} notionConfig={notionConfig} generateAndSendToNotion={generateAndSendToNotion} setPendingFlowchartImport={setPendingFlowchartImport} />;
                     default: return renderErrorList();
                 }
             };
