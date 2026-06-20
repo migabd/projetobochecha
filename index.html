@@ -915,29 +915,7 @@ const FluxogramasTab = React.memo(({ db, fluxogramas = [], setDb, callIA, extrac
             const [isQuickReview, setIsQuickReview] = React.useState(false);
             const [quickReviewTimeLeft, setQuickReviewTimeLeft] = React.useState(300);
 
-            React.useEffect(() => {
-                let timer;
-                if (isSimulating && isQuickReview && quickReviewTimeLeft > 0) {
-                    timer = setInterval(() => {
-                        setQuickReviewTimeLeft(prev => {
-                            if (prev <= 1) {
-                                clearInterval(timer);
-                                return 0;
-                            }
-                            return prev - 1;
-                        });
-                    }, 1000);
-                }
-                return () => {
-                    if (timer) clearInterval(timer);
-                };
-            }, [isSimulating, isQuickReview, quickReviewTimeLeft]);
-
-            React.useEffect(() => {
-                if (isSimulating && isQuickReview && quickReviewTimeLeft === 0 && !isEvaluating) {
-                    handleFinishAndEvaluate();
-                }
-            }, [isSimulating, isQuickReview, quickReviewTimeLeft, isEvaluating]);
+             // Timer logic for Quick Review moved below
             
             // Focus Selector States (escolher parte do fluxograma antes da revisão)
             const [showFocusSelector, setShowFocusSelector] = React.useState(false);
@@ -2203,6 +2181,31 @@ Você deve retornar APENAS um objeto JSON válido, sem qualquer bloco de código
                     setIsEvaluating(false);
                 }
             };
+            
+            // Timer logic for Quick Review
+            React.useEffect(() => {
+                let timer;
+                if (isSimulating && isQuickReview && quickReviewTimeLeft > 0) {
+                    timer = setInterval(() => {
+                        setQuickReviewTimeLeft(prev => {
+                            if (prev <= 1) {
+                                clearInterval(timer);
+                                return 0;
+                            }
+                            return prev - 1;
+                        });
+                    }, 1000);
+                }
+                return () => {
+                    if (timer) clearInterval(timer);
+                };
+            }, [isSimulating, isQuickReview, quickReviewTimeLeft]);
+
+            React.useEffect(() => {
+                if (isSimulating && isQuickReview && quickReviewTimeLeft === 0 && !isEvaluating) {
+                    handleFinishAndEvaluate();
+                }
+            }, [isSimulating, isQuickReview, quickReviewTimeLeft, isEvaluating]);
 
             // Mobile detection listener
             React.useEffect(() => {
