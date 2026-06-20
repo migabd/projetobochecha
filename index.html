@@ -1861,11 +1861,6 @@ INSTRUÇÕES IMPORTANTES DA SIMULAÇÃO:
 
 Para iniciar a simulação, responda agora APENAS com a introdução do caso clínico inicial do paciente e pergunte qual é a primeira conduta ou pergunta do estudante.`;
 
-                const initialMessages = [{ role: 'system', text: initialPrompt }];om: "${getLocalPersonaInstruction(aiConfig?.persona || 'amigavel', 'chat')}".
-7. ATENÇÃO: Apenas na sua primeira resposta você deve apresentar a introdução do caso clínico do paciente. Nas respostas e interações seguintes, prossiga com a simulação fornecendo exames, respostas clínicas e reações de acordo com o que o estudante solicitar, sem NUNCA mais repetir a introdução ou o caso clínico inicial.
-
-Para iniciar a simulação, responda agora APENAS com a introdução do caso clínico inicial do paciente e pergunte qual é a primeira conduta ou pergunta do estudante.`;
-
                 const initialMessages = [{ role: 'system', text: initialPrompt }];
                 setActiveReviewChat(initialMessages);
                 setIsEvaluating(true);
