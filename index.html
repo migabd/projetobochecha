@@ -2364,6 +2364,7 @@ Você deve retornar APENAS um objeto JSON válido, sem qualquer bloco de código
                     const info = getReviewInfo(flow);
                     let score = 0;
                     
+                    if (flow.nextReviewDate) {
                         const today = db.isReviewPaused && db.pausedAt
                             ? parseDateAsLocalMidnight(db.pausedAt)
                             : (() => {
