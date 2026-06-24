@@ -878,6 +878,59 @@ const FluxogramasTab = React.memo(({ db, fluxogramas = [], setDb, callIA, extrac
             // Screen detection
             const [isMobile, setIsMobile] = React.useState(false);
             
+            const handleTogglePauseReviews = () => {
+                if (db.isReviewPaused) {
+                    const pausedAtDate = parseDateAsLocalMidnight(db.pausedAt);
+                    if (!pausedAtDate) {
+                        setDb(prev => ({
+                            ...prev,
+                            isReviewPaused: false,
+                            pausedAt: null
+                        }));
+                        return;
+                    }
+                    
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    
+                    const diffTime = today.getTime() - pausedAtDate.getTime();
+                    const daysPaused = Math.round(diffTime / (1000 * 60 * 60 * 24));
+                    
+                    setDb(prev => {
+                        const updatedFlows = (prev.fluxogramas || []).map(flow => {
+                            if (!flow.nextReviewDate) return flow;
+                            
+                            const nextDate = parseDateAsLocalMidnight(flow.nextReviewDate);
+                            if (daysPaused > 0 && nextDate) {
+                                nextDate.setDate(nextDate.getDate() + daysPaused);
+                                return {
+                                    ...flow,
+                                    nextReviewDate: nextDate.toISOString()
+                                };
+                            }
+                            return flow;
+                        });
+                        
+                        return {
+                            ...prev,
+                            fluxogramas: updatedFlows,
+                            isReviewPaused: false,
+                            pausedAt: null
+                        };
+                    });
+                    
+                    alert(`✅ Revisões retomadas! O cronograma de todos os fluxogramas foi adiado em ${daysPaused} ${daysPaused === 1 ? 'dia' : 'dias'} correspondente(s) ao tempo pausado.`);
+                } else {
+                    if (window.confirm("Deseja pausar a contagem de revisões para todos os fluxogramas? O cronograma atual ficará congelado até que você retome.")) {
+                        setDb(prev => ({
+                            ...prev,
+                            isReviewPaused: true,
+                            pausedAt: new Date().toISOString()
+                        }));
+                    }
+                }
+            };
+            
             // Layout and view states
             const [pan, setPan] = React.useState({ x: 0, y: 0 });
             const [zoom, setZoom] = React.useState(1);
@@ -2263,8 +2316,13 @@ Você deve retornar APENAS um objeto JSON válido, sem qualquer bloco de código
                     isDueToday: false 
                 };
                 
-                const today = new Date();
-                today.setHours(0, 0, 0, 0);
+                const today = db.isReviewPaused && db.pausedAt
+                    ? parseDateAsLocalMidnight(db.pausedAt)
+                    : (() => {
+                        const d = new Date();
+                        d.setHours(0, 0, 0, 0);
+                        return d;
+                    })();
                 const nextDate = parseDateAsLocalMidnight(flow.nextReviewDate);
                 
                 const diffTime = nextDate.getTime() - today.getTime();
@@ -2306,9 +2364,13 @@ Você deve retornar APENAS um objeto JSON válido, sem qualquer bloco de código
                     const info = getReviewInfo(flow);
                     let score = 0;
                     
-                    if (flow.nextReviewDate) {
-                        const today = new Date();
-                        today.setHours(0, 0, 0, 0);
+                        const today = db.isReviewPaused && db.pausedAt
+                            ? parseDateAsLocalMidnight(db.pausedAt)
+                            : (() => {
+                                const d = new Date();
+                                d.setHours(0, 0, 0, 0);
+                                return d;
+                            })();
                         const nextDate = parseDateAsLocalMidnight(flow.nextReviewDate);
                         
                         const diffTime = nextDate.getTime() - today.getTime();
@@ -3528,11 +3590,29 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                     <h2 className="text-2xl md:text-3xl lg:text-4xl font-black text-white mb-2"><i className="fa-solid fa-folder-tree text-emerald-400 mr-2 md:mr-3"></i> Fluxogramas de Conduta</h2>
                                     <p className="text-sm md:text-base text-emerald-200/70 font-medium leading-relaxed">Estude diretrizes médicas e condutas em um mapa mental premium de repetição espaçada.</p>
                                 </div>
-                                <button onClick={() => setIsCreating(true)} className="w-full md:w-auto px-5 py-3.5 md:px-6 md:py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-2xl flex items-center justify-center gap-2 shadow-lg shadow-emerald-900/30 transition-all active:scale-95 shrink-0">
-                                    <i className="fa-solid fa-plus text-lg"></i> Novo Fluxograma
-                                </button>
+                                <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto shrink-0">
+                                    <button 
+                                        onClick={handleTogglePauseReviews} 
+                                        className={`w-full sm:w-auto px-5 py-3.5 md:px-6 md:py-4 font-black rounded-2xl flex items-center justify-center gap-2 border transition-all active:scale-95 text-sm md:text-base ${db.isReviewPaused ? 'bg-amber-600 hover:bg-amber-500 text-white border-amber-500 shadow-lg shadow-amber-900/20' : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border-zinc-700/40'}`}
+                                    >
+                                        <i className={`fa-solid ${db.isReviewPaused ? 'fa-play' : 'fa-pause'}`}></i>
+                                        {db.isReviewPaused ? 'Retomar Revisões' : 'Pausar Revisões'}
+                                    </button>
+                                    <button onClick={() => setIsCreating(true)} className="w-full sm:w-auto px-5 py-3.5 md:px-6 md:py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-2xl flex items-center justify-center gap-2 shadow-lg shadow-emerald-900/30 transition-all active:scale-95">
+                                        <i className="fa-solid fa-plus text-lg"></i> Novo Fluxograma
+                                    </button>
+                                </div>
                             </div>
                         </div>
+
+                        {db.isReviewPaused && (
+                            <div className="bg-gradient-to-r from-amber-500/10 to-orange-500/10 border border-amber-500/30 p-4 rounded-2xl flex items-center gap-3 text-amber-700 dark:text-amber-300 shadow-md">
+                                <i className="fa-solid fa-circle-info text-amber-500 text-lg"></i>
+                                <span className="text-xs font-black">
+                                    Revisões Pausadas. A contagem de repetição espaçada está congelada. Despause para retomar o cronograma normal.
+                                </span>
+                            </div>
+                        )}
 
                         {/* List of Decks */}
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
@@ -9349,6 +9429,8 @@ Retorne apenas o texto da resposta, sem JSON ou tags explicativas.`;
                     darkMode: true,
                     simuladoPausado: null,
                     fluxogramas: [],
+                    isReviewPaused: false,
+                    pausedAt: null,
                     desafiosDiarios: [],
                     comments: {},
                     customDailyChallengePromptEnabled: false,
@@ -9380,6 +9462,8 @@ Retorne apenas o texto da resposta, sem JSON ou tags explicativas.`;
                         if (parsed.customDailyChallengePrompt === undefined) parsed.customDailyChallengePrompt = '';
                         if (parsed.customFlowchartPromptEnabled === undefined) parsed.customFlowchartPromptEnabled = false;
                         if (parsed.customFlowchartPrompt === undefined) parsed.customFlowchartPrompt = '';
+                        if (parsed.isReviewPaused === undefined) parsed.isReviewPaused = false;
+                        if (parsed.pausedAt === undefined) parsed.pausedAt = null;
 
                         // Restaurar imagens e dados limpos do window.__INITIAL_STATE__
                         if (window.__INITIAL_STATE__) {
