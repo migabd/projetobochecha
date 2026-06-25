@@ -12566,10 +12566,18 @@ Gere um resumo PROFUNDO e PERSONALIZADO para este caso clínico. O resumo deve s
                         }
                         return { ...q, _score: score };
                     }).sort((a, b) => b._score - a._score);
-                } else pool = [...pool].sort(() => 0.5 - Math.random());
+                } else {
+                    // Fisher-Yates shuffle — distribuição uniforme e sem viés
+                    pool = [...pool];
+                    for (let i = pool.length - 1; i > 0; i--) {
+                        const j = Math.floor(Math.random() * (i + 1));
+                        [pool[i], pool[j]] = [pool[j], pool[i]];
+                    }
+                }
 
                 let deck = pool.slice(0, isQuick ? 5 : simQty);
                 if (simUseSpaced || forceSpaced) {
+                    // Embaralha o deck final com Fisher-Yates também
                     for (let i = deck.length - 1; i > 0; i--) {
                         const j = Math.floor(Math.random() * (i + 1));
                         [deck[i], deck[j]] = [deck[j], deck[i]];
