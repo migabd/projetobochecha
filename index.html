@@ -10206,7 +10206,7 @@ Retorne apenas o texto da resposta, sem JSON ou tags explicativas.`;
 
             // --- ESTADOS DE FILTRAGEM UNIFICADOS ---
             const [listFilters, setListFilters] = useState({ subj: [], exam: 'ALL', fac: 'ALL', tag: 'ALL' });
-            const [simFilters, setSimFilters] = useState({ subj: [], exam: 'ALL', fac: 'ALL', tag: 'ALL' });
+            const [simFilters, setSimFilters] = useState({ subj: [], exam: 'ALL', fac: 'ALL', tag: 'ALL', sourceType: 'ALL' });
             const [visibleCount, setVisibleCount] = useState(20);
             const [searchTerm, setSearchTerm] = useState('');
             const [summarySearch, setSummarySearch] = useState('');
@@ -12435,6 +12435,13 @@ Gere um resumo PROFUNDO e PERSONALIZADO para este caso clínico. O resumo deve s
                 }
 
                 let p = basePool;
+
+                // --- FILTRO POR TIPO DE ORIGEM ---
+                if (simFilters.sourceType === 'provas') {
+                    p = p.filter(e => e.examId || (e.tags && e.tags.some(t => t === 'Provas/Concursos' || t.toLowerCase().includes('prova') || t.toLowerCase().includes('concurso'))));
+                } else if (simFilters.sourceType === 'modulos') {
+                    p = p.filter(e => e.facId || (e.tags && e.tags.some(t => t === 'Módulos da faculdade' || t.toLowerCase().includes('módulo') || t.toLowerCase().includes('faculdade'))));
+                }
 
                 // --- FILTROS DE PROVA/EXAME ---
                 if (simFilters.exam !== 'ALL') {
@@ -14812,6 +14819,33 @@ Estrutura esperada:
 
                                 <div>
                                     <label className="text-xs font-black text-zinc-400 uppercase mb-3 block tracking-widest"><i className="fa-solid fa-filter mr-2"></i> 2. Subfiltros de Origem e Status</label>
+
+                                    {/* Tipo de Origem */}
+                                    <div className="mb-4">
+                                        <span className="text-[9px] font-black uppercase text-zinc-400 tracking-widest block mb-2">Tipo de Origem</span>
+                                        <div className="flex gap-1.5 flex-wrap">
+                                            {[
+                                                { id: 'ALL',     label: 'Todas',        icon: 'fa-layer-group' },
+                                                { id: 'provas',  label: 'Só Provas',    icon: 'fa-graduation-cap' },
+                                                { id: 'modulos', label: 'Só Módulos',   icon: 'fa-school' },
+                                            ].map(opt => (
+                                                <button
+                                                    key={opt.id}
+                                                    onClick={() => setSimFilters(p => ({ ...p, sourceType: opt.id, exam: 'ALL', fac: 'ALL' }))}
+                                                    className={`px-3 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all flex items-center gap-1.5 ${
+                                                        simFilters.sourceType === opt.id
+                                                            ? opt.id === 'provas'  ? 'bg-indigo-600 text-white shadow-md'
+                                                            : opt.id === 'modulos' ? 'bg-emerald-600 text-white shadow-md'
+                                                            :                        'bg-zinc-700 text-white shadow-md'
+                                                            : 'bg-white dark:bg-zinc-900 text-zinc-500 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800'
+                                                    }`}
+                                                >
+                                                    <i className={`fa-solid ${opt.icon}`}></i>{opt.label}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         {/* Coluna 1: Status */}
                                         <div className="space-y-3">
@@ -14831,16 +14865,20 @@ Estrutura esperada:
                                             <div className="flex flex-col gap-2">
                                                 <select
                                                     value={simFilters.exam}
-                                                    onChange={e => setSimFilters(p => ({ ...p, exam: e.target.value }))}
-                                                    className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-[9px] font-black uppercase tracking-widest text-zinc-500 outline-none focus:ring-2 focus:ring-indigo-500 w-full"
+                                                    onChange={e => setSimFilters(p => ({ ...p, exam: e.target.value, sourceType: e.target.value !== 'ALL' ? 'provas' : p.sourceType }))}
+                                                    className={`bg-white dark:bg-zinc-900 border rounded-xl px-3 py-2 text-[9px] font-black uppercase tracking-widest text-zinc-500 outline-none focus:ring-2 focus:ring-indigo-500 w-full transition-all ${
+                                                        simFilters.sourceType === 'modulos' ? 'opacity-40 pointer-events-none border-zinc-200 dark:border-zinc-800' : 'border-zinc-200 dark:border-zinc-800'
+                                                    }`}
                                                 >
                                                     <option value="ALL">Todas as Provas</option>
                                                     {allExams.map(ex => <option key={ex.id} value={ex.id}>{ex.name}</option>)}
                                                 </select>
                                                 <select
                                                     value={simFilters.fac}
-                                                    onChange={e => setSimFilters(p => ({ ...p, fac: e.target.value }))}
-                                                    className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-[9px] font-black uppercase tracking-widest text-zinc-500 outline-none focus:ring-2 focus:ring-emerald-500 w-full"
+                                                    onChange={e => setSimFilters(p => ({ ...p, fac: e.target.value, sourceType: e.target.value !== 'ALL' ? 'modulos' : p.sourceType }))}
+                                                    className={`bg-white dark:bg-zinc-900 border rounded-xl px-3 py-2 text-[9px] font-black uppercase tracking-widest text-zinc-500 outline-none focus:ring-2 focus:ring-emerald-500 w-full transition-all ${
+                                                        simFilters.sourceType === 'provas' ? 'opacity-40 pointer-events-none border-zinc-200 dark:border-zinc-800' : 'border-zinc-200 dark:border-zinc-800'
+                                                    }`}
                                                 >
                                                     <option value="ALL">Todos os Módulos</option>
                                                     {allFacs.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
