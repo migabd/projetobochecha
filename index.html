@@ -12879,7 +12879,7 @@ Gere um resumo PROFUNDO e PERSONALIZADO para este caso clínico. O resumo deve s
                     context: activeTab,
                     totalTimeSpent: simulado.totalTimeElapsed,
                     averageTimeSpent: Math.round(simulado.totalTimeElapsed / (simulado.results.length || 1)),
-                    results: simulado.results.map(r => ({ id: r.id, isCorrect: r.isCorrect, timeSpent: r.timeSpent }))
+                    results: simulado.results.map(r => ({ id: r.id, isCorrect: r.isCorrect, timeSpent: r.timeSpent, userAns: r.userAns }))
                 };
                 setDb(p => ({ ...p, simuladoHistory: [session, ...p.simuladoHistory], simuladoPausado: null }));
                 setSimulado(p => ({ ...p, showResults: true }));
@@ -14226,7 +14226,7 @@ Estrutura esperada:
                                                     const userAns = simulado.isReviewing ? simulado.results.find(r => r.id === q.id)?.userAns : simulado.selAlt;
                                                     const correctText = q.alternatives[q.correctAlternative.charCodeAt(0) - 65] || '';
                                                     const userText = (userAns && userAns !== 'Pulo') ? q.alternatives[userAns.charCodeAt(0) - 65] : 'Não soube responder (Pulo)';
-                                                    const promptContext = `${getPersonaInstruction(aiConfig.persona, 'batepapo')}\n\nTema: ${q.title}\nQuestão: ${q.question}\n\nAlternativa Correta (${q.correctAlternative}): ${correctText}\nMinha resposta: ${userAns} (${userText})`;
+                                                    const promptContext = `${getPersonaInstruction(aiConfig.persona, 'batepapo')}\n\nTema: ${q.title}\nQuesão: ${q.question}\n\nAlternativa Correta (${q.correctAlternative}): ${correctText}\nMinha resposta: ${userAns} (${userText})`;
                                                     setSimulado(p => ({ ...p, isAiChatting: true, aiChatMessages: [{ role: 'user', text: promptContext }], isAiExplaining: true, aiExplanation: '' }));
                                                     callIA([{ role: 'user', parts: [{ text: promptContext }] }]).then(r => {
                                                         setSimulado(p => ({ ...p, isAiExplaining: false, aiChatMessages: [...p.aiChatMessages, { role: 'model', text: r || "Falha ao gerar resposta da IA. Tente novamente." }] }));
@@ -14245,6 +14245,27 @@ Estrutura esperada:
                                                         <i className="fa-solid fa-clone text-2xl"></i>
                                                     )}
                                                     <span className="text-xs uppercase tracking-widest">Flashcard</span>
+                                                </button>
+                                            </div>
+
+                                            {/* Botão Editar Questão */}
+                                            <div className="mb-6">
+                                                <button
+                                                    onClick={() => {
+                                                        const err = db.errors.find(e => String(e.id) === String(q.id));
+                                                        if (err) {
+                                                            setFormData({ ...emptyForm, ...err, alternatives: err.alternatives || ['', '', '', '', ''], alternativeExplanations: err.alternativeExplanations || ['', '', '', '', ''], tags: err.tags || [] });
+                                                            setEditingId(err.id);
+                                                            setShowForm(true);
+                                                            setActiveTab('questoes');
+                                                            window.scrollTo(0, 0);
+                                                        } else {
+                                                            showAlert('⚠️ Esta é uma questão de lista gerada por IA e não pode ser editada diretamente pelo formulário.');
+                                                        }
+                                                    }}
+                                                    className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 text-zinc-500 hover:text-amber-600 hover:border-amber-400 dark:hover:text-amber-400 dark:hover:border-amber-700 font-black text-xs uppercase tracking-widest transition-all"
+                                                >
+                                                    <i className="fa-solid fa-pen-nib"></i> Editar Questão
                                                 </button>
                                             </div>
                                         )}
@@ -15098,20 +15119,67 @@ Estrutura esperada:
                         <div className="bg-white dark:bg-zinc-900 p-8 md:p-10 rounded-[40px] shadow-xl border border-zinc-200 dark:border-zinc-800 flex flex-col">
                             <h2 className="text-2xl font-black mb-8 flex items-center gap-3 text-zinc-400"><i className="fa-solid fa-clock-rotate-left"></i> Sessões Anteriores</h2>
                             <div className="flex-1 overflow-y-auto space-y-3 pr-2">
-                                {db.simuladoHistory.map(h => (
-                                    <div key={h.id} className="p-5 bg-zinc-50 dark:bg-zinc-950 rounded-3xl flex justify-between items-center border border-zinc-200 dark:border-zinc-800 animate-in slide-in-from-bottom-2 hover:border-emerald-500 transition-colors">
-                                        <div>
-                                            <span className="text-[10px] font-black uppercase text-zinc-400 tracking-widest block mb-1"><i className="fa-regular fa-calendar mr-1"></i> {h.date}</span>
-                                            <span className="font-bold dark:text-zinc-100 text-sm">{h.hits} de {h.total} Acertos <span className="opacity-50 font-normal ml-1">({h.context || 'Geral'})</span></span>
+                                {db.simuladoHistory.map(h => {
+                                    const wrongResults = (h.results || []).filter(r => !r.isCorrect && r.userAns && r.userAns !== 'Pulo');
+                                    const [expanded, setExpanded] = React.useState(false);
+                                    return (
+                                    <div key={h.id} className="bg-zinc-50 dark:bg-zinc-950 rounded-3xl border border-zinc-200 dark:border-zinc-800 animate-in slide-in-from-bottom-2 hover:border-emerald-500 transition-colors overflow-hidden">
+                                        <div className="p-5 flex justify-between items-center">
+                                            <div>
+                                                <span className="text-[10px] font-black uppercase text-zinc-400 tracking-widest block mb-1"><i className="fa-regular fa-calendar mr-1"></i> {h.date}</span>
+                                                <span className="font-bold dark:text-zinc-100 text-sm">{h.hits} de {h.total} Acertos <span className="opacity-50 font-normal ml-1">({h.context || 'Geral'})</span></span>
+                                                {wrongResults.length > 0 && (
+                                                    <button
+                                                        onClick={() => setExpanded(e => !e)}
+                                                        className="mt-1 flex items-center gap-1 text-[10px] font-black text-rose-500 hover:text-rose-600 transition-colors"
+                                                    >
+                                                        <i className={`fa-solid fa-chevron-${expanded ? 'up' : 'down'} text-[8px]`}></i>
+                                                        {wrongResults.length} marcada{wrongResults.length > 1 ? 's' : ''} errada{wrongResults.length > 1 ? 's' : ''}
+                                                    </button>
+                                                )}
+                                            </div>
+                                            <div className="flex items-center gap-3">
+                                                <button onClick={() => reviewHistoricalSim(h)} className="px-4 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-600 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/40 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 text-xs font-black transition-colors">
+                                                    Revisar
+                                                </button>
+                                                <span className={`px-4 py-2 rounded-xl text-sm font-black border ${h.hits / h.total >= 0.7 ? 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400 dark:border-emerald-800' : 'bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:border-amber-800'}`}>{Math.round(h.hits / h.total * 100)}%</span>
+                                            </div>
                                         </div>
-                                        <div className="flex items-center gap-3">
-                                            <button onClick={() => reviewHistoricalSim(h)} className="px-4 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-600 dark:bg-indigo-950/40 dark:hover:bg-indigo-900/40 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 text-xs font-black transition-colors">
-                                                Revisar
-                                            </button>
-                                            <span className={`px-4 py-2 rounded-xl text-sm font-black border ${h.hits / h.total >= 0.7 ? 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400 dark:border-emerald-800' : 'bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:border-amber-800'}`}>{Math.round(h.hits / h.total * 100)}%</span>
-                                        </div>
+                                        {expanded && wrongResults.length > 0 && (
+                                            <div className="border-t border-zinc-200 dark:border-zinc-800 px-5 py-4 space-y-2 bg-rose-50/50 dark:bg-rose-950/10 animate-in slide-in-from-top-2">
+                                                <span className="text-[9px] font-black uppercase text-rose-500 tracking-widest block mb-3"><i className="fa-solid fa-triangle-exclamation mr-1"></i> Alternativas marcadas incorretamente</span>
+                                                {wrongResults.map(r => {
+                                                    const question = db.errors.find(e => String(e.id) === String(r.id)) ||
+                                                        (db.processedQuestionLists || []).flatMap(l => l.questions || []).find(q => `ai_${q.id}` === String(r.id) || String(q.id) === String(r.id));
+                                                    if (!question) return null;
+                                                    const markedAlt = r.userAns;
+                                                    const markedText = (markedAlt && markedAlt !== 'Pulo' && question.alternatives)
+                                                        ? question.alternatives[markedAlt.charCodeAt(0) - 65]
+                                                        : null;
+                                                    const correctText = question.alternatives?.[question.correctAlternative?.charCodeAt(0) - 65];
+                                                    return (
+                                                        <div key={r.id} className="bg-white dark:bg-zinc-900 rounded-2xl border border-rose-200 dark:border-rose-900/50 p-3">
+                                                            <p className="text-xs font-black text-zinc-700 dark:text-zinc-300 mb-2 leading-snug">{question.title}</p>
+                                                            {markedText && (
+                                                                <div className="flex items-start gap-2 mb-1">
+                                                                    <span className="text-[10px] font-black text-rose-500 shrink-0 mt-0.5"><i className="fa-solid fa-xmark"></i> {markedAlt})</span>
+                                                                    <span className="text-[10px] text-rose-700 dark:text-rose-400 line-through opacity-70">{markedText}</span>
+                                                                </div>
+                                                            )}
+                                                            {correctText && (
+                                                                <div className="flex items-start gap-2">
+                                                                    <span className="text-[10px] font-black text-emerald-600 shrink-0 mt-0.5"><i className="fa-solid fa-check"></i> {question.correctAlternative})</span>
+                                                                    <span className="text-[10px] text-emerald-700 dark:text-emerald-400">{correctText}</span>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        )}
                                     </div>
-                                )) }
+                                    );
+                                })}
                                 {db.simuladoHistory.length === 0 && (
                                     <div className="h-full flex flex-col items-center justify-center opacity-40 text-center py-10">
                                         <i className="fa-solid fa-ghost text-6xl mb-4"></i>
