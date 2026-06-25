@@ -1850,9 +1850,9 @@ As demais etapas do fluxograma podem aparecer como contexto, mas o FOCO principa
                 })();
 
                 const quickReviewPromptInstructions = isQuickReview 
-                    ? `\nATENÇÃO - MODO REVISÃO RÁPIDA (MÁXIMO 5 MINUTOS):
+                    ? `\nATENÇÃO - MODO REVISÃO RÁPIDA (MÁXIMO 7 MINUTOS):
 Você está conduzindo uma Revisão Rápida e focada no essencial do protocolo.
-- O tempo limite total da simulação é de 5 minutos, então as interações devem ser rápidas e diretas.
+- O tempo limite total da simulação é de 7 minutos, então as interações devem ser rápidas e diretas.
 - Foque apenas nas etapas críticas e tomadas de decisão cruciais do fluxograma.
 - Apresente informações sucintas, sem enrolação. As falas do paciente e da equipe devem ser curtas e objetivas.
 - Conduza o estudante diretamente aos pontos fundamentais do fluxograma.`
@@ -1977,7 +1977,7 @@ Para iniciar a simulação, responda agora APENAS com a introdução do caso cl�
                     : `fluxograma "${selectedFlow.title}"`;
 
                 const quickReviewEvalInstructions = isQuickReview
-                    ? `\nATENÇÃO: Esta foi uma REVISÃO RÁPIDA (tempo limite de 5 minutos, focada no essencial). Avalie o desempenho considerando o foco no essencial e o tempo reduzido.`
+                    ? `\nATENÇÃO: Esta foi uma REVISÃO RÁPIDA (tempo limite de 7 minutos, focada no essencial). Avalie o desempenho considerando o foco no essencial e o tempo reduzido.`
                     : '';
 
                 const evaluationPrompt = `Você concluiu a simulação. Agora, realize uma avaliação clínica extremamente criteriosa baseada nos diálogos acima, seguindo rigorosamente as diretrizes da "Escala de Avaliação Médica de 0 a 10" do PDF:
