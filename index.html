@@ -14248,14 +14248,14 @@ Estrutura esperada:
                                                 </button>
                                             </div>
 
-                                            {/* Botão Editar Questão */}
+                                            {/* Botao Editar Questao */}
                                             <div className="mb-6">
                                                 <button
                                                     onClick={() => {
-                                                        const err = db.errors.find(e => String(e.id) === String(q.id));
-                                                        if (err) {
-                                                            setFormData({ ...emptyForm, ...err, alternatives: err.alternatives || ['', '', '', '', ''], alternativeExplanations: err.alternativeExplanations || ['', '', '', '', ''], tags: err.tags || [] });
-                                                            setEditingId(err.id);
+                                                        const foundQ = db.errors.find(errItem => String(errItem.id) === String(q.id));
+                                                        if (foundQ) {
+                                                            setFormData({ ...emptyForm, ...foundQ, alternatives: foundQ.alternatives || ['', '', '', '', ''], alternativeExplanations: foundQ.alternativeExplanations || ['', '', '', '', ''], tags: foundQ.tags || [] });
+                                                            setEditingId(foundQ.id);
                                                             setShowForm(true);
                                                             setActiveTab('questoes');
                                                             window.scrollTo(0, 0);
