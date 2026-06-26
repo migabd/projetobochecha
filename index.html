@@ -14209,65 +14209,67 @@ Estrutura esperada:
 
                                         {/* --- FERRAMENTAS DE FIXAÇÃO IA --- */}
                                         {showCol && !simulado.aiExplanation && !simulado.isAiExplaining && (
-                                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3 mb-8">
-                                                <button onClick={() => handleExplainSimuladoQuestion('explain')} className="bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800/50 text-indigo-700 dark:text-indigo-400 font-black py-4 px-2 rounded-2xl hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-all flex flex-col items-center justify-center gap-2 shadow-sm text-center">
-                                                    <i className="fa-solid fa-chalkboard-user text-2xl ai-glow rounded-full"></i> <span className="text-xs uppercase tracking-widest">Professor IA</span>
-                                                </button>
-                                                <button onClick={() => handleExplainSimuladoQuestion('mnemonic')} className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50 text-amber-700 dark:text-amber-400 font-black py-4 px-2 rounded-2xl hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-all flex flex-col items-center justify-center gap-2 shadow-sm text-center">
-                                                    <i className="fa-solid fa-lightbulb text-2xl"></i> <span className="text-xs uppercase tracking-widest">Mnemónica</span>
-                                                </button>
-                                                <button onClick={() => handleExplainSimuladoQuestion('summary')} className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800/50 text-emerald-700 dark:text-emerald-400 font-black py-4 px-2 rounded-2xl hover:bg-emerald-100 dark:hover:bg-emerald-900/40 transition-all flex flex-col items-center justify-center gap-2 shadow-sm text-center">
-                                                    <i className="fa-solid fa-bolt text-2xl"></i> <span className="text-xs uppercase tracking-widest">Resumo Flash</span>
-                                                </button>
-                                                <button onClick={() => handleExplainSimuladoQuestion('pitfalls')} className="bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800/50 text-rose-700 dark:text-rose-400 font-black py-4 px-2 rounded-2xl hover:bg-rose-100 dark:hover:bg-rose-900/40 transition-all flex flex-col items-center justify-center gap-2 shadow-sm text-center">
-                                                    <i className="fa-solid fa-triangle-exclamation text-2xl"></i> <span className="text-xs uppercase tracking-widest">Pegadinhas</span>
-                                                </button>
-                                                <button onClick={() => {
-                                                    const userAns = simulado.isReviewing ? simulado.results.find(r => r.id === q.id)?.userAns : simulado.selAlt;
-                                                    const correctText = q.alternatives[q.correctAlternative.charCodeAt(0) - 65] || '';
-                                                    const userText = (userAns && userAns !== 'Pulo') ? q.alternatives[userAns.charCodeAt(0) - 65] : 'Não soube responder (Pulo)';
-                                                    const promptContext = `${getPersonaInstruction(aiConfig.persona, 'batepapo')}\n\nTema: ${q.title}\nQuesão: ${q.question}\n\nAlternativa Correta (${q.correctAlternative}): ${correctText}\nMinha resposta: ${userAns} (${userText})`;
-                                                    setSimulado(p => ({ ...p, isAiChatting: true, aiChatMessages: [{ role: 'user', text: promptContext }], isAiExplaining: true, aiExplanation: '' }));
-                                                    callIA([{ role: 'user', parts: [{ text: promptContext }] }]).then(r => {
-                                                        setSimulado(p => ({ ...p, isAiExplaining: false, aiChatMessages: [...p.aiChatMessages, { role: 'model', text: r || "Falha ao gerar resposta da IA. Tente novamente." }] }));
-                                                    });
-                                                }} className="bg-sky-50 dark:bg-sky-900/20 border border-sky-200 dark:border-sky-800/50 text-sky-700 dark:text-sky-400 font-black py-4 px-2 rounded-2xl hover:bg-sky-100 dark:hover:bg-sky-900/40 transition-all flex flex-col items-center justify-center gap-2 shadow-sm text-center">
-                                                    <i className="fa-solid fa-comments text-2xl"></i> <span className="text-xs uppercase tracking-widest">Bate-Papo</span>
-                                                </button>
-                                                <button 
-                                                    onClick={() => handleGenerateSingleFlashcard(q.id)} 
-                                                    disabled={simulado.isGeneratingFlashcards}
-                                                    className="bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800/50 text-indigo-700 dark:text-indigo-400 font-black py-4 px-2 rounded-2xl hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-all flex flex-col items-center justify-center gap-2 shadow-sm text-center disabled:opacity-50 disabled:cursor-not-allowed"
-                                                >
-                                                    {simulado.isGeneratingFlashcards ? (
-                                                        <i className="fa-solid fa-circle-notch fa-spin text-2xl"></i>
-                                                    ) : (
-                                                        <i className="fa-solid fa-clone text-2xl"></i>
-                                                    )}
-                                                    <span className="text-xs uppercase tracking-widest">Flashcard</span>
-                                                </button>
-                                            </div>
+                                            <>
+                                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3 mb-8">
+                                                    <button onClick={() => handleExplainSimuladoQuestion('explain')} className="bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800/50 text-indigo-700 dark:text-indigo-400 font-black py-4 px-2 rounded-2xl hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-all flex flex-col items-center justify-center gap-2 shadow-sm text-center">
+                                                        <i className="fa-solid fa-chalkboard-user text-2xl ai-glow rounded-full"></i> <span className="text-xs uppercase tracking-widest">Professor IA</span>
+                                                    </button>
+                                                    <button onClick={() => handleExplainSimuladoQuestion('mnemonic')} className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50 text-amber-700 dark:text-amber-400 font-black py-4 px-2 rounded-2xl hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-all flex flex-col items-center justify-center gap-2 shadow-sm text-center">
+                                                        <i className="fa-solid fa-lightbulb text-2xl"></i> <span className="text-xs uppercase tracking-widest">Mnemónica</span>
+                                                    </button>
+                                                    <button onClick={() => handleExplainSimuladoQuestion('summary')} className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800/50 text-emerald-700 dark:text-emerald-400 font-black py-4 px-2 rounded-2xl hover:bg-emerald-100 dark:hover:bg-emerald-900/40 transition-all flex flex-col items-center justify-center gap-2 shadow-sm text-center">
+                                                        <i className="fa-solid fa-bolt text-2xl"></i> <span className="text-xs uppercase tracking-widest">Resumo Flash</span>
+                                                    </button>
+                                                    <button onClick={() => handleExplainSimuladoQuestion('pitfalls')} className="bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800/50 text-rose-700 dark:text-rose-400 font-black py-4 px-2 rounded-2xl hover:bg-rose-100 dark:hover:bg-rose-900/40 transition-all flex flex-col items-center justify-center gap-2 shadow-sm text-center">
+                                                        <i className="fa-solid fa-triangle-exclamation text-2xl"></i> <span className="text-xs uppercase tracking-widest">Pegadinhas</span>
+                                                    </button>
+                                                    <button onClick={() => {
+                                                        const userAns = simulado.isReviewing ? simulado.results.find(r => r.id === q.id)?.userAns : simulado.selAlt;
+                                                        const correctText = q.alternatives[q.correctAlternative.charCodeAt(0) - 65] || '';
+                                                        const userText = (userAns && userAns !== 'Pulo') ? q.alternatives[userAns.charCodeAt(0) - 65] : 'Não soube responder (Pulo)';
+                                                        const promptContext = `${getPersonaInstruction(aiConfig.persona, 'batepapo')}\n\nTema: ${q.title}\nQuesão: ${q.question}\n\nAlternativa Correta (${q.correctAlternative}): ${correctText}\nMinha resposta: ${userAns} (${userText})`;
+                                                        setSimulado(p => ({ ...p, isAiChatting: true, aiChatMessages: [{ role: 'user', text: promptContext }], isAiExplaining: true, aiExplanation: '' }));
+                                                        callIA([{ role: 'user', parts: [{ text: promptContext }] }]).then(r => {
+                                                            setSimulado(p => ({ ...p, isAiExplaining: false, aiChatMessages: [...p.aiChatMessages, { role: 'model', text: r || "Falha ao gerar resposta da IA. Tente novamente." }] }));
+                                                        });
+                                                    }} className="bg-sky-50 dark:bg-sky-900/20 border border-sky-200 dark:border-sky-800/50 text-sky-700 dark:text-sky-400 font-black py-4 px-2 rounded-2xl hover:bg-sky-100 dark:hover:bg-sky-900/40 transition-all flex flex-col items-center justify-center gap-2 shadow-sm text-center">
+                                                        <i className="fa-solid fa-comments text-2xl"></i> <span className="text-xs uppercase tracking-widest">Bate-Papo</span>
+                                                    </button>
+                                                    <button 
+                                                        onClick={() => handleGenerateSingleFlashcard(q.id)} 
+                                                        disabled={simulado.isGeneratingFlashcards}
+                                                        className="bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800/50 text-indigo-700 dark:text-indigo-400 font-black py-4 px-2 rounded-2xl hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-all flex flex-col items-center justify-center gap-2 shadow-sm text-center disabled:opacity-50 disabled:cursor-not-allowed"
+                                                    >
+                                                        {simulado.isGeneratingFlashcards ? (
+                                                            <i className="fa-solid fa-circle-notch fa-spin text-2xl"></i>
+                                                        ) : (
+                                                            <i className="fa-solid fa-clone text-2xl"></i>
+                                                        )}
+                                                        <span className="text-xs uppercase tracking-widest">Flashcard</span>
+                                                    </button>
+                                                </div>
 
-                                            {/* Botao Editar Questao */}
-                                            <div className="mb-6">
-                                                <button
-                                                    onClick={() => {
-                                                        const foundQ = db.errors.find(errItem => String(errItem.id) === String(q.id));
-                                                        if (foundQ) {
-                                                            setFormData({ ...emptyForm, ...foundQ, alternatives: foundQ.alternatives || ['', '', '', '', ''], alternativeExplanations: foundQ.alternativeExplanations || ['', '', '', '', ''], tags: foundQ.tags || [] });
-                                                            setEditingId(foundQ.id);
-                                                            setShowForm(true);
-                                                            setActiveTab('questoes');
-                                                            window.scrollTo(0, 0);
-                                                        } else {
-                                                            showAlert('⚠️ Esta é uma questão de lista gerada por IA e não pode ser editada diretamente pelo formulário.');
-                                                        }
-                                                    }}
-                                                    className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 text-zinc-500 hover:text-amber-600 hover:border-amber-400 dark:hover:text-amber-400 dark:hover:border-amber-700 font-black text-xs uppercase tracking-widest transition-all"
-                                                >
-                                                    <i className="fa-solid fa-pen-nib"></i> Editar Questão
-                                                </button>
-                                            </div>
+                                                {/* Botao Editar Questao */}
+                                                <div className="mb-6">
+                                                    <button
+                                                        onClick={() => {
+                                                            const foundQ = db.errors.find(errItem => String(errItem.id) === String(q.id));
+                                                            if (foundQ) {
+                                                                setFormData({ ...emptyForm, ...foundQ, alternatives: foundQ.alternatives || ['', '', '', '', ''], alternativeExplanations: foundQ.alternativeExplanations || ['', '', '', '', ''], tags: foundQ.tags || [] });
+                                                                setEditingId(foundQ.id);
+                                                                setShowForm(true);
+                                                                setActiveTab('questoes');
+                                                                window.scrollTo(0, 0);
+                                                            } else {
+                                                                showAlert('⚠️ Esta é uma questão de lista gerada por IA e não pode ser editada diretamente pelo formulário.');
+                                                            }
+                                                        }}
+                                                        className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 text-zinc-500 hover:text-amber-600 hover:border-amber-400 dark:hover:text-amber-400 dark:hover:border-amber-700 font-black text-xs uppercase tracking-widest transition-all"
+                                                    >
+                                                        <i className="fa-solid fa-pen-nib"></i> Editar Questão
+                                                    </button>
+                                                </div>
+                                            </>
                                         )}
 
                                         {showCol && simulado.isAiExplaining && !simulado.isAiChatting && (
