@@ -6649,7 +6649,7 @@ className="flex-1 w-full h-full relative cursor-grab active:cursor-grabbing over
                 if (!activeChallenge) {
                     loadTodayChallenge();
                 }
-            }, [db.desafiosDiarios, activeChallenge]);
+            }, [db.desafiosDiarios, activeChallenge, db.isDailyChallengePaused]);
 
             // challengeToRender is declared at the top
 
@@ -6734,6 +6734,15 @@ className="flex-1 w-full h-full relative cursor-grab active:cursor-grabbing over
                 return instructions[persona] || instructions.amigavel;
             };
 
+            const handleTogglePauseDailyChallenges = () => {
+                const nextVal = !db.isDailyChallengePaused;
+                setDb(prev => ({
+                    ...prev,
+                    isDailyChallengePaused: nextVal
+                }));
+                showLocalToast(nextVal ? 'Geração diária de desafios pausada!' : 'Geração diária de desafios retomada!', 'info');
+            };
+
             const loadTodayChallenge = async (forceRegen = false) => {
                 const todayStr = new Date().toLocaleDateString('en-CA'); // YYYY-MM-DD local
                 const currentDesafios = db.desafiosDiarios || [];
@@ -6742,6 +6751,11 @@ className="flex-1 w-full h-full relative cursor-grab active:cursor-grabbing over
                 if (found && !forceRegen) {
                     setActiveChallenge(found);
                     setAnswer(found.answer || '');
+                    return;
+                }
+
+                if (db.isDailyChallengePaused && !found && !forceRegen) {
+                    setIsGenerating(false);
                     return;
                 }
 
@@ -7728,6 +7742,19 @@ Retorne a resposta refinada em formato Markdown profissional e limpo. Retorne AP
                                     </div>
                                     <p className="text-zinc-550 dark:text-zinc-400 text-xs font-semibold font-sans">Gerencie, resolva e analise seus desafios de diagnóstico baseados em artigos médicos reais.</p>
                                 </div>
+                                <div className="flex gap-2.5 w-full sm:w-auto shrink-0 font-sans">
+                                    <button
+                                        onClick={handleTogglePauseDailyChallenges}
+                                        className={`px-4 py-2.5 font-black rounded-2xl flex items-center justify-center gap-2 border transition-all active:scale-95 text-xs font-sans ${
+                                            db.isDailyChallengePaused
+                                                ? 'bg-amber-600 hover:bg-amber-500 text-white border-amber-500 shadow-md shadow-amber-900/20'
+                                                : 'bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-650 dark:text-zinc-300 border-zinc-200 dark:border-zinc-750/50'
+                                        }`}
+                                    >
+                                        <i className={`fa-solid ${db.isDailyChallengePaused ? 'fa-play' : 'fa-pause'}`}></i>
+                                        {db.isDailyChallengePaused ? 'Retomar Geração' : 'Pausar Geração'}
+                                    </button>
+                                </div>
                             </div>
 
                             {/* Cards de Métricas Rápidas */}
@@ -7788,10 +7815,27 @@ Retorne a resposta refinada em formato Markdown profissional e limpo. Retorne AP
                                                 <h4 className="text-sm font-black text-zinc-800 dark:text-white leading-snug">{todayChallenge.title}</h4>
                                                 <p className="text-xs text-zinc-500 line-clamp-3 leading-relaxed">{todayChallenge.caseReport.replace(/###/g, '').substring(0, 200)}...</p>
                                             </div>
+                                        ) : isGenerating ? (
+                                            <div className="py-8 text-center text-zinc-405">
+                                                <i className="fa-solid fa-spinner fa-spin text-2xl mb-2"></i>
+                                                <p className="text-xs font-semibold font-sans">Sintonizando caso do dia...</p>
+                                            </div>
+                                        ) : db.isDailyChallengePaused ? (
+                                            <div className="py-8 px-4 text-center text-zinc-400 font-sans bg-amber-500/5 dark:bg-amber-950/10 border border-dashed border-amber-500/25 rounded-2xl flex flex-col items-center justify-center">
+                                                <i className="fa-solid fa-circle-pause text-amber-500 text-3xl mb-2 animate-pulse"></i>
+                                                <p className="text-xs font-bold text-zinc-700 dark:text-zinc-300 font-sans">Geração Diária Pausada</p>
+                                                <p className="text-[10px] text-zinc-500 dark:text-zinc-455 mt-1.5 font-sans leading-relaxed">A geração automática do caso clínico do dia está suspensa.</p>
+                                                <button 
+                                                    onClick={() => loadTodayChallenge(true)}
+                                                    className="mt-3.5 px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-[10px] font-black uppercase tracking-wider transition-all"
+                                                >
+                                                    Gerar Hoje Mesmo
+                                                </button>
+                                            </div>
                                         ) : (
                                             <div className="py-8 text-center text-zinc-405">
                                                 <i className="fa-solid fa-spinner fa-spin text-2xl mb-2"></i>
-                                                <p className="text-xs font-semibold font-sans">Carregando caso do dia...</p>
+                                                <p className="text-xs font-semibold font-sans font-sans">Carregando caso do dia...</p>
                                             </div>
                                         )}
                                     </div>
@@ -9432,6 +9476,7 @@ Retorne apenas o texto da resposta, sem JSON ou tags explicativas.`;
                     fluxogramas: [],
                     isReviewPaused: false,
                     pausedAt: null,
+                    isDailyChallengePaused: false,
                     desafiosDiarios: [],
                     comments: {},
                     customDailyChallengePromptEnabled: false,
@@ -9465,6 +9510,7 @@ Retorne apenas o texto da resposta, sem JSON ou tags explicativas.`;
                         if (parsed.customFlowchartPrompt === undefined) parsed.customFlowchartPrompt = '';
                         if (parsed.isReviewPaused === undefined) parsed.isReviewPaused = false;
                         if (parsed.pausedAt === undefined) parsed.pausedAt = null;
+                        if (parsed.isDailyChallengePaused === undefined) parsed.isDailyChallengePaused = false;
 
                         // Restaurar imagens e dados limpos do window.__INITIAL_STATE__
                         if (window.__INITIAL_STATE__) {
