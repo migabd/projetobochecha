@@ -966,7 +966,7 @@ const FluxogramasTab = React.memo(({ db, fluxogramas = [], setDb, callIA, extrac
             const [isVoiceSynthesizing, setIsVoiceSynthesizing] = React.useState(false);
             const [gradingScorecard, setGradingScorecard] = React.useState(null);
             const [isQuickReview, setIsQuickReview] = React.useState(false);
-            const [quickReviewTimeLeft, setQuickReviewTimeLeft] = React.useState(300);
+            const [quickReviewTimeLeft, setQuickReviewTimeLeft] = React.useState(420);
 
              // Timer logic for Quick Review moved below
             
@@ -1764,7 +1764,7 @@ const FluxogramasTab = React.memo(({ db, fluxogramas = [], setDb, callIA, extrac
                 setGradingScorecard(null);
                 setIsEvaluating(false);
                 setChatInputText('');
-                setQuickReviewTimeLeft(300);
+                setQuickReviewTimeLeft(420);
                 
                 const flowTitle = flowToSimulate.title;
                 const flowDesc = flowToSimulate.description || '';
@@ -3293,7 +3293,7 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                                 onClick={() => setIsQuickReview(true)}
                                                 className={`py-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 ${isQuickReview ? 'bg-purple-600 text-white shadow-md' : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200'}`}
                                             >
-                                                <i className="fa-solid fa-bolt text-xs"></i> Rápida (5 min)
+                                                <i className="fa-solid fa-bolt text-xs"></i> Rápida (7 min)
                                             </button>
                                         </div>
                                     </div>
@@ -5552,7 +5552,7 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                                             : 'text-zinc-550 dark:text-zinc-450 hover:text-zinc-700 dark:hover:text-zinc-300'
                                                     }`}
                                                 >
-                                                    <i className="fa-solid fa-bolt text-[9px]"></i> Rápida (5 min)
+                                                    <i className="fa-solid fa-bolt text-[9px]"></i> Rápida (7 min)
                                                 </button>
                                             </div>
                                         </div>
