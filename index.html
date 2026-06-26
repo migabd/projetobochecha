@@ -1087,8 +1087,19 @@ const FluxogramasTab = React.memo(({ db, fluxogramas = [], setDb, callIA, extrac
             const [newCategoryName, setNewCategoryName] = React.useState('');
             const [creatorPrompt, setCreatorPrompt] = React.useState('');
             const [creatorFocus, setCreatorFocus] = React.useState('');
-            const [pdfFile, setPdfFile] = React.useState(null);
+            const [pdfFiles, setPdfFiles] = React.useState([]);
             const [generatingStatus, setGeneratingStatus] = React.useState('');
+            
+            const handleFileChange = (e) => {
+                if (e.target.files && e.target.files.length > 0) {
+                    const selected = Array.from(e.target.files).filter(f => f.name.toLowerCase().endsWith('.pdf') || f.type === 'application/pdf');
+                    setPdfFiles(prev => [...prev, ...selected]);
+                }
+            };
+
+            const handleRemoveFile = (indexToRemove) => {
+                setPdfFiles(prev => prev.filter((_, i) => i !== indexToRemove));
+            };
             
             React.useEffect(() => {
                 if (pendingFlowchartImport) {
@@ -2790,10 +2801,11 @@ DESCRIÇÃO DO FLUXOGRAMA: "${selectedFlow.description}"
 
 
             // File parsing and AI flowchart generation
+            // File parsing and AI flowchart generation
             const handleCreateFlowchart = async (e) => {
                 e.preventDefault();
-                if (creatorMode === 'pdf' && !pdfFile) {
-                    alert("Selecione um arquivo PDF de diretriz/conduta clínica.");
+                if (creatorMode === 'pdf' && pdfFiles.length === 0) {
+                    alert("Selecione pelo menos um arquivo PDF de diretriz/conduta clínica.");
                     return;
                 }
                 if (creatorMode === 'text' && !creatorPrompt.trim()) {
@@ -2835,84 +2847,102 @@ DESCRIÇÃO DO FLUXOGRAMA: "${selectedFlow.description}"
                     };
 
                     if (creatorMode === 'pdf') {
-                        setGeneratingStatus("Carregando PDF...");
-                        const reader = new FileReader();
-                        const arrayBuffer = await new Promise((resolve, reject) => {
-                            reader.onload = () => resolve(reader.result);
-                            reader.onerror = reject;
-                            reader.readAsArrayBuffer(pdfFile);
-                        });
+                        let combinedContentParts = [];
+                        
+                        for (let fileIndex = 0; fileIndex < pdfFiles.length; fileIndex++) {
+                            const file = pdfFiles[fileIndex];
+                            const fileNumStr = pdfFiles.length > 1 ? ` (${fileIndex + 1}/${pdfFiles.length})` : "";
+                            
+                            setGeneratingStatus(`Carregando PDF: ${file.name}${fileNumStr}...`);
+                            const reader = new FileReader();
+                            const arrayBuffer = await new Promise((resolve, reject) => {
+                                reader.onload = () => resolve(reader.result);
+                                reader.onerror = reject;
+                                reader.readAsArrayBuffer(file);
+                            });
 
-                        const typedarray = new Uint8Array(arrayBuffer);
-                        const pdfDoc = await pdfjsLib.getDocument({ data: typedarray }).promise;
-                        const totalPages = pdfDoc.numPages;
+                            const typedarray = new Uint8Array(arrayBuffer);
+                            const pdfDoc = await pdfjsLib.getDocument({ data: typedarray }).promise;
+                            const totalPages = pdfDoc.numPages;
 
-                        const CHUNK_SIZE = 10;      // pages per AI call
-                        const MAX_IMAGES_PER_CHUNK = 6; // max images sent per chunk call
-                        const LOW_TEXT_THRESHOLD = 120; // chars — below this we treat page as "image-only"
+                            const CHUNK_SIZE = 10;      // pages per AI call
+                            const MAX_IMAGES_PER_CHUNK = 6; // max images sent per chunk call
+                            const LOW_TEXT_THRESHOLD = 120; // chars — below this we treat page as "image-only"
 
-                        // ─────────────────────────────────────────────────────────
-                        // SMALL PDFs (≤ 12 pages): single-pass, send everything
-                        // ─────────────────────────────────────────────────────────
-                        if (totalPages <= 12) {
-                            setGeneratingStatus(`Extraindo conteúdo (${totalPages} páginas)...`);
-                            try { sourceContent = await extractTextFromPDF(typedarray); } catch(e) { sourceContent = ''; }
+                            let fileTextContent = "";
 
-                            for (let p = 1; p <= totalPages; p++) {
-                                setGeneratingStatus(`Renderizando página ${p} de ${totalPages}...`);
-                                try { finalPageImages.push({ page: p, b64: await renderPageAsBase64(pdfDoc, p, 1.5) }); } catch(e) {}
-                            }
+                            // ─────────────────────────────────────────────────────────
+                            // SMALL PDFs (≤ 12 pages): single-pass, send everything
+                            // ─────────────────────────────────────────────────────────
+                            if (totalPages <= 12) {
+                                setGeneratingStatus(`Extraindo conteúdo: ${file.name}${fileNumStr} (${totalPages} páginas)...`);
+                                try { fileTextContent = await extractTextFromPDF(typedarray); } catch(e) { fileTextContent = ''; }
 
-                            if ((!sourceContent || !sourceContent.trim()) && finalPageImages.length === 0)
-                                throw new Error("Não foi possível extrair nenhum conteúdo do PDF.");
+                                for (let p = 1; p <= totalPages; p++) {
+                                    setGeneratingStatus(`Renderizando página ${p} de ${totalPages} do PDF: ${file.name}...`);
+                                    try { 
+                                        const b64 = await renderPageAsBase64(pdfDoc, p, 1.5);
+                                        finalPageImages.push({ 
+                                            fileName: file.name,
+                                            page: p, 
+                                            b64 
+                                        }); 
+                                    } catch(e) {}
+                                }
 
-                        } else {
-                            // ─────────────────────────────────────────────────────
-                            // LARGE PDFs (> 12 pages): PHASE 1 — chunk summarization
-                            // ─────────────────────────────────────────────────────
-                            const chunkSummaries = [];
-                            const totalChunks = Math.ceil(totalPages / CHUNK_SIZE);
+                                if ((!fileTextContent || !fileTextContent.trim()) && finalPageImages.filter(img => img.fileName === file.name).length === 0)
+                                    throw new Error(`Não foi possível extrair nenhum conteúdo do PDF: ${file.name}`);
 
-                            for (let chunk = 0; chunk < totalChunks; chunk++) {
-                                const fromPage = chunk * CHUNK_SIZE + 1;
-                                const toPage = Math.min(fromPage + CHUNK_SIZE - 1, totalPages);
+                            } else {
+                                // ─────────────────────────────────────────────────────
+                                // LARGE PDFs (> 12 pages): PHASE 1 — chunk summarization
+                                // ─────────────────────────────────────────────────────
+                                const chunkSummaries = [];
+                                const totalChunks = Math.ceil(totalPages / CHUNK_SIZE);
 
-                                setGeneratingStatus(`📄 Fase 1/2 — Analisando páginas ${fromPage}–${toPage} de ${totalPages}...`);
+                                for (let chunk = 0; chunk < totalChunks; chunk++) {
+                                    const fromPage = chunk * CHUNK_SIZE + 1;
+                                    const toPage = Math.min(fromPage + CHUNK_SIZE - 1, totalPages);
 
-                                // Extract text for this chunk
-                                const chunkText = await extractTextRange(pdfDoc, fromPage, toPage);
+                                    setGeneratingStatus(`📄 Fase 1/2 — Analisando páginas ${fromPage}–${toPage} de ${totalPages} do PDF: ${file.name}...`);
 
-                                // Identify low-text pages and render them as images
-                                const chunkParts = [];
-                                const chunkPromptText = `Você é um extrator clínico especializado. Analise o conteúdo das páginas ${fromPage}–${toPage} do documento médico abaixo e extraia, em texto corrido e detalhado, TODOS os pontos clínicos relevantes: critérios diagnósticos, condutas, doses de medicamentos, critérios de gravidade, algoritmos de decisão, fluxos de tratamento, critérios de alta e UTI. Seja exaustivo. Preserve números, doses e critérios exatos. Retorne apenas o texto extraído, sem formatação especial.\n\nCONTEÚDO DAS PÁGINAS ${fromPage}–${toPage}:\n${chunkText || '(sem texto digital — veja as imagens das páginas abaixo)'}`;
+                                    // Extract text for this chunk
+                                    const chunkText = await extractTextRange(pdfDoc, fromPage, toPage);
 
-                                chunkParts.push({ text: chunkPromptText });
+                                    // Identify low-text pages and render them as images
+                                    const chunkParts = [];
+                                    const chunkPromptText = `Você é um extrator clínico especializado. Analise o conteúdo das páginas ${fromPage}–${toPage} do documento médico "${file.name}" abaixo e extraia, em texto corrido e detalhado, TODOS os pontos clínicos relevantes: critérios diagnósticos, condutas, doses de medicamentos, critérios de gravidade, algoritmos de decisão, fluxos de tratamento, critérios de alta e UTI. Seja exaustivo. Preserve números, doses e critérios exatos. Retorne apenas o texto extraído, sem formatação especial.\n\nCONTEÚDO DAS PÁGINAS ${fromPage}–${toPage} DO DOCUMENTO "${file.name}":\n${chunkText || '(sem texto digital — veja as imagens das páginas abaixo)'}`;
 
-                                // Render pages with little text as images (cap at MAX_IMAGES_PER_CHUNK)
-                                let imagesAdded = 0;
-                                for (let p = fromPage; p <= toPage && imagesAdded < MAX_IMAGES_PER_CHUNK; p++) {
-                                    const pageText = await extractTextRange(pdfDoc, p, p);
-                                    if (pageText.trim().length < LOW_TEXT_THRESHOLD) {
-                                        try {
-                                            const b64 = await renderPageAsBase64(pdfDoc, p, 1.2);
-                                            chunkParts.push({ text: `\n[Página ${p} — conteúdo visual:]` });
-                                            chunkParts.push({ inlineData: { mimeType: 'image/jpeg', data: b64 } });
-                                            imagesAdded++;
-                                        } catch(e) {}
+                                    chunkParts.push({ text: chunkPromptText });
+
+                                    // Render pages with little text as images (cap at MAX_IMAGES_PER_CHUNK)
+                                    let imagesAdded = 0;
+                                    for (let p = fromPage; p <= toPage && imagesAdded < MAX_IMAGES_PER_CHUNK; p++) {
+                                        const pageText = await extractTextRange(pdfDoc, p, p);
+                                        if (pageText.trim().length < LOW_TEXT_THRESHOLD) {
+                                            try {
+                                                const b64 = await renderPageAsBase64(pdfDoc, p, 1.2);
+                                                chunkParts.push({ text: `\n[Página ${p} do PDF "${file.name}" — conteúdo visual:]` });
+                                                chunkParts.push({ inlineData: { mimeType: 'image/jpeg', data: b64 } });
+                                                imagesAdded++;
+                                            } catch(e) {}
+                                        }
+                                    }
+
+                                    const chunkResponse = await callIA([{ role: 'user', parts: chunkParts }]);
+                                    if (chunkResponse && !chunkResponse.startsWith('[ERRO')) {
+                                        chunkSummaries.push(`=== "${file.name}" - Páginas ${fromPage}–${toPage} ===\n${chunkResponse}`);
                                     }
                                 }
 
-                                const chunkResponse = await callIA([{ role: 'user', parts: chunkParts }]);
-                                if (chunkResponse && !chunkResponse.startsWith('[ERRO')) {
-                                    chunkSummaries.push(`=== Páginas ${fromPage}–${toPage} ===\n${chunkResponse}`);
-                                }
+                                if (chunkSummaries.length === 0)
+                                    throw new Error(`Não foi possível extrair conteúdo clínico do PDF: ${file.name}`);
+
+                                fileTextContent = chunkSummaries.join('\n\n');
                             }
-
-                            if (chunkSummaries.length === 0)
-                                throw new Error("Não foi possível extrair conteúdo clínico do PDF.");
-
-                            sourceContent = chunkSummaries.join('\n\n');
+                            combinedContentParts.push(`=== ARQUIVO DIRETRIZ: ${file.name} ===\n${fileTextContent}`);
                         }
+                        sourceContent = combinedContentParts.join('\n\n\n');
 
                     } else {
                         sourceContent = `Tema: ${creatorPrompt}`;
@@ -2976,8 +3006,8 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                     const finalTextContent = sourceContent || '';
 
                     const finalParts = [{ text: `${systemPrompt}${focusInstruction}\n\nMATERIAL DE ENTRADA:\n${finalTextContent || '(Analise as imagens das páginas do PDF abaixo)'}` }];
-                    finalPageImages.forEach(({ page, b64 }) => {
-                        finalParts.push({ text: `\n--- Página ${page} (imagem) ---` });
+                    finalPageImages.forEach(({ fileName, page, b64 }) => {
+                        finalParts.push({ text: `\n--- Documento: ${fileName} - Página ${page} (imagem) ---` });
                         finalParts.push({ inlineData: { mimeType: 'image/jpeg', data: b64 } });
                     });
 
@@ -3036,7 +3066,7 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                     setCreatorTitle('');
                     setCreatorPrompt('');
                     setCreatorFocus('');
-                    setPdfFile(null);
+                    setPdfFiles([]);
                     setIsCreating(false);
                     setSelectedDeck(newFlowchart.category);
                     setView('gallery');
@@ -4037,11 +4067,30 @@ Gere conexões inteligentes conectando todos os nós em um grafo contínuo, comp
                                                     <div>
                                                         <label className="block text-[10px] font-black text-zinc-400 uppercase tracking-widest mb-1.5 ml-1">Diretriz em PDF</label>
                                                         <div className="relative border-2 border-dashed border-zinc-200 dark:border-zinc-800 hover:border-emerald-500/50 rounded-2xl p-6 flex flex-col items-center justify-center text-center cursor-pointer transition-all bg-zinc-50/50 dark:bg-zinc-950/20">
-                                                            <input type="file" accept=".pdf" onChange={e => setPdfFile(e.target.files[0])} className="absolute inset-0 opacity-0 cursor-pointer" />
+                                                            <input type="file" accept=".pdf" multiple onChange={handleFileChange} className="absolute inset-0 opacity-0 cursor-pointer" />
                                                             <i className="fa-solid fa-cloud-arrow-up text-2xl text-zinc-400 dark:text-zinc-600 mb-2"></i>
-                                                            <p className="text-xs md:text-sm font-bold text-zinc-700 dark:text-zinc-300">{pdfFile ? pdfFile.name : 'Selecione ou arraste seu PDF de conduta...'}</p>
-                                                            <p className="text-[10px] text-zinc-500 dark:text-zinc-600 font-medium mt-1">Apenas arquivos .pdf</p>
+                                                            <p className="text-xs md:text-sm font-bold text-zinc-700 dark:text-zinc-300">
+                                                                {pdfFiles.length > 0 
+                                                                    ? `${pdfFiles.length} PDF(s) selecionado(s)` 
+                                                                    : 'Selecione ou arraste seu(s) PDF(s) de conduta...'}
+                                                            </p>
+                                                            <p className="text-[10px] text-zinc-500 dark:text-zinc-600 font-medium mt-1">Apenas arquivos .pdf (você pode selecionar vários)</p>
                                                         </div>
+                                                        {pdfFiles.length > 0 && (
+                                                            <div className="mt-3 space-y-2 max-h-48 overflow-y-auto pr-1">
+                                                                {pdfFiles.map((file, idx) => (
+                                                                    <div key={idx} className="flex items-center justify-between bg-zinc-100 dark:bg-zinc-900 px-3.5 py-2.5 rounded-2xl border border-zinc-200 dark:border-zinc-800 text-xs font-semibold text-zinc-700 dark:text-zinc-300 transition-all hover:bg-zinc-200 dark:hover:bg-zinc-850">
+                                                                        <div className="flex items-center gap-2 truncate">
+                                                                            <i className="fa-solid fa-file-pdf text-red-500 text-sm shrink-0"></i>
+                                                                            <span className="truncate">{file.name}</span>
+                                                                        </div>
+                                                                        <button type="button" onClick={() => handleRemoveFile(idx)} className="text-zinc-400 hover:text-red-500 transition-colors p-1" title="Remover PDF">
+                                                                            <i className="fa-solid fa-trash-can"></i>
+                                                                        </button>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 ) : (
                                                     <div>
