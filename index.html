@@ -11131,6 +11131,7 @@ Retorne apenas o texto da resposta, sem JSON ou tags explicativas.`;
                     isDirty.current = false;
                 } catch (err) {
                     console.error("Erro ao sincronizar KV:", err);
+                    showAlert("❌ Erro ao Enviar Nuvem: " + err.message);
                     setSyncStatus('error');
                 }
             };
