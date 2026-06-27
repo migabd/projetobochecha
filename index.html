@@ -11101,7 +11101,7 @@ Retorne apenas o texto da resposta, sem JSON ou tags explicativas.`;
 
             // ----- Sincronização via Vercel KV -----
             const syncToCloud = async (dataToSave) => {
-                const secret = cloudConfig.token?.trim();
+                
                 console.log("Sync KV: Iniciando upload...");
                 setSyncStatus('syncing');
                 
@@ -11110,7 +11110,7 @@ Retorne apenas o texto da resposta, sem JSON ou tags explicativas.`;
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
-                            ...(secret ? { 'Authorization': `Bearer ${secret}` } : {})
+                            
                         },
                         body: JSON.stringify(dataToSave)
                     });
@@ -11128,7 +11128,7 @@ Retorne apenas o texto da resposta, sem JSON ou tags explicativas.`;
             };
 
             const syncFromCloud = async (isManual = false) => {
-                const secret = cloudConfig.token?.trim();
+                
                 if (!isManual && !cloudConfig.autoSync) return;
                 
                 console.log("Sync KV: Iniciando download...");
@@ -11137,7 +11137,7 @@ Retorne apenas o texto da resposta, sem JSON ou tags explicativas.`;
                 try {
                     const response = await fetch('/api/sync', {
                         method: 'GET',
-                        headers: secret ? { 'Authorization': `Bearer ${secret}` } : {}
+                        headers: {}
                     });
                     
                     const data = await response.json();
@@ -21301,17 +21301,7 @@ ${(obj.questoesAnalisadas || []).map(q => `### ${q.identificacao}
                                                 <i className="fa-solid fa-circle-info mr-1"></i> A sincronização agora é nativa e instantânea usando o banco de dados da Vercel. Nenhum dado é salvo no Gist.
                                             </div>
                                             
-                                            <div>
-                                                <label className="block text-xs font-bold text-zinc-500 mb-1">Senha de Acesso (API Secret)</label>
-                                                <input 
-                                                    type="password"
-                                                    value={cloudConfig.token}
-                                                    onChange={e => setCloudConfig(p => ({ ...p, token: e.target.value }))}
-                                                    placeholder="Digite a senha configurada na Vercel (API_SECRET)..."
-                                                    className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl px-4 py-3 outline-none focus:border-emerald-500 transition-colors font-mono text-sm"
-                                                />
-                                                <p className="text-[10px] text-zinc-400 mt-1">Protege seu banco de dados contra acessos não autorizados. Deixe em branco se a sua API não tiver senha.</p>
-                                            </div>
+
                                             
                                             <label className="flex items-center gap-3 cursor-pointer group mt-4">
                                                 <div className={`w-10 h-5 rounded-full p-1 transition-colors ${cloudConfig.autoSync ? 'bg-emerald-500' : 'bg-zinc-300 dark:bg-zinc-700'}`}>

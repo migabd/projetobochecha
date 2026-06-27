@@ -2,20 +2,13 @@ export default async function handler(req, res) {
     // Vercel KV ou Upstash Marketplace
     const url = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
     const token = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
-    const expectedSecret = process.env.API_SECRET;
 
     if (!url || !token) {
         return res.status(500).json({ error: 'Banco de dados Redis não está configurado na Vercel.' });
     }
 
-    // Verifica a senha se ela foi configurada no servidor
-    const authHeader = req.headers.authorization;
-    if (expectedSecret) {
-        if (!authHeader || authHeader !== `Bearer ${expectedSecret}`) {
-            return res.status(401).json({ error: 'Senha incorreta (API Secret) ou não fornecida.' });
-        }
-    }
-
+    // Nenhuma senha exigida (100% automático para o usuário)
+    
     // Usaremos uma chave fixa para armazenar os dados do usuário neste app
     const dbKey = 'caderno_db_main';
 
