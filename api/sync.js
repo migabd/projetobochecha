@@ -4,12 +4,9 @@ export default async function handler(req, res) {
     const token = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
 
     if (!url || !token) {
-        return res.status(500).json({ error: 'Banco de dados Redis não está configurado na Vercel.' });
+        return res.status(500).json({ error: 'Banco de dados Redis nǜo estǭ configurado na Vercel.' });
     }
 
-    // Nenhuma senha exigida (100% automático para o usuário)
-    
-    // Usaremos uma chave fixa para armazenar os dados do usuário neste app
     const dbKey = 'caderno_db_main';
 
     try {
@@ -19,12 +16,15 @@ export default async function handler(req, res) {
             });
             const data = await response.json();
             
-            if (data.result) {
+            if (data.result !== null && data.result !== undefined) {
                 let parsed = data.result;
-                if (typeof parsed === 'string') {
+                // Parse recursive para lidar com double ou triple stringify
+                while (typeof parsed === 'string') {
                     try {
                         parsed = JSON.parse(parsed);
-                    } catch(e) {}
+                    } catch(e) {
+                        break;
+                    }
                 }
                 return res.status(200).json(parsed);
             }
@@ -32,19 +32,20 @@ export default async function handler(req, res) {
         } 
         
         if (req.method === 'POST') {
+            // Em Upstash, se mandarmos como JSON string no body, ele salva a string.
             const response = await fetch(`${url}/set/${dbKey}`, {
                 method: 'POST',
                 headers: { 
                     Authorization: `Bearer ${token}`,
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify(JSON.stringify(req.body)) 
+                body: JSON.stringify(req.body)
             });
             const data = await response.json();
             return res.status(200).json({ success: true, response: data });
         }
 
-        return res.status(405).json({ error: 'Método não permitido.' });
+        return res.status(405).json({ error: 'MǸtodo nǜo permitido.' });
 
     } catch (error) {
         console.error('Erro na API Sync KV:', error);
