@@ -10885,6 +10885,7 @@ Retorne apenas o texto da resposta, sem JSON ou tags explicativas.`;
                     darkMode: true,
                     themeMode: 'dark',
                     colorProfile: 'emerald',
+                    cloudVoiceLang: 'pt-BR',
                     simuladoPausado: null,
                     fluxogramas: [],
                     isReviewPaused: false,
@@ -10927,6 +10928,7 @@ Retorne apenas o texto da resposta, sem JSON ou tags explicativas.`;
                         if (parsed.isDailyChallengePaused === undefined) parsed.isDailyChallengePaused = false;
                         if (parsed.themeMode === undefined) parsed.themeMode = parsed.darkMode ? 'dark' : 'light';
                         if (parsed.colorProfile === undefined) parsed.colorProfile = 'emerald';
+                        if (parsed.cloudVoiceLang === undefined) parsed.cloudVoiceLang = localStorage.getItem('flowchart_cloud_voice_lang') || 'pt-BR';
 
                         // Restaurar imagens e dados limpos do window.__INITIAL_STATE__
                         if (window.__INITIAL_STATE__) {
@@ -21017,32 +21019,27 @@ ${(obj.questoesAnalisadas || []).map(q => `### ${q.identificacao}
 
                                     <section className="bg-emerald-50 dark:bg-emerald-800/10 p-6 rounded-3xl border border-emerald-100 dark:border-emerald-800/20 shadow-inner">
                                         <h3 className="text-xs font-black uppercase text-emerald-600 dark:text-emerald-400 mb-4 tracking-widest flex items-center gap-2">
-                                            <i className="fa-solid fa-sliders"></i> Customização de IA (Casos e Desafios)
+                                            <i className="fa-solid fa-volume-high"></i> Voz e Áudio
                                         </h3>
-                                        
-                                        {/* 1. Desafio Diário */}
-                                        <div className="space-y-3 mb-6">
-                                            <div className="flex justify-between items-center">
-                                                <label className="text-[10px] font-bold text-zinc-550 dark:text-zinc-400 uppercase tracking-wider">Desafio Diário</label>
-                                                <label className="flex items-center gap-2 cursor-pointer select-none">
-                                                    <span className={`text-[9px] font-black uppercase tracking-widest ${db.customDailyChallengePromptEnabled ? 'text-emerald-600 dark:text-emerald-400' : 'text-zinc-400'}`}>{db.customDailyChallengePromptEnabled ? 'Personalizado' : 'Padrão'}</span>
-                                                    <div
-                                                        onClick={() => setDb(p => ({ ...p, customDailyChallengePromptEnabled: !p.customDailyChallengePromptEnabled }))}
-                                                        className={`relative w-9 h-5 rounded-full transition-all cursor-pointer ${db.customDailyChallengePromptEnabled ? 'bg-emerald-500' : 'bg-zinc-300 dark:bg-zinc-700'}`}
-                                                    >
-                                                        <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow-md transition-all ${db.customDailyChallengePromptEnabled ? 'left-[18px]' : 'left-0.5'}`}></div>
-                                                    </div>
-                                                </label>
-                                            </div>
-                                            {db.customDailyChallengePromptEnabled && (
-                                                <textarea
-                                                    value={db.customDailyChallengePrompt || ''}
-                                                    onChange={e => setDb(p => ({ ...p, customDailyChallengePrompt: e.target.value }))}
-                                                    placeholder="Como você quer o Desafio Clínico do dia seguinte? (Ex: Focar em pediatria, casos raros, etc.)"
-                                                    className="w-full p-3 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl outline-none text-xs font-bold font-sans resize-none text-zinc-800 dark:text-white"
-                                                    rows="3"
-                                                />
-                                            )}
+                                        <div>
+                                            <label className="block text-[10px] font-bold text-zinc-550 dark:text-zinc-400 uppercase tracking-wider mb-2">
+                                                Idioma da Voz (Nuvem / Edge)
+                                            </label>
+                                            <select
+                                                value={db.cloudVoiceLang || 'pt-BR'}
+                                                onChange={e => {
+                                                    const lang = e.target.value;
+                                                    setDb(p => ({ ...p, cloudVoiceLang: lang }));
+                                                    setCloudVoiceLang(lang);
+                                                    localStorage.setItem('flowchart_cloud_voice_lang', lang);
+                                                }}
+                                                className="w-full p-3 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl outline-none text-xs font-bold text-zinc-800 dark:text-white focus:border-emerald-500 transition-colors cursor-pointer"
+                                            >
+                                                <option value="pt-BR">Português (Brasil)</option>
+                                                <option value="pt-PT">Português (Portugal)</option>
+                                                <option value="en-US">Inglês (Estados Unidos)</option>
+                                                <option value="es-ES">Espanhol (Espanha)</option>
+                                            </select>
                                         </div>
                                     </section>
 
