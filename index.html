@@ -12464,6 +12464,7 @@ ${safeScript}
 
                         const sanitized = sanitizeErrors(rawErrors);
 
+                        let syncedDb = null;
                         setDb(prev => {
                             const importedMap = new Map(sanitized.map(e => [e.id, e]));
                             const updatedErrors = (prev.errors || []).map(localErr => {
@@ -12477,7 +12478,7 @@ ${safeScript}
                             });
                             const brandNewErrors = Array.from(importedMap.values());
 
-                            return {
+                            const newDbState = {
                                 ...prev,
                                 errors: [...brandNewErrors, ...updatedErrors],
                                 perceptions: [...(data.perceptions || []), ...(prev.perceptions || [])].filter((v, i, a) => v && v.id && a.findIndex(t => t.id === v.id) === i),
@@ -12490,6 +12491,9 @@ ${safeScript}
                                 checklists: [...(data.checklists || []), ...(prev.checklists || [])].filter((v, i, a) => v && v.id && a.findIndex(t => t.id === v.id) === i),
                                 fluxogramas: [...(data.fluxogramas || []), ...(prev.fluxogramas || [])].filter((v, i, a) => v && v.id && a.findIndex(t => t.id === v.id) === i)
                             };
+                            
+                            syncedDb = newDbState;
+                            return newDbState;
                         });
 
                         if (data.chatMessages && Array.isArray(data.chatMessages)) {
