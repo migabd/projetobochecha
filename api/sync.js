@@ -16,14 +16,12 @@ export default async function handler(req, res) {
             const data = await response.json();
             
             if (data.result !== null && data.result !== undefined) {
-                // Return exactly what Upstash returned. The frontend will decompress if it's base64.
                 return res.status(200).json(data.result);
             }
             return res.status(200).json(null);
         } 
         
         if (req.method === 'POST') {
-            // Frontend já manda comprimido se passar pelo JSZip. Salva cru no KV.
             const response = await fetch(`${url}/set/${dbKey}`, {
                 method: 'POST',
                 headers: { 
@@ -36,6 +34,19 @@ export default async function handler(req, res) {
             const data = await response.json();
             if (data.error) {
                 console.error("Upstash Error:", data.error);
+                return res.status(500).json({ error: data.error });
+            }
+            return res.status(200).json({ success: true, response: data });
+        }
+        
+        if (req.method === 'DELETE') {
+            const response = await fetch(`${url}/del/${dbKey}`, {
+                method: 'POST', // Upstash REST API uses POST for /del
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            
+            const data = await response.json();
+            if (data.error) {
                 return res.status(500).json({ error: data.error });
             }
             return res.status(200).json({ success: true, response: data });
