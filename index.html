@@ -11644,27 +11644,15 @@ Retorne apenas o texto da resposta, sem JSON ou tags explicativas.`;
                 };
 
                 if (input.toLowerCase() === masterKey.toLowerCase()) {
-                    const decToken = dec(_s.t, masterKey);
-                    const decId = gistConfig.id || dec(_s.g, masterKey);
-                    console.log("DEBUG: handleLogin matched masterKey (Gabriel)", { hasToken: !!decToken, id: decId });
-                    setGistConfig(p => ({ ...p, token: decToken, id: decId, autoSync: true }));
-                    setAiConfig(p => ({ ...p, key: dec(_s.k, masterKey) }));
+                                        setAiConfig(p => ({ ...p, key: dec(_s.k, masterKey) }));
                     setIsLoggedIn(true);
                     showAlert("✅ Credenciais Master ativadas com sucesso!");
                 } else if (input.toLowerCase() === rafaelKey.toLowerCase()) {
-                    const decToken = dec(_r.t, rafaelKey);
-                    const decId = gistConfig.id || dec(_r.g, rafaelKey);
-                    console.log("DEBUG: handleLogin matched rafaelKey (Rafael)", { hasToken: !!decToken, id: decId });
-                    setGistConfig(p => ({ ...p, token: decToken, id: decId, autoSync: true }));
-                    setAiConfig(p => ({ ...p, key: dec(_r.k, rafaelKey) }));
+                                        setAiConfig(p => ({ ...p, key: dec(_r.k, rafaelKey) }));
                     setIsLoggedIn(true);
                     showAlert("✅ Credenciais Rafael ativadas com sucesso!");
                 } else if (input.toLowerCase() === miguelKey.toLowerCase()) {
-                    const decToken = dec(_m.t, miguelKey);
-                    const decId = gistConfig.id || dec(_m.g, miguelKey);
-                    console.log("DEBUG: handleLogin matched miguelKey (Miguel)", { hasToken: !!decToken, id: decId });
-                    setGistConfig(p => ({ ...p, token: decToken, id: decId, autoSync: true }));
-                    setAiConfig(p => ({ ...p, key: dec(_m.k, miguelKey) }));
+                                        setAiConfig(p => ({ ...p, key: dec(_m.k, miguelKey) }));
                     setIsLoggedIn(true);
                     showAlert("✅ Credenciais Miguel ativadas com sucesso!");
                 } else if (input.length > 0) {
