@@ -1,10 +1,11 @@
 export default async function handler(req, res) {
-    const url = process.env.KV_REST_API_URL;
-    const token = process.env.KV_REST_API_TOKEN;
+    // Vercel KV ou Upstash Marketplace
+    const url = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
+    const token = process.env.KV_REST_API_TOKEN || process.env.UPSTASH_REDIS_REST_TOKEN;
     const expectedSecret = process.env.API_SECRET;
 
     if (!url || !token) {
-        return res.status(500).json({ error: 'Banco de dados KV não está configurado na Vercel.' });
+        return res.status(500).json({ error: 'Banco de dados Redis não está configurado na Vercel.' });
     }
 
     // Verifica a senha se ela foi configurada no servidor
@@ -26,8 +27,6 @@ export default async function handler(req, res) {
             const data = await response.json();
             
             if (data.result) {
-                // O Redis armazena como string JSON, então retornamos a string diretamente se quisermos
-                // ou fazemos o parse para enviar como objeto JSON.
                 let parsed = data.result;
                 if (typeof parsed === 'string') {
                     try {
@@ -46,7 +45,6 @@ export default async function handler(req, res) {
                     Authorization: `Bearer ${token}`,
                     'Content-Type': 'application/json'
                 },
-                // Vercel KV requer stringify do valor
                 body: JSON.stringify(JSON.stringify(req.body)) 
             });
             const data = await response.json();
