@@ -845,7 +845,7 @@
             return corrected;
         };
 
-const FluxogramasTab = React.memo(({ db, fluxogramas = [], setDb, callIA, extractTextFromPDF, aiConfig, setAiConfig, availableModels = [], pendingFlowchartImport, setPendingFlowchartImport }) => {
+const FluxogramasTab = React.memo(({ db, fluxogramas = [], setDb, callIA, extractTextFromPDF, aiConfig, setAiConfig, availableModels = [], pendingFlowchartImport, setPendingFlowchartImport, focusFlowchartId, setFocusFlowchartId }) => {
             const [view, setView] = React.useState('decks');
             const [selectedDeck, setSelectedDeck] = React.useState(null);
             const [selectedFlow, setSelectedFlow] = React.useState(null);
@@ -939,6 +939,19 @@ const FluxogramasTab = React.memo(({ db, fluxogramas = [], setDb, callIA, extrac
             const [layoutDirection, setLayoutDirection] = React.useState('TB');
             const [selectedNode, setSelectedNode] = React.useState(null);
             const [canvasViewMode, setCanvasViewMode] = React.useState('canvas'); // 'canvas' | 'checklist' | 'ia_review'
+
+            React.useEffect(() => {
+                if (focusFlowchartId) {
+                    const flow = (fluxogramas || []).find(f => f.id === focusFlowchartId);
+                    if (flow) {
+                        setSelectedFlow(flow);
+                        setSelectedDeck(flow.category);
+                        setView('canvas');
+                        setCanvasViewMode('canvas');
+                    }
+                    setFocusFlowchartId(null);
+                }
+            }, [focusFlowchartId, fluxogramas, setFocusFlowchartId]);
             
             // States for AI Review (Revisão com IA)
             const [isSimulating, setIsSimulating] = React.useState(false);
@@ -2067,8 +2080,8 @@ Você deve retornar APENAS um objeto JSON válido, sem qualquer bloco de código
                     const reviewLog = {
                         id: Date.now(),
                         date: new Date().toISOString(),
-                        scenario: activeReviewChat[1]?.text || 'Caso clínico simulado',
-                        chatHistory: activeReviewChat.filter(m => m.role !== 'system'),
+                        scenario: activeReviewChatRef.current[1]?.text || 'Caso clínico simulado',
+                        chatHistory: activeReviewChatRef.current.filter(m => m.role !== 'system'),
                         grades: { d1, d2, d3, d4, d5 },
                         score: calculatedScore,
                         classification: calculatedClassification,
@@ -9509,16 +9522,1136 @@ Retorne apenas o texto da resposta, sem JSON ou tags explicativas.`;
                                 <button 
                                     type="submit" 
                                     disabled={!newCommentText.trim()}
-                                    className="px-6 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-black text-[10px] uppercase tracking-wider transition-all disabled:opacity-30 disabled:cursor-not-allowed"
-                                >
-                                    Publicar Comentário
-                                </button>
-                            </div>
-                        </div>
-                    </form>
-                </div>
             );
         };
+
+        const ExamesTab = React.memo(({ db, setDb, callIA, aiConfig, availableModels, setActiveTab }) => {
+            const [viewMode, setViewMode] = useState('dashboard'); // 'dashboard' | 'workspace'
+            const [activeExam, setActiveExam] = useState(null);
+            const [answer, setAnswer] = useState('');
+            const [isGenerating, setIsGenerating] = useState(false);
+            const [isEvaluating, setIsEvaluating] = useState(false);
+            const [error, setError] = useState(null);
+            const [selectedHistoryExam, setSelectedHistoryExam] = useState(null);
+            const [lightboxImage, setLightboxImage] = useState(null);
+            const [localFigUrls, setLocalFigUrls] = useState({});
+            const [historySearchQuery, setHistorySearchQuery] = useState('');
+            const [historyTypeFilter, setHistoryTypeFilter] = useState('ALL'); // 'ALL' | 'ecg' | 'image'
+            const [toast, setToast] = useState(null);
+
+            // Zoom e Pan
+            const [zoomScale, setZoomScale] = useState(1.0);
+            const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
+            const [isDragging, setIsDragging] = useState(false);
+            const dragStart = React.useRef({ x: 0, y: 0 });
+
+            // Checklist do Estudante
+            const [checklistChecked, setChecklistChecked] = useState({});
+
+            // Laudário e Refinamento
+            const [laudarioOpen, setLaudarioOpen] = useState(false);
+            const [isRefining, setIsRefining] = useState(false);
+
+            const showLocalToast = (msg, type = 'success') => {
+                setToast({ message: msg, type });
+                setTimeout(() => setToast(null), 4000);
+            };
+
+            const formatDate = (dateStr) => {
+                if (!dateStr) return '';
+                const parts = dateStr.split('-');
+                if (parts.length !== 3) return dateStr;
+                return `${parts[2]}/${parts[1]}/${parts[0]}`;
+            };
+
+            const parseMarkdown = (text) => {
+                if (!text) return "";
+                let html = text;
+                html = html.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                html = html.replace(/^### (.*?)$/gm, '<h3 class="text-base font-black text-indigo-600 dark:text-indigo-400 mt-4 mb-2">$1</h3>');
+                html = html.replace(/^## (.*?)$/gm, '<h2 class="text-lg font-black text-indigo-600 dark:text-indigo-400 mt-5 mb-2.5">$1</h2>');
+                html = html.replace(/\*\*(.*?)\*\*/g, '<strong class="font-black text-indigo-600 dark:text-indigo-400">$1</strong>');
+                html = html.replace(/^\- (.*?)$/gm, '<li class="ml-4 list-disc text-sm font-semibold text-zinc-700 dark:text-zinc-300">$1</li>');
+                html = html.replace(/\n/g, '<br/>');
+                return html;
+            };
+
+            const allExames = db.examesDiarios || [];
+            const sortedExames = allExames
+                .filter(exame => {
+                    const q = historySearchQuery.toLowerCase().trim();
+                    const typeMatch = historyTypeFilter === 'ALL' || exame.type === historyTypeFilter;
+                    if (!typeMatch) return false;
+                    if (!q) return true;
+                    const titleStr = (exame.title || '').toLowerCase();
+                    const specialtyStr = (exame.specialty || '').toLowerCase();
+                    const reportStr = (exame.caseReport || '').toLowerCase();
+                    const dateStr = formatDate(exame.date).toLowerCase();
+                    return titleStr.includes(q) || specialtyStr.includes(q) || reportStr.includes(q) || dateStr.includes(q);
+                })
+                .sort((a, b) => b.id - a.id);
+
+            const examToRender = selectedHistoryExam || activeExam;
+
+            // Carrega figuras dataUrl
+            React.useEffect(() => {
+                let active = true;
+                if (!examToRender || !examToRender.figures || examToRender.figures.length === 0) {
+                    setLocalFigUrls({});
+                    return;
+                }
+                const allHaveDataUrl = examToRender.figures.every(f => f.dataUrl);
+                if (allHaveDataUrl) {
+                    const mapping = {};
+                    examToRender.figures.forEach(f => { mapping[f.id] = f.dataUrl; });
+                    setLocalFigUrls(mapping);
+                    return;
+                }
+                
+                const loadFigs = async () => {
+                    try {
+                        const updated = await fetchFigureDataUrls(examToRender.pmcid, examToRender.figures);
+                        if (!active) return;
+                        const mapping = {};
+                        updated.forEach(f => { mapping[f.id] = f.dataUrl || f.url; });
+                        setLocalFigUrls(mapping);
+                        
+                        // Opcional: Persistir no DB se baixar agora
+                        setDb(prev => {
+                            const list = prev.examesDiarios || [];
+                            const next = list.map(item => {
+                                if (item.id === examToRender.id) {
+                                    return { ...item, figures: updated };
+                                }
+                                return item;
+                            });
+                            return { ...prev, examesDiarios: next };
+                        });
+                    } catch (e) {
+                        console.warn("Erro ao baixar imagens do exame:", e);
+                    }
+                };
+                loadFigs();
+                return () => { active = false; };
+            }, [examToRender, setDb]);
+
+            // Reset Zoom/Pan ao mudar de exame
+            React.useEffect(() => {
+                setZoomScale(1.0);
+                setPanOffset({ x: 0, y: 0 });
+                setChecklistChecked({});
+            }, [examToRender]);
+
+            // Dicionário de Frases do Laudário
+            const laudarioFrases = {
+                ecg: [
+                    { label: "FC e Ritmo Sinusal", text: "Ritmo sinusal regular, frequência cardíaca de ___ bpm." },
+                    { label: "Desvio de Eixo", text: "Eixo elétrico do complexo QRS desviado para a esquerda (aproximadamente ___ graus)." },
+                    { label: "Supra de ST", text: "Supradesnivelamento do segmento ST de aspecto convexo medindo ___ mm em derivações DII, DIII e aVF." },
+                    { label: "Infra por Reciprocidade", text: "Infradesnivelamento de segmento ST em derivações DI e aVL, caracterizando imagem em espelho (reciprocidade)." },
+                    { label: "QT Prolongado", text: "Prolongamento do intervalo QT corrigido (QTc de ___ ms)." },
+                    { label: "Onda T Apiculada", text: "Ondas T simétricas, pontiagudas e de grande amplitude nas derivações de ___ a ___." },
+                    { label: "Onda Q Patológica", text: "Presença de ondas Q patológicas (duração > 0.04s e amplitude > 25% da onda R) em ___." }
+                ],
+                image: [
+                    { label: "Qualidade Técnica", text: "Radiografia de tórax realizada em incidência PA e Perfil com parâmetros técnicos adequados." },
+                    { label: "Consolidação Lobar", text: "Opacidade alveolar homogênea / consolidação com presença de broncogramas aéreos no lobo ___." },
+                    { label: "Sem Derrame/Ar", text: "Ausência de pneumotórax, derrame pleural ou outras alterações pleurais visíveis bilateralmente." },
+                    { label: "Diafragma Livre", text: "Cúpulas diafragmáticas livres, contornos preservados e seios costofrênicos pérvios." },
+                    { label: "Área Cardíaca Normal", text: "Área cardíaca com dimensões e contornos dentro dos limites normais de tamanho." },
+                    { label: "Alargamento Mediastino", text: "Alargamento do mediastino superior, com contornos mediastinais convexos e medindo ___ mm." },
+                    { label: "Infiltrado Intersticial", text: "Infiltrado intersticial retículo-nodular difuso e simétrico, mais proeminente em bases pulmonares." }
+                ]
+            };
+
+            const insertAtCursor = (textToInsert) => {
+                const textarea = document.getElementById('exame-report-textarea');
+                if (!textarea) return;
+                const start = textarea.selectionStart;
+                const end = textarea.selectionEnd;
+                const currentText = answer;
+                const newText = currentText.substring(0, start) + textToInsert + currentText.substring(end);
+                setAnswer(newText);
+                setTimeout(() => {
+                    textarea.focus();
+                    textarea.selectionStart = textarea.selectionEnd = start + textToInsert.length;
+                }, 50);
+            };
+
+            // Inserir Template de Laudo
+            const handleInsertTemplate = (type) => {
+                if (type === 'ecg') {
+                    setAnswer(`1. TÉCNICA E QUALIDADE DO REGISTRO:
+2. FREQUÊNCIA E RITMO CARDÍACO:
+3. EIXO ELÉTRICO (QRS):
+4. ANÁLISE DAS ONDAS (P, QRS, T) E INTERVALOS (PR, QTc):
+5. ANÁLISE DE SEGMENTO ST E ALTERAÇÕES DE REPOLARIZAÇÃO:
+6. SÍNTESE DIAGNÓSTICA / CONCLUSÃO:
+7. GRAVIDADE E REPERCUSSÃO CLÍNICA IMEDIATA:`);
+                } else {
+                    setAnswer(`1. TÉCNICA, PROJEÇÃO E QUALIDADE DO EXAME:
+2. DESCRIÇÃO DAS ESTRUTURAS ANATÔMICAS (Paredes, Silhueta Cardíaca, Mediastino):
+3. ACHADOS POSITIVOS (Alterações visíveis no parênquima, pleura, etc.):
+4. ACHADOS NEGATIVOS RELEVANTES (O que foi excluído):
+5. SÍNTESE DIAGNÓSTICA / CONCLUSÃO:
+6. GRAVIDADE E REPERCUSSÃO CLÍNICA IMEDIATA:`);
+                }
+            };
+
+            // Polimento Linguístico via Gemini
+            const handlePolishReport = async () => {
+                if (!answer.trim()) return;
+                setIsRefining(true);
+                try {
+                    const polishPrompt = `Você é um Médico Radiologista/Cardiologista Sênior. Sua tarefa é receber o rascunho de laudo de exame escrito pelo estudante e polir a linguagem técnica para que soe extremamente profissional, formal e adequada ao padrão dos laudários médicos brasileiros.
+                    IMPORTANTE:
+                    1. NÃO altere o significado clínico, os achados descritos ou o diagnóstico pretendido pelo aluno.
+                    2. Ajuste termos informais para nomenclatura médica formal (ex: "mancha no pulmão" para "opacidade alveolar", "coração grande" para "cardiomegalia", "risco na onda" para "infradesnivelamento").
+                    3. Organize em tópicos estruturados se apropriado.
+                    4. Retorne APENAS o laudo polido, sem comentários adicionais e sem marcação markdown de bloco de código.
+
+                    RASCUNHO DO ESTUDANTE:
+                    ${answer}`;
+
+                    const selectedModel = db.desafioDiarioModel || aiConfig.model || 'gemini-1.5-flash';
+                    const refined = await callIA([
+                        { role: 'user', parts: [{ text: polishPrompt }] }
+                    ], selectedModel);
+                    
+                    const cleaned = refined.replace(/```[a-z]*\n|```/g, '').trim();
+                    setAnswer(cleaned);
+                    showLocalToast("Laudo polido profissionalmente com sucesso!", "success");
+                } catch (e) {
+                    showLocalToast("Erro ao polir laudo: " + e.message, "error");
+                } finally {
+                    setIsRefining(false);
+                }
+            };
+
+            // Busca Literária e Geração de Exame
+            const handleGenerateExam = async (type, forceRegen = false) => {
+                const todayStr = new Date().toLocaleDateString('en-CA');
+                const currentExames = db.examesDiarios || [];
+                const found = currentExames.find(e => e.date === todayStr && e.type === type);
+
+                if (found && !forceRegen) {
+                    setActiveExam(found);
+                    setAnswer(found.answer || '');
+                    setViewMode('workspace');
+                    return;
+                }
+
+                setIsGenerating(true);
+                setError(null);
+
+                try {
+                    // Especialidades variadas dependendo do dia
+                    const specialties = ['Cardiologia', 'Pneumologia', 'Medicina de Emergência', 'Cirurgia Geral', 'Infectologia', 'Pediatria'];
+                    const dayOfYear = Math.floor((new Date() - new Date(new Date().getFullYear(), 0, 0)) / (1000 * 60 * 60 * 24));
+                    const selectedSpecialty = specialties[dayOfYear % specialties.length];
+
+                    const usedPmcids = new Set(currentExames.map(e => e.pmcid).filter(Boolean));
+
+                    let selectedArticle = null;
+                    let figures = [];
+                    let pageNum = 1;
+                    
+                    const query = type === 'ecg'
+                        ? `(title:electrocardiogram OR title:ECG OR title:electrocardiographic) AND (title:"case report" OR title:"clinical case") AND HAS_FT:y AND OPEN_ACCESS:y`
+                        : `(title:radiograph OR title:radiography OR title:"chest x-ray" OR "computed tomography" OR "magnetic resonance imaging" OR title:ultrasound) AND (title:"case report" OR title:"clinical case") AND HAS_FT:y AND OPEN_ACCESS:y`;
+
+                    while (!selectedArticle && pageNum <= 5) {
+                        const searchUrl = `https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=${encodeURIComponent(query)}&format=json&pageSize=50&page=${pageNum}`;
+                        const res = await fetch(searchUrl);
+                        if (!res.ok) throw new Error("Erro de conexão ao buscar base de exames.");
+                        const searchData = await res.json();
+                        const results = searchData.resultList?.result || [];
+
+                        if (results.length === 0) break;
+
+                        const seedIdx = Math.floor(Math.random() * results.length);
+                        for (let i = 0; i < results.length; i++) {
+                            const article = results[(seedIdx + i) % results.length];
+                            if (article.pmcid && !usedPmcids.has(article.pmcid)) {
+                                // Tenta baixar XML do artigo e conferir se tem figuras
+                                const xmlUrl = `https://www.ebi.ac.uk/europepmc/webservices/rest/${article.pmcid}/fullTextXML`;
+                                try {
+                                    const xmlRes = await fetch(xmlUrl);
+                                    if (xmlRes.ok) {
+                                        const xmlText = await xmlRes.text();
+                                        const parser = new DOMParser();
+                                        const doc = parser.parseFromString(xmlText, 'application/xml');
+                                        const figs = doc.getElementsByTagName('fig');
+                                        const tempFigs = [];
+
+                                        for (let j = 0; j < figs.length; j++) {
+                                            const fig = figs[j];
+                                            const label = fig.getElementsByTagName('label')[0]?.textContent || `Figura ${j+1}`;
+                                            const caption = fig.getElementsByTagName('caption')[0]?.textContent || '';
+                                            const graphic = fig.getElementsByTagName('graphic')[0];
+                                            if (graphic) {
+                                                const href = graphic.getAttribute('xlink:href') || graphic.getAttribute('href');
+                                                if (href && !/\.gif$/i.test(href)) {
+                                                    let fileName = href;
+                                                    if (!/\.(jpg|jpeg|png|tiff)$/i.test(fileName)) fileName += '.jpg';
+                                                    const url = `https://europepmc.org/articles/${article.pmcid}/bin/${fileName}`;
+                                                    tempFigs.push({
+                                                        id: fig.getAttribute('id') || `fig${j+1}`,
+                                                        label,
+                                                        caption,
+                                                        url
+                                                    });
+                                                }
+                                            }
+                                        }
+
+                                        if (tempFigs.length > 0) {
+                                            selectedArticle = article;
+                                            figures = tempFigs;
+                                            break;
+                                        }
+                                    }
+                                } catch (e) {
+                                    console.warn("Erro ao testar XML do artigo:", e);
+                                }
+                            }
+                        }
+                        if (selectedArticle) break;
+                        pageNum++;
+                    }
+
+                    // Fallback caso não encontre artigo com imagens na pesquisa online
+                    if (!selectedArticle) {
+                        throw new Error(`Não conseguimos encontrar um caso de ${type === 'ecg' ? 'ECG' : 'imagem'} com figuras disponíveis na literatura hoje. Tente novamente em alguns instantes.`);
+                    }
+
+                    // Tenta baixar texto do parágrafo
+                    let articleText = selectedArticle.abstractText || "";
+                    try {
+                        const ftRes = await fetch(`https://www.ebi.ac.uk/europepmc/webservices/rest/${selectedArticle.pmcid}/fullTextXML`);
+                        if (ftRes.ok) {
+                            const ftXml = await ftRes.text();
+                            const parser = new DOMParser();
+                            const doc = parser.parseFromString(ftXml, 'application/xml');
+                            const paragraphs = doc.getElementsByTagName('p');
+                            let tempText = "";
+                            for (let j = 0; j < Math.min(paragraphs.length, 25); j++) {
+                                const txt = paragraphs[j].textContent || "";
+                                if (txt.length > 60) tempText += txt + "\n\n";
+                            }
+                            if (tempText.trim().length > 200) articleText = tempText;
+                        }
+                    } catch (e) {}
+
+                    const prompt = `Você é um Elaborador de Casos Práticos de Exames de Elite. Sua tarefa é transformar um relato de caso real da literatura em um desafio de INTERPRETAÇÃO DE EXAME MÉDICO em português brasileiro.
+
+                    DADOS DO ARTIGO:
+                    Título: ${selectedArticle.title}
+                    Tipo de Exame Solicitado: ${type === 'ecg' ? 'Eletrocardiograma (ECG)' : 'Exame de Imagem (Radiografia, Tomografia, RM ou Ultrassom)'}
+                    PMCID: ${selectedArticle.pmcid}
+                    DOI: ${selectedArticle.doi}
+                    Texto do caso clínico (extraído da literatura):
+                    ${articleText.substring(0, 7000)}
+
+                    FIGURAS REAIS DO EXAME:
+                    ${JSON.stringify(figures)}
+
+                    INSTRUÇÕES DE ELABORAÇÃO:
+                    1. Crie uma breve história clínica inicial (anamnese e queixa principal) em português, formatada em markdown. O caso deve descrever o contexto de admissão do paciente e a indicação de se solicitar o exame.
+                    2. Não revele em hipótese alguma o diagnóstico definitivo ou o laudo do exame no texto da história clínica. O estudante deve laudá-lo analisando as figuras anexadas.
+                    3. Se houver figuras associadas, instrua o estudante a analisar a(s) imagem(ns) do exame anexadas.
+                    4. Crie um gabarito clínico de interpretação EXTREMAMENTE detalhado para a avaliação posterior. Siga rigorosamente esta estrutura de gabarito para que a IA avaliadora possa usar como referência:
+                       - Diagnóstico final exato do exame.
+                       - Sequência técnica recomendada (leitura sequencial).
+                       - Descrição esperada dos achados normais e anormais do exame.
+                       - Achados principais obrigatórios que o aluno DEVE citar (ex: "supra de ST em DII, DIII, aVF", "imagem em cunha pulmonar", etc.).
+                       - Integração diagnóstica esperada.
+                       - Gravidade e repercussão clínica (sinais de alarme, conduta de urgência).
+                       - Erros potencialmente letais que seriam imperdoáveis cometer (ex: confundir IAM com repolarização precoce, confundir pneumotórax com derrame).
+                    5. Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto adicional) com a seguinte estrutura:
+                    {
+                      "titulo": "Título do Exame (ex: ECG de Admissão - Dor Torácica)",
+                      "caso_clinico": "Breve história clínica e indicação do exame formatada em Markdown...",
+                      "gabarito_avaliacao": {
+                        "diagnostico_final": "Diagnóstico do exame...",
+                        "sequencia_tecnica": "Passo a passo técnico esperado...",
+                        "descricao_esperada": "Como descrever os achados perfeitamente...",
+                        "achados_obrigatorios": ["Achado obrigatório 1", "Achado obrigatório 2"],
+                        "raciocinio_sintese": "Como integrar os achados ao diagnóstico...",
+                        "urgencia_gravidade": "Explicação se é grave/urgente e o que mata...",
+                        "erros_letais": ["Erro letal 1", "Erro letal 2"]
+                      }
+                    }`;
+
+                    const selectedModel = db.desafioDiarioModel || aiConfig.model || 'gemini-1.5-flash';
+                    const responseText = await callIA([
+                        { role: 'user', parts: [{ text: prompt }] }
+                    ], selectedModel);
+
+                    const jsonString = responseText.replace(/```json|```/g, '').trim();
+                    const match = jsonString.match(/\{[\s\S]*\}/);
+                    if (!match) throw new Error("A IA não retornou um JSON válido.");
+
+                    const generated = JSON.parse(match[0]);
+
+                    // Persiste figuras como dataUrl
+                    const persistedFigures = await fetchFigureDataUrls(selectedArticle.pmcid, figures);
+
+                    const newExam = {
+                        id: Date.now() + "_" + type,
+                        date: todayStr,
+                        type,
+                        specialty: selectedSpecialty,
+                        title: generated.titulo || `Laudo de ${type === 'ecg' ? 'ECG' : 'Imagem'} - ${selectedSpecialty}`,
+                        caseReport: generated.caso_clinico,
+                        doi: selectedArticle.doi,
+                        pmcid: selectedArticle.pmcid || '',
+                        citation: `${selectedArticle.authorString || 'Autores'}. ${selectedArticle.title} ${selectedArticle.journalTitle || ''}. ${selectedArticle.pubYear || ''}`,
+                        figures: persistedFigures,
+                        gabarito: generated.gabarito_avaliacao,
+                        answer: null,
+                        evaluation: null
+                    };
+
+                    setDb(prev => {
+                        const current = prev.examesDiarios || [];
+                        const filtered = current.filter(e => !(e.date === todayStr && e.type === type));
+                        return {
+                            ...prev,
+                            examesDiarios: [...filtered, newExam]
+                        };
+                    });
+
+                    setActiveExam(newExam);
+                    setAnswer('');
+                    setViewMode('workspace');
+                    showLocalToast("Exame de hoje gerado com sucesso!", "success");
+                } catch (err) {
+                    console.error("Erro na geração do exame:", err);
+                    setError(err.message);
+                } finally {
+                    setIsGenerating(false);
+                }
+            };
+
+            // Avaliação do Laudo
+            const handleSubmitReport = async () => {
+                const targetExame = examToRender;
+                if (!answer.trim() || !targetExame) return;
+                setIsEvaluating(true);
+                setError(null);
+
+                try {
+                    const evaluationPrompt = `Você é um Profissional Avaliador de Exames Médicos extremamente rígido. Avalie o laudo/relatório discursivo enviado pelo estudante para o seguinte exame:
+
+                    TIPO DE EXAME: ${targetExame.type === 'ecg' ? 'Eletrocardiograma (ECG)' : 'Exame de Imagem'}
+                    CASO CLÍNICO E EXAME:
+                    ${targetExame.caseReport}
+
+                    EXAME ANEXADO (FIGURAS):
+                    ${targetExame.figures.map(f => `${f.label}: ${f.caption}`).join('\n')}
+
+                    GABARITO DE REFERÊNCIA:
+                    - Diagnóstico: ${targetExame.gabarito.diagnostico_final}
+                    - Sequência Técnica Esperada: ${targetExame.gabarito.sequencia_tecnica}
+                    - Descrição Esperada: ${targetExame.gabarito.descricao_esperada}
+                    - Achados Obrigatórios (Aluno deve citar todos): ${JSON.stringify(targetExame.gabarito.achados_obrigatorios)}
+                    - Síntese Diagnóstica: ${targetExame.gabarito.raciocinio_sintese}
+                    - Gravidade e Urgência: ${targetExame.gabarito.urgencia_gravidade}
+                    - Erros Potencialmente Letais: ${JSON.stringify(targetExame.gabarito.erros_letais)}
+
+                    RESPOSTA/LAUDO DO ESTUDANTE:
+                    ${answer}
+
+                    REGRAS DE AVALIAÇÃO (Siga rigidamente os 5 critérios e penalidades abaixo):
+
+                    ---
+                    # Critério 1 – Técnica de leitura (Máx: 2,0 pontos)
+                    O aluno deve seguir uma sequência padronizada de leitura (Frequência, ritmo, eixo, etc. para ECG; ou qualidade, plano, estruturas, achados para imagem).
+                    - 2,0: sequência perfeita
+                    - 1,5: pequena desorganização
+                    - 1,0: método incompleto
+                    - 0,5: leitura caótica
+                    - 0: sem método / direto para o diagnóstico
+
+                    # Critério 2 – Descrição objetiva (Máx: 2,0 pontos)
+                    O aluno deve descrever exatamente o que vê (Ex: supra de ST de 3mm em DII, DIII e aVF) em vez de descrições vagas (Ex: tem alteração).
+                    - 2,0: descrição precisa e mensurada
+                    - 1,5: pequenas imprecisões
+                    - 1,0: descrição incompleta
+                    - 0,5: descrição vaga
+                    - 0: descrição incorreta
+
+                    # Critério 3 – Reconhecimento dos achados principais (Máx: 2,5 pontos)
+                    Todos os achados importantes devem ser identificados. Subtraia 0.5 por cada achado importante omitido. Erros importantes custam -1.0. Se houver erro crítico, atribua 0 pontos a este critério.
+                    - Comece com 2.5 e aplique deduções com base nas omissões dos "Achados Obrigatórios".
+
+                    # Critério 4 – Integração diagnóstica (Máx: 2,0 pontos)
+                    O diagnóstico final deve ser justificado e derivado logicamente dos achados.
+                    - 2,0: excelente e preciso
+                    - 1,5: correto mas incompleto
+                    - 1,0: diagnóstico genérico
+                    - 0: errado
+
+                    # Critério 5 – Gravidade e repercussão clínica (Máx: 1,5 pontos)
+                    O aluno avaliou a gravidade imediata (mata? é urgente? conduta de emergência?).
+                    - 1,5: reconheceu e justificou tudo
+                    - 1,0: reconheceu parcialmente
+                    - 0: ignorou ou errou a gravidade
+
+                    ---
+                    # PENALIZAÇÕES ABSOLUTAS:
+                    1. Diagnóstico correto sem justificar/descrever: NOTA MÁXIMA FINAL = 5.0
+                    2. Acertou por "chute" (sem fundamentar achados): NOTA MÁXIMA FINAL = 4.0
+                    3. Não utilizou método algum de leitura: NOTA MÁXIMA FINAL = 6.0
+                    4. Confundiu anatomia básica: NOTA MÁXIMA FINAL = 4.0
+                    5. Omissão de um achado obrigatório: dedução de -1.0 ponto por item (máximo -3.0 de penalidade)
+                    6. ERRO POTENCIALMENTE LETAL (ex: confundir IAM com repolarização precoce, dissecção com IAM, pneumotórax com derrame, hemorragia com calcificação, ou qualquer erro citado nos "Erros Potencialmente Letais" do gabarito): NOTA MÁXIMA FINAL = 2.0 (reprovação automática)
+
+                    # GATILHOS DE REPROVAÇÃO AUTOMÁTICA (NOTA ≤ 2.0):
+                    Atribua no máximo 2.0 pontos na nota final se o estudante:
+                    - Não reconhecer uma emergência evidente contida no exame.
+                    - Inventar achados inexistentes que mudariam condutas críticas.
+                    - Demonstrar desconhecimento anatômico grave.
+
+                    # BÔNUS (Até +0,5):
+                    Apenas se a nota calculada antes do bônus for >= 9.0. Conceda bônus se o estudante discutiu diagnósticos diferenciais relevantes, limitações do exame, fisiopatologia ou correlação clínica detalhada. O total final nunca pode exceder 10.0.
+
+                    # CONVERSÃO PARA CONCEITO:
+                    - 9.5 a 10.0: Excelente (nível R3/Especialista)
+                    - 9.0 a 9.4: Muito bom
+                    - 8.0 a 8.9: Bom
+                    - 7.0 a 7.9: Adequado
+                    - 6.0 a 6.9: Limítrofe
+                    - 5.0 a 5.9: Insuficiente
+                    - 3.0 a 4.9: Fraco
+                    - 0 a 2.9: Inaceitável
+
+                    # ÍNDICE DE CONFIABILIDADE DA INTERPRETAÇÃO:
+                    - A (95-100%): interpretação sistemática, completa e reprodutível.
+                    - B (85-94%): correta, com pequenas falhas sem impacto clínico.
+                    - C (70-84%): acerta o principal, mas omite achados relevantes.
+                    - D (50-69%): acertos pontuais com raciocínio inconsistente.
+                    - E (<50%): interpretação insegura ou perigosa.
+
+                    ---
+                    Retorne APENAS um objeto JSON válido (sem tags markdown de código e sem texto adicional), no seguinte formato:
+                    {
+                      "grades": {
+                        "criterio1": 1.5,
+                        "criterio2": 2.0,
+                        "criterio3": 2.0,
+                        "criterio4": 1.5,
+                        "criterio5": 1.0
+                      },
+                      "rawScoreBeforePenalties": 8.0,
+                      "penaltiesApplied": [
+                        { "type": "Omissão", "deduction": 1.0, "reason": "Omitiu a identificação de infra de ST recíproco" }
+                      ],
+                      "bonusApplied": {
+                        "points": 0.0,
+                        "reason": ""
+                      },
+                      "finalScore": 7.0,
+                      "reliabilityIndex": "B",
+                      "concept": "Adequado",
+                      "evaluationsPerCriterion": {
+                        "criterio1": "Feedback para Critério 1...",
+                        "criterio2": "Feedback para Critério 2...",
+                        "criterio3": "Feedback para Critério 3...",
+                        "criterio4": "Feedback para Critério 4...",
+                        "criterio5": "Feedback para Critério 5..."
+                      },
+                      "lethalErrorDetected": false,
+                      "lethalErrorComment": "",
+                      "mentorComment": "[Seu comentário final, de no máximo 4 linhas, encarnando a personalidade: ${getLocalPersonaInstruction(aiConfig?.persona || 'amigavel')}]"
+                    }`;
+
+                    const selectedModel = db.desafioDiarioModel || aiConfig.model || 'gemini-1.5-flash';
+                    const responseText = await callIA([
+                        { role: 'user', parts: [{ text: evaluationPrompt }] }
+                    ], selectedModel);
+
+                    const jsonString = responseText.replace(/```json|```/g, '').trim();
+                    const match = jsonString.match(/\{[\s\S]*\}/);
+                    if (!match) throw new Error("A IA não retornou um JSON de avaliação válido.");
+
+                    const parsedEval = JSON.parse(match[0]);
+
+                    setDb(prev => {
+                        const current = prev.examesDiarios || [];
+                        const next = current.map(item => {
+                            if (item.id === targetExame.id) {
+                                return { ...item, answer, evaluation: parsedEval };
+                            }
+                            return item;
+                        });
+                        return { ...prev, examesDiarios: next };
+                    });
+
+                    // Atualizar o estado local
+                    setActiveExam(prev => ({ ...prev, answer, evaluation: parsedEval }));
+                    showLocalToast("Laudo avaliado com sucesso pela banca!", "success");
+                } catch (e) {
+                    console.error(e);
+                    setError("Erro ao avaliar laudo: " + e.message);
+                } finally {
+                    setIsEvaluating(false);
+                }
+            };
+
+            // Zoom e Pan mouse handlers
+            const handleMouseDown = (e) => {
+                e.preventDefault();
+                setIsDragging(true);
+                dragStart.current = { x: e.clientX - panOffset.x, y: e.clientY - panOffset.y };
+            };
+
+            const handleMouseMove = (e) => {
+                if (!isDragging) return;
+                setPanOffset({
+                    x: e.clientX - dragStart.current.x,
+                    y: e.clientY - dragStart.current.y
+                });
+            };
+
+            const handleMouseUp = () => setIsDragging(false);
+
+            // Checklist de apoio
+            const handleCheckToggle = (key) => {
+                setChecklistChecked(prev => ({
+                    ...prev,
+                    [key]: !prev[key]
+                }));
+            };
+
+            const checkListItems = examToRender?.type === 'ecg'
+                ? [
+                    { key: 'c1_fc', label: 'Frequência Cardíaca' },
+                    { key: 'c1_ritmo', label: 'Ritmo' },
+                    { key: 'c1_eixo', label: 'Eixo Elétrico' },
+                    { key: 'c1_intervalos', label: 'Intervalos (PR, QRS, QT)' },
+                    { key: 'c1_ondas_p', label: 'Ondas P' },
+                    { key: 'c1_qrs', label: 'Complexo QRS' },
+                    { key: 'c1_st', label: 'Segmento ST' },
+                    { key: 'c1_onda_t', label: 'Onda T' },
+                    { key: 'c1_qt', label: 'Intervalo QT' },
+                    { key: 'c1_conclusao', label: 'Conclusão' }
+                ]
+                : [
+                    { key: 'c2_confirmar', label: 'Confirmar Exame Correto' },
+                    { key: 'c2_qualidade', label: 'Qualidade Técnica' },
+                    { key: 'c2_projecao', label: 'Projeção/Plano' },
+                    { key: 'c2_anatomia', label: 'Estruturas Anatômicas' },
+                    { key: 'c2_achados_pos', label: 'Achados Positivos' },
+                    { key: 'c2_achados_neg', label: 'Achados Negativos Relevantes' },
+                    { key: 'c2_conclusao', label: 'Conclusão' }
+                ];
+
+            return (
+                <div className="p-4 sm:p-8 space-y-8 animate-in fade-in duration-300 font-sans">
+                    {/* Header Principal */}
+                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-zinc-200 dark:border-zinc-800 pb-6">
+                        <div>
+                            <h2 className="text-2xl font-black text-zinc-900 dark:text-white flex items-center gap-2">
+                                <i className="fa-solid fa-wave-square text-indigo-500 bg-indigo-50 dark:bg-indigo-900/20 p-2.5 rounded-xl"></i>
+                                Central de Laudo de Exames
+                            </h2>
+                            <p className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 mt-1">
+                                Resolva exames diários de ECG e Imagem e seja avaliado sob a rígida escala de interpretação clínica.
+                            </p>
+                        </div>
+
+                        {viewMode === 'workspace' && (
+                            <button
+                                onClick={() => { setViewMode('dashboard'); setActiveExam(null); setSelectedHistoryExam(null); }}
+                                className="px-5 py-2.5 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-xl font-black text-xs transition-all flex items-center gap-2"
+                            >
+                                <i className="fa-solid fa-arrow-left"></i> Voltar ao Painel
+                            </button>
+                        )}
+                    </div>
+
+                    {/* Toast Notification */}
+                    {toast && (
+                        <div className={`fixed bottom-5 right-5 z-[9999] px-5 py-3 rounded-2xl shadow-xl font-black text-xs font-sans text-white animate-bounce flex items-center gap-2 ${
+                            toast.type === 'success' ? 'bg-emerald-600 shadow-emerald-500/20' : toast.type === 'error' ? 'bg-rose-600 shadow-rose-500/20' : 'bg-indigo-600 shadow-indigo-500/20'
+                        }`}>
+                            <i className={toast.type === 'success' ? 'fa-solid fa-circle-check' : toast.type === 'error' ? 'fa-solid fa-triangle-exclamation' : 'fa-solid fa-circle-info'}></i>
+                            {toast.message}
+                        </div>
+                    )}
+
+                    {/* VIEW 1: DASHBOARD */}
+                    {viewMode === 'dashboard' && (
+                        <div className="space-y-8">
+                            {/* Seção Exames de Hoje */}
+                            <div>
+                                <h3 className="text-lg font-black text-zinc-850 dark:text-zinc-200 mb-4 flex items-center gap-2">
+                                    <i className="fa-solid fa-calendar-day text-emerald-500"></i> Exames Clínicos de Hoje
+                                </h3>
+                                
+                                {isGenerating ? (
+                                    <div className="py-16 flex flex-col items-center justify-center space-y-4 bg-white/40 dark:bg-zinc-900/40 border border-zinc-200 dark:border-zinc-800 rounded-3xl">
+                                        <i className="fa-solid fa-circle-notch fa-spin text-4xl text-indigo-500"></i>
+                                        <div className="text-center space-y-1.5">
+                                            <p className="text-sm font-black text-zinc-800 dark:text-zinc-200">Sintonizando Biblioteca Médica...</p>
+                                            <p className="text-xs font-semibold text-zinc-500">Buscando relatos indexados e baixando figuras do exame original.</p>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                        {/* ECG do Dia */}
+                                        <div className="bg-gradient-to-br from-white to-zinc-50 dark:from-zinc-900 dark:to-zinc-900/80 p-6 rounded-[32px] border border-zinc-200 dark:border-zinc-800 shadow-lg flex flex-col justify-between h-56 group hover:border-indigo-500/40 transition-all duration-300">
+                                            <div className="space-y-2">
+                                                <div className="flex justify-between items-center">
+                                                    <span className="px-3 py-1 bg-rose-500/10 text-rose-500 rounded-lg text-[9px] font-black uppercase tracking-widest border border-rose-500/20">ECG (Eletrocardiograma)</span>
+                                                    {allExames.find(e => e.date === new Date().toLocaleDateString('en-CA') && e.type === 'ecg')?.evaluation ? (
+                                                        <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-500 rounded text-[9px] font-black">Laudado</span>
+                                                    ) : (
+                                                        <span className="px-2 py-0.5 bg-amber-500/10 text-amber-500 rounded text-[9px] font-black animate-pulse">Pendente</span>
+                                                    )}
+                                                </div>
+                                                <h4 className="text-base font-black text-zinc-900 dark:text-white leading-snug group-hover:text-indigo-500 transition-colors">Laudo de ECG Diário</h4>
+                                                <p className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">Analise traçados, ritmos, eixos e intervalos de ECGs de casos clínicos reais.</p>
+                                            </div>
+                                            <button
+                                                onClick={() => handleGenerateExam('ecg')}
+                                                className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-black text-xs transition-all uppercase tracking-wider flex items-center justify-center gap-2 shadow-md shadow-indigo-500/10 active:scale-95"
+                                            >
+                                                <i className="fa-solid fa-play"></i> Iniciar Interpretação
+                                            </button>
+                                        </div>
+
+                                        {/* Exame Imagem do Dia */}
+                                        <div className="bg-gradient-to-br from-white to-zinc-50 dark:from-zinc-900 dark:to-zinc-900/80 p-6 rounded-[32px] border border-zinc-200 dark:border-zinc-800 shadow-lg flex flex-col justify-between h-56 group hover:border-emerald-500/40 transition-all duration-300">
+                                            <div className="space-y-2">
+                                                <div className="flex justify-between items-center">
+                                                    <span className="px-3 py-1 bg-emerald-500/10 text-emerald-500 rounded-lg text-[9px] font-black uppercase tracking-widest border border-emerald-500/20">Imagem (Raio-X, TC, RM)</span>
+                                                    {allExames.find(e => e.date === new Date().toLocaleDateString('en-CA') && e.type === 'image')?.evaluation ? (
+                                                        <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-500 rounded text-[9px] font-black">Laudado</span>
+                                                    ) : (
+                                                        <span className="px-2 py-0.5 bg-amber-500/10 text-amber-500 rounded text-[9px] font-black animate-pulse">Pendente</span>
+                                                    )}
+                                                </div>
+                                                <h4 className="text-base font-black text-zinc-900 dark:text-white leading-snug group-hover:text-emerald-500 transition-colors">Laudo de Imagem Diário</h4>
+                                                <p className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">Examine radiografias, tomografias e ressonâncias magnéticas da prática médica.</p>
+                                            </div>
+                                            <button
+                                                onClick={() => handleGenerateExam('image')}
+                                                className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-black text-xs transition-all uppercase tracking-wider flex items-center justify-center gap-2 shadow-md shadow-emerald-500/10 active:scale-95"
+                                            >
+                                                <i className="fa-solid fa-play"></i> Iniciar Interpretação
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Histórico de Exames */}
+                            <div className="border-t border-zinc-200 dark:border-zinc-800 pt-8">
+                                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+                                    <h3 className="text-lg font-black text-zinc-850 dark:text-zinc-200 flex items-center gap-2">
+                                        <i className="fa-solid fa-clock-rotate-left text-zinc-400"></i> Histórico de Laudos Realizados
+                                    </h3>
+                                    
+                                    {/* Filtros */}
+                                    <div className="flex items-center gap-3 w-full sm:w-auto">
+                                        <input
+                                            type="text"
+                                            value={historySearchQuery}
+                                            onChange={e => setHistorySearchQuery(e.target.value)}
+                                            placeholder="Buscar nos laudos..."
+                                            className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-2 text-xs font-bold text-zinc-850 dark:text-zinc-100 outline-none focus:ring-2 focus:ring-indigo-500"
+                                        />
+                                        <select
+                                            value={historyTypeFilter}
+                                            onChange={e => setHistoryTypeFilter(e.target.value)}
+                                            className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs font-bold text-zinc-850 dark:text-zinc-100 outline-none cursor-pointer"
+                                        >
+                                            <option value="ALL">Todos os Tipos</option>
+                                            <option value="ecg">Apenas ECG</option>
+                                            <option value="image">Apenas Imagem</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                {sortedExames.length === 0 ? (
+                                    <div className="py-16 text-center text-zinc-400 border border-dashed border-zinc-200 dark:border-zinc-850 rounded-3xl">
+                                        <i className="fa-regular fa-folder-open text-3xl mb-2 text-zinc-300 dark:text-zinc-700"></i>
+                                        <p className="text-xs font-bold uppercase tracking-wider">Nenhum exame encontrado no histórico</p>
+                                    </div>
+                                ) : (
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                                        {sortedExames.map(exame => {
+                                            const score = exame.evaluation?.finalScore;
+                                            const concept = exame.evaluation?.concept;
+                                            const reliability = exame.evaluation?.reliabilityIndex;
+                                            const hasReport = !!exame.evaluation;
+                                            
+                                            let scoreBadgeColor = 'bg-zinc-100 text-zinc-500 dark:bg-zinc-850';
+                                            if (hasReport) {
+                                                if (score >= 9.0) scoreBadgeColor = 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/25';
+                                                else if (score >= 7.0) scoreBadgeColor = 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/25';
+                                                else if (score >= 5.0) scoreBadgeColor = 'bg-amber-500/10 text-amber-600 dark:text-amber-500 border border-amber-500/25';
+                                                else scoreBadgeColor = 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/25';
+                                            }
+
+                                            return (
+                                                <div
+                                                    key={exame.id}
+                                                    onClick={() => { setSelectedHistoryExam(exame); setAnswer(exame.answer || ''); setViewMode('workspace'); }}
+                                                    className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-5 rounded-2xl shadow-xs cursor-pointer hover:border-indigo-500/40 hover:shadow-md transition-all relative group"
+                                                >
+                                                    <div className="flex justify-between items-start gap-2 mb-3">
+                                                        <span className={`px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-wider ${
+                                                            exame.type === 'ecg' ? 'bg-rose-500/10 text-rose-500' : 'bg-emerald-500/10 text-emerald-500'
+                                                        }`}>
+                                                            {exame.type === 'ecg' ? 'ECG' : 'Imagem'}
+                                                        </span>
+                                                        <span className="text-[10px] font-black text-zinc-400">{formatDate(exame.date)}</span>
+                                                    </div>
+
+                                                    <h5 className="font-black text-sm text-zinc-850 dark:text-zinc-100 group-hover:text-indigo-500 transition-colors line-clamp-1 mb-1">{exame.title}</h5>
+                                                    <p className="text-[10px] font-bold text-zinc-450 dark:text-zinc-400 mb-4">{exame.specialty}</p>
+
+                                                    <div className="flex items-center justify-between border-t border-zinc-100 dark:border-zinc-850 pt-3">
+                                                        {hasReport ? (
+                                                            <div className="flex items-center gap-2">
+                                                                <span className={`px-2.5 py-1 rounded-xl text-xs font-black ${scoreBadgeColor}`}>
+                                                                    {score.toFixed(1)} / 10
+                                                                </span>
+                                                                <span className="text-[9px] font-black text-zinc-400 uppercase">Index: {reliability}</span>
+                                                            </div>
+                                                        ) : (
+                                                            <span className="text-[10px] font-black text-amber-500 uppercase tracking-wider animate-pulse"><i className="fa-solid fa-clock mr-1"></i>Pendente</span>
+                                                        )}
+                                                        <span className="text-[10px] font-black text-indigo-500 group-hover:translate-x-1 transition-transform flex items-center gap-1">Ver laudo <i className="fa-solid fa-chevron-right text-[8px]"></i></span>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* VIEW 2: WORKSPACE (EDITOR DE LAUDO) */}
+                    {viewMode === 'workspace' && examToRender && (
+                        <div className="space-y-8">
+                            {/* Informações Básicas do Exame */}
+                            <div className="bg-white/60 dark:bg-zinc-900/60 p-6 rounded-3xl border border-zinc-200 dark:border-zinc-800/80 shadow flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                                <div className="space-y-1">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                        <span className={`px-2.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest ${
+                                            examToRender.type === 'ecg' ? 'bg-rose-500/10 text-rose-500' : 'bg-emerald-500/10 text-emerald-500'
+                                        }`}>
+                                            {examToRender.type === 'ecg' ? 'Eletrocardiograma' : 'Exame de Imagem'}
+                                        </span>
+                                        <span className="px-2.5 py-0.5 rounded bg-indigo-500/10 text-indigo-500 text-[8px] font-black uppercase">{examToRender.specialty}</span>
+                                    </div>
+                                    <h3 className="text-lg font-black text-zinc-900 dark:text-white leading-tight">{examToRender.title}</h3>
+                                </div>
+                                <div className="text-right shrink-0">
+                                    <span className="text-xs font-black text-zinc-400 block">Data de Publicação</span>
+                                    <span className="text-sm font-black text-zinc-800 dark:text-zinc-200">{formatDate(examToRender.date)}</span>
+                                </div>
+                            </div>
+
+                            {/* Grid Duas Colunas */}
+                            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+                                {/* Coluna Esquerda: Caso Clínico e Imagens (Zoom/Pan) (lg:col-span-5) */}
+                                <div className="lg:col-span-5 space-y-6">
+                                    {/* Caso Clínico */}
+                                    <div className="bg-white/70 dark:bg-zinc-900/70 p-6 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow">
+                                        <h4 className="text-xs font-black text-zinc-455 dark:text-zinc-500 uppercase tracking-widest mb-3 flex items-center gap-1.5">
+                                            <i className="fa-solid fa-file-waveform text-indigo-500"></i> História e Indicação do Exame
+                                        </h4>
+                                        <div className="prose prose-sm dark:prose-invert max-w-none text-zinc-700 dark:text-zinc-300 font-semibold leading-relaxed text-justify-custom text-xs" dangerouslySetInnerHTML={{ __html: parseMarkdown(examToRender.caseReport) }} />
+                                    </div>
+
+                                    {/* Visualizador do Exame */}
+                                    <div className="bg-white/70 dark:bg-zinc-900/70 p-6 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow space-y-4">
+                                        <div className="flex justify-between items-center">
+                                            <h4 className="text-xs font-black text-zinc-455 dark:text-zinc-500 uppercase tracking-widest flex items-center gap-1.5">
+                                                <i className="fa-solid fa-image text-indigo-500"></i> Traçados e Imagens do Exame
+                                            </h4>
+                                            
+                                            {/* Controles de Zoom/Pan */}
+                                            <div className="flex items-center gap-1">
+                                                <button onClick={() => setZoomScale(z => Math.max(0.5, z - 0.25))} className="w-7 h-7 rounded bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-600 dark:text-zinc-400 flex items-center justify-center active:scale-95 text-xs" title="Reduzir Zoom"><i className="fa-solid fa-magnifying-glass-minus"></i></button>
+                                                <button onClick={() => { setZoomScale(1.0); setPanOffset({ x: 0, y: 0 }); }} className="px-2 h-7 rounded bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-600 dark:text-zinc-400 flex items-center justify-center active:scale-95 text-[10px] font-black" title="Resetar Visualização">Reset</button>
+                                                <button onClick={() => setZoomScale(z => Math.min(3.0, z + 0.25))} className="w-7 h-7 rounded bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-600 dark:text-zinc-400 flex items-center justify-center active:scale-95 text-xs" title="Aumentar Zoom"><i className="fa-solid fa-magnifying-glass-plus"></i></button>
+                                            </div>
+                                        </div>
+
+                                        {examToRender.figures && examToRender.figures.length > 0 ? (
+                                            <div className="space-y-4">
+                                                {examToRender.figures.map(fig => {
+                                                    const figSrc = fig.dataUrl || localFigUrls[fig.id] || fig.url;
+                                                    return (
+                                                        <div key={fig.id} className="border border-zinc-200 dark:border-zinc-800 rounded-2xl bg-zinc-950 p-2 overflow-hidden relative group">
+                                                            {/* Zoom/Pan Area */}
+                                                            <div 
+                                                                className="aspect-video w-full cursor-grab active:cursor-grabbing overflow-hidden relative select-none rounded-xl"
+                                                                onMouseDown={handleMouseDown}
+                                                                onMouseMove={handleMouseMove}
+                                                                onMouseUp={handleMouseUp}
+                                                                onMouseLeave={handleMouseUp}
+                                                            >
+                                                                <img
+                                                                    src={figSrc}
+                                                                    alt={fig.label}
+                                                                    className="w-full h-full object-contain pointer-events-none transition-transform duration-75 origin-center"
+                                                                    style={{
+                                                                        transform: `scale(${zoomScale}) translate(${panOffset.x / zoomScale}px, ${panOffset.y / zoomScale}px)`
+                                                                    }}
+                                                                    referrerPolicy="no-referrer"
+                                                                />
+                                                                <div onClick={() => setLightboxImage(figSrc)} className="absolute bottom-3 right-3 w-8 h-8 rounded-xl bg-black/60 hover:bg-black/80 text-white flex items-center justify-center cursor-pointer transition-all active:scale-95" title="Expandir Imagem">
+                                                                    <i className="fa-solid fa-expand text-xs"></i>
+                                                                </div>
+                                                            </div>
+                                                            <div className="p-3 bg-zinc-900 border-t border-zinc-800 rounded-b-xl mt-1">
+                                                                <span className="text-[10px] font-black text-indigo-400 block">{fig.label}</span>
+                                                                <span className="text-[10px] font-semibold text-zinc-400 block mt-0.5 leading-snug">{fig.caption}</span>
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        ) : (
+                                            <div className="py-12 text-center text-zinc-400 border border-dashed border-zinc-250 dark:border-zinc-800 rounded-2xl bg-zinc-50 dark:bg-zinc-950/20">
+                                                <i className="fa-solid fa-file-circle-exclamation text-3xl text-zinc-300 dark:text-zinc-700 mb-2"></i>
+                                                <p className="text-[10px] uppercase font-black tracking-widest">Sem imagens anexadas na literatura deste exame</p>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* Coluna Direita: Editor de Laudo e Avaliação (lg:col-span-7) */}
+                                <div className="lg:col-span-7 space-y-6">
+                                    {/* Visualização da Avaliação Existente (se laudado) */}
+                                    {examToRender.evaluation && (
+                                        <div className="space-y-6 animate-in slide-in-from-bottom-6 duration-300">
+                                            {/* Score Geral */}
+                                            <div className="bg-white/60 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800 rounded-3xl p-6 md:p-8 shadow-lg flex flex-col sm:flex-row items-center gap-6">
+                                                {/* Círculo da Nota */}
+                                                <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-full border-[8px] border-indigo-500/20 flex flex-col items-center justify-center bg-indigo-500/5 dark:bg-indigo-500/10 shrink-0">
+                                                    <span className="text-3xl sm:text-4xl font-black text-indigo-600 dark:text-indigo-400">{examToRender.evaluation.finalScore?.toFixed(1)}</span>
+                                                    <span className="text-[9px] font-black uppercase text-zinc-400">Nota Final</span>
+                                                </div>
+                                                
+                                                <div className="space-y-3 text-center sm:text-left flex-1">
+                                                    <div className="flex flex-wrap justify-center sm:justify-start items-center gap-2">
+                                                        <span className="px-3 py-1 bg-indigo-600 text-white rounded-full text-[9px] font-black uppercase tracking-wider shadow shadow-indigo-500/30">
+                                                            {examToRender.evaluation.concept}
+                                                        </span>
+                                                        <span className="px-3 py-1 bg-zinc-250 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 rounded-full text-[9px] font-black uppercase tracking-wider">
+                                                            Confiabilidade: {examToRender.evaluation.reliabilityIndex}
+                                                        </span>
+                                                    </div>
+                                                    
+                                                    {/* Comentário Geral */}
+                                                    <div className="p-4 bg-zinc-50 dark:bg-zinc-950/40 rounded-2xl border border-zinc-150 dark:border-zinc-800 text-xs font-bold text-zinc-700 dark:text-zinc-300 italic leading-relaxed">
+                                                        {examToRender.evaluation.mentorComment}
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {/* Seção de Penalidades Aplicadas */}
+                                            {examToRender.evaluation.penaltiesApplied && examToRender.evaluation.penaltiesApplied.length > 0 && (
+                                                <div className="bg-rose-500/5 dark:bg-rose-500/10 border border-rose-500/20 rounded-3xl p-5 space-y-3">
+                                                    <h4 className="text-[10px] font-black uppercase tracking-wider text-rose-500 flex items-center gap-1.5">
+                                                        <i className="fa-solid fa-triangle-exclamation"></i> Limitações e Deduções Aplicadas
+                                                    </h4>
+                                                    <div className="space-y-2">
+                                                        {examToRender.evaluation.penaltiesApplied.map((p, idx) => (
+                                                            <div key={idx} className="flex justify-between items-center text-xs bg-white dark:bg-zinc-950/60 p-2.5 rounded-xl border border-rose-500/15">
+                                                                <span className="font-bold text-zinc-800 dark:text-zinc-200">
+                                                                    <span className="text-rose-500 font-black mr-1">[{p.type}]</span> {p.reason}
+                                                                </span>
+                                                                <span className="font-black text-rose-600 dark:text-rose-400">-{p.deduction} pt</span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            {/* Nota Detalhada por Critério */}
+                                            <div className="bg-white/60 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800 rounded-3xl p-6 shadow-lg space-y-4">
+                                                <h4 className="text-xs font-black text-zinc-850 dark:text-zinc-200 uppercase tracking-widest border-b border-zinc-100 dark:border-zinc-800 pb-3">Avaliação Detalhada por Critério</h4>
+                                                
+                                                <div className="space-y-4">
+                                                    {[
+                                                        { label: "Critério 1: Técnica de Leitura", score: examToRender.evaluation.grades?.criterio1, max: 2.0, feedback: examToRender.evaluation.evaluationsPerCriterion?.criterio1 },
+                                                        { label: "Critério 2: Descrição Objetiva", score: examToRender.evaluation.grades?.criterio2, max: 2.0, feedback: examToRender.evaluation.evaluationsPerCriterion?.criterio2 },
+                                                        { label: "Critério 3: Reconhecimento de Achados", score: examToRender.evaluation.grades?.criterio3, max: 2.5, feedback: examToRender.evaluation.evaluationsPerCriterion?.criterio3 },
+                                                        { label: "Critério 4: Integração Diagnóstica", score: examToRender.evaluation.grades?.criterio4, max: 2.0, feedback: examToRender.evaluation.evaluationsPerCriterion?.criterio4 },
+                                                        { label: "Critério 5: Gravidade e Repercussão", score: examToRender.evaluation.grades?.criterio5, max: 1.5, feedback: examToRender.evaluation.evaluationsPerCriterion?.criterio5 }
+                                                    ].map((crit, idx) => (
+                                                        <div key={idx} className="space-y-1.5">
+                                                            <div className="flex justify-between items-center text-xs">
+                                                                <span className="font-black text-zinc-800 dark:text-zinc-200">{crit.label}</span>
+                                                                <span className="font-black text-indigo-500">{crit.score?.toFixed(1)} / {crit.max.toFixed(1)}</span>
+                                                            </div>
+                                                            {/* Barra de Progresso */}
+                                                            <div className="h-2 bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden">
+                                                                <div className="h-full bg-indigo-500 rounded-full" style={{ width: `${(crit.score / crit.max) * 100}%` }}></div>
+                                                            </div>
+                                                            <p className="text-[10px] text-zinc-505 text-zinc-500 dark:text-zinc-400 font-bold bg-zinc-50 dark:bg-zinc-950/20 p-2.5 rounded-xl border border-zinc-100 dark:border-zinc-850 leading-relaxed">{crit.feedback}</p>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+
+                                            {/* Gabarito Detalhado do Professor */}
+                                            <div className="bg-white/60 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800 rounded-3xl p-6 shadow-lg space-y-4">
+                                                <h4 className="text-xs font-black text-indigo-500 uppercase tracking-widest border-b border-zinc-150 dark:border-zinc-800 pb-3 flex items-center gap-1.5"><i className="fa-solid fa-graduation-cap"></i> Gabarito de Referência Oficial</h4>
+                                                
+                                                <div className="space-y-4 text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                                                    <div>
+                                                        <span className="text-indigo-400 font-black block uppercase tracking-wider text-[9px] mb-1">Diagnóstico Final Esperado</span>
+                                                        <p className="p-3 bg-zinc-50 dark:bg-zinc-950/40 rounded-xl border border-zinc-150 dark:border-zinc-800 text-zinc-900 dark:text-white font-black">{examToRender.gabarito.diagnostico_final}</p>
+                                                    </div>
+
+                                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                                        <div>
+                                                            <span className="text-indigo-400 font-black block uppercase tracking-wider text-[9px] mb-1">Sequência Técnica Recomendada</span>
+                                                            <p className="p-3 bg-zinc-50 dark:bg-zinc-950/40 rounded-xl border border-zinc-150 dark:border-zinc-800 leading-relaxed">{examToRender.gabarito.sequencia_tecnica}</p>
+                                                        </div>
+                                                        <div>
+                                                            <span className="text-indigo-400 font-black block uppercase tracking-wider text-[9px] mb-1">Achados Obrigatórios</span>
+                                                            <div className="p-3 bg-zinc-50 dark:bg-zinc-950/40 rounded-xl border border-zinc-150 dark:border-zinc-800 space-y-1">
+                                                                {examToRender.gabarito.achados_obrigatorios?.map((item, idx) => (
+                                                                    <div key={idx} className="flex gap-1.5 items-start text-zinc-900 dark:text-white font-black"><span className="text-emerald-500">✓</span><span>{item}</span></div>
+                                                                ))}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+
+                                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                                        <div>
+                                                            <span className="text-indigo-400 font-black block uppercase tracking-wider text-[9px] mb-1">Integração Diagnóstica</span>
+                                                            <p className="p-3 bg-zinc-50 dark:bg-zinc-950/40 rounded-xl border border-zinc-150 dark:border-zinc-800 leading-relaxed">{examToRender.gabarito.raciocinio_sintese}</p>
+                                                        </div>
+                                                        <div>
+                                                            <span className="text-indigo-400 font-black block uppercase tracking-wider text-[9px] mb-1">Gravidade e Sinais Clínicos</span>
+                                                            <p className="p-3 bg-zinc-50 dark:bg-zinc-950/40 rounded-xl border border-zinc-150 dark:border-zinc-800 leading-relaxed">{examToRender.gabarito.urgencia_gravidade}</p>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Editor de Laudo (se não laudado) */}
+                                    {!examToRender.evaluation && (
+                                        <div className="bg-white/60 dark:bg-zinc-900/60 p-6 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-lg space-y-4">
+                                            <div className="flex justify-between items-center gap-4">
+                                                <h4 className="text-xs font-black text-zinc-455 dark:text-zinc-500 uppercase tracking-widest flex items-center gap-1.5">
+                                                    <i className="fa-solid fa-pen-to-square text-indigo-500"></i> Elaboração do Seu Laudo Clínico
+                                                </h4>
+                                                
+                                                <button
+                                                    onClick={() => setLaudarioOpen(!laudarioOpen)}
+                                                    className="px-3 py-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-150 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 text-[10px] font-black uppercase tracking-wider transition-all flex items-center gap-1"
+                                                >
+                                                    <i className="fa-solid fa-book-medical"></i> {laudarioOpen ? 'Fechar Laudário' : 'Frases Prontas'}
+                                                </button>
+                                            </div>
+
+                                            {/* Menu de Laudário Rápido */}
+                                            {laudarioOpen && (
+                                                <div className="bg-indigo-500/5 dark:bg-indigo-500/10 border border-indigo-500/20 p-4 rounded-2xl space-y-2 animate-in slide-in-from-top-3 duration-250">
+                                                    <span className="text-[9px] font-black text-indigo-500 uppercase tracking-wider block">Dicionário de Expressões Clínicas (Clique para inserir)</span>
+                                                    <div className="flex flex-wrap gap-2">
+                                                        {(laudarioFrases[examToRender.type] || []).map((frase, idx) => (
+                                                            <button
+                                                                key={idx}
+                                                                type="button"
+                                                                onClick={() => insertAtCursor(frase.text)}
+                                                                className="px-3 py-2 bg-white dark:bg-zinc-900 hover:bg-zinc-150 dark:hover:bg-zinc-800 border border-zinc-200 dark:border-zinc-850 rounded-xl text-[10px] font-bold text-zinc-800 dark:text-zinc-200 text-left transition-all active:scale-95"
+                                                            >
+                                                                {frase.label}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            )}
+
+                                            {/* Barra de Ferramentas do Editor */}
+                                            <div className="flex flex-wrap justify-between items-center gap-2 p-2 bg-zinc-50 dark:bg-zinc-950/40 rounded-2xl border border-zinc-155 dark:border-zinc-850">
+                                                <div className="flex items-center gap-1.5 flex-wrap">
+                                                    <button type="button" onClick={() => handleInsertTemplate(examToRender.type)} className="px-3 py-1.5 rounded-lg bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-[10px] font-black text-zinc-700 dark:text-zinc-355 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all flex items-center gap-1.5" title="Carregar Estrutura Técnica de Laudo"><i className="fa-solid fa-list-check text-indigo-500"></i> Modelo de Laudo</button>
+                                                    <button type="button" onClick={handlePolishReport} disabled={!answer.trim() || isRefining} className="px-3 py-1.5 rounded-lg bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-[10px] font-black text-zinc-700 dark:text-zinc-355 hover:bg-indigo-50 dark:hover:bg-indigo-900/10 hover:text-indigo-500 disabled:opacity-40 transition-all flex items-center gap-1.5" title="Polir Linguagem para Termos Médicos Profissionais">
+                                                        {isRefining ? <i className="fa-solid fa-circle-notch fa-spin text-indigo-500"></i> : <i className="fa-solid fa-wand-magic-sparkles text-indigo-500"></i>} Polir Linguagem
+                                                    </button>
+                                                </div>
+                                                
+                                                <span className="text-[9px] font-black text-zinc-400 uppercase mr-2">{answer.length} caracteres</span>
+                                            </div>
+
+                                            {/* Textarea do Laudo */}
+                                            <textarea
+                                                id="exame-report-textarea"
+                                                value={answer}
+                                                onChange={e => setAnswer(e.target.value)}
+                                                rows="12"
+                                                placeholder="Descreva seu laudo técnico aqui. Lembre-se de seguir uma sequência de leitura estruturada, descrever achados quantitativos anormais e avaliar a gravidade da situação..."
+                                                className="w-full p-4 bg-zinc-50 dark:bg-zinc-950/30 border border-zinc-200 dark:border-zinc-800 rounded-2xl text-xs font-semibold leading-relaxed outline-none focus:ring-2 focus:ring-indigo-500 text-zinc-850 dark:text-zinc-100"
+                                            />
+
+                                            {/* Checklist Técnico de Apoio */}
+                                            <div className="p-4 bg-zinc-50 dark:bg-zinc-950/20 border border-zinc-200 dark:border-zinc-800 rounded-2xl space-y-2.5">
+                                                <span className="text-[10px] font-black text-zinc-500 dark:text-zinc-400 uppercase tracking-wider block">Garantia de Método: Lista Técnica de Apoio</span>
+                                                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                                                    {checkListItems.map(item => (
+                                                        <label key={item.key} className="flex items-center gap-2 text-[10px] font-bold text-zinc-600 dark:text-zinc-455 cursor-pointer select-none">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={!!checklistChecked[item.key]}
+                                                                onChange={() => handleCheckToggle(item.key)}
+                                                                className="rounded border-zinc-300 dark:border-zinc-700 text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5"
+                                                            />
+                                                            <span className={checklistChecked[item.key] ? 'line-through text-zinc-400 dark:text-zinc-500' : ''}>{item.label}</span>
+                                                        </label>
+                                                    ))}
+                                                </div>
+                                            </div>
+
+                                            {/* Botão de Envio */}
+                                            {isEvaluating ? (
+                                                <div className="py-4 flex items-center justify-center gap-2 bg-indigo-655 bg-indigo-600 text-white rounded-2xl font-black text-xs uppercase tracking-wider">
+                                                    <i className="fa-solid fa-circle-notch fa-spin"></i> Submetendo ao Painel de Especialistas...
+                                                </div>
+                                            ) : (
+                                                <button
+                                                    onClick={handleSubmitReport}
+                                                    disabled={!answer.trim()}
+                                                    className="w-full py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg shadow-indigo-500/20 transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
+                                                >
+                                                    Submeter Laudo para Avaliação
+                                                </button>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Lightbox para Imagens */}
+                    {lightboxImage && (
+                        <div className="fixed inset-0 bg-black/95 z-[99999] flex flex-col justify-center items-center p-4 animate-in fade-in duration-200">
+                            <button onClick={() => setLightboxImage(null)} className="absolute top-5 right-5 w-12 h-12 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-all active:scale-95 text-lg"><i className="fa-solid fa-xmark"></i></button>
+                            <img src={lightboxImage} className="max-w-full max-h-[90vh] object-contain rounded-lg" alt="Exame ampliado" referrerPolicy="no-referrer" />
+                        </div>
+                    )}
+                </div>
+            );
+        });
 
         const App = () => {
             // --- ESTADO INICIAL (DB) ---
@@ -9545,6 +10678,7 @@ Retorne apenas o texto da resposta, sem JSON ou tags explicativas.`;
                     pausedAt: null,
                     isDailyChallengePaused: false,
                     desafiosDiarios: [],
+                    examesDiarios: [],
                     comments: {},
                     customDailyChallengePromptEnabled: false,
                     customDailyChallengePrompt: '',
@@ -9802,11 +10936,39 @@ Retorne apenas o texto da resposta, sem JSON ou tags explicativas.`;
                     
                     if (typeof remVal === 'object' && typeof locVal === 'object' && !Array.isArray(remVal) && !Array.isArray(locVal)) {
                         merged[key] = mergeObjects(locVal, remVal);
+                    } else if (Array.isArray(remVal) && Array.isArray(locVal)) {
+                        const uniqueMap = new Map();
+                        locVal.forEach((item, idx) => {
+                            const uniqueKey = (item && typeof item === 'object') ? (item.id || item.date || item.key || idx) : idx;
+                            uniqueMap.set(uniqueKey, item);
+                        });
+                        remVal.forEach((item, idx) => {
+                            const uniqueKey = (item && typeof item === 'object') ? (item.id || item.date || item.key || idx) : idx;
+                            const existing = uniqueMap.get(uniqueKey);
+                            uniqueMap.set(uniqueKey, (existing && typeof existing === 'object' && item && typeof item === 'object') ? mergeObjects(existing, item) : item);
+                        });
+                        merged[key] = Array.from(uniqueMap.values());
                     } else {
                         if (key === 'answer' && locVal && !remVal) {
                             merged[key] = locVal;
                         } else if (key === 'evaluation' && remVal && !locVal) {
                             merged[key] = remVal;
+                        } else if (key === 'completedReviewsCount') {
+                            merged[key] = Math.max(locVal || 0, remVal || 0);
+                        } else if (key === 'nextReviewDate') {
+                            const locCount = loc.completedReviewsCount || 0;
+                            const remCount = rem.completedReviewsCount || 0;
+                            if (locCount > remCount) {
+                                merged[key] = locVal;
+                            } else if (remCount > locCount) {
+                                merged[key] = remVal;
+                            } else {
+                                if (locVal && remVal) {
+                                    merged[key] = new Date(locVal) > new Date(remVal) ? locVal : remVal;
+                                } else {
+                                    merged[key] = remVal || locVal;
+                                }
+                            }
                         } else {
                             merged[key] = remVal;
                         }
@@ -9845,6 +11007,7 @@ Retorne apenas o texto da resposta, sem JSON ou tags explicativas.`;
                     processedQuestionLists: mergeAdditive(prev.processedQuestionLists, remote.processedQuestionLists),
                     fluxogramas: mergeAdditive(prev.fluxogramas, remote.fluxogramas),
                     desafiosDiarios: mergeAdditive(prev.desafiosDiarios || [], remote.desafiosDiarios || []),
+                    examesDiarios: mergeAdditive(prev.examesDiarios || [], remote.examesDiarios || []),
                     dailyStats: { ...(prev.dailyStats || {}), ...(remote.dailyStats || {}) }
                 }));
                 if (remote.chatSessions && Array.isArray(remote.chatSessions) && remote.chatSessions.length > 0) {
@@ -10270,6 +11433,11 @@ Retorne apenas o texto da resposta, sem JSON ou tags explicativas.`;
             const [floatingAi, setFloatingAi] = useState({ isOpen: false, query: '', result: '', isLoading: false, includeScreen: true });
             const [activeChallengeInfo, setActiveChallengeInfo] = useState(null);
             const [pendingFlowchartImport, setPendingFlowchartImport] = useState(null);
+            const [focusFlowchartId, setFocusFlowchartId] = useState(null);
+            const [schedulerCategory, setSchedulerCategory] = useState('ALL');
+            const [schedulerDaysSimulated, setSchedulerDaysSimulated] = useState(0);
+            const [schedulerSearchTerm, setSchedulerSearchTerm] = useState('');
+            const [schedulerSelectedDayIdx, setSchedulerSelectedDayIdx] = useState(0);
 
             useEffect(() => {
                 if (chatMessages.length === 0) {
@@ -13542,6 +14710,91 @@ Estrutura esperada:
             };
 
             const renderDashboard = () => {
+                const availableCats = (() => {
+                    const cats = new Set(['Clínica Médica', 'Pediatria', 'Ginecologia e Obstetrícia', 'Cirurgia Geral', 'Medicina Preventiva']);
+                    (db.fluxogramas || []).forEach(f => {
+                        if (f.category) cats.add(f.category);
+                    });
+                    return Array.from(cats);
+                })();
+
+                const parseDateAsLocalMidnightLocal = (dateInput) => {
+                    if (!dateInput) return new Date();
+                    const match = dateInput.match(/^(\d{4})-(\d{2})-(\d{2})/);
+                    if (match) {
+                        const year = parseInt(match[1], 10);
+                        const month = parseInt(match[2], 10) - 1; // 0-indexed
+                        const day = parseInt(match[3], 10);
+                        return new Date(year, month, day, 0, 0, 0, 0);
+                    }
+                    const d = new Date(dateInput);
+                    d.setHours(0, 0, 0, 0);
+                    return d;
+                };
+
+                const todayMidnight = new Date();
+                todayMidnight.setHours(0, 0, 0, 0);
+
+                const scheduleDays = [];
+                for (let i = 0; i < 7; i++) {
+                    const d = new Date(todayMidnight);
+                    d.setDate(todayMidnight.getDate() + i);
+                    scheduleDays.push({
+                        index: i,
+                        date: d,
+                        weekday: d.toLocaleDateString('pt-BR', { weekday: 'short' }),
+                        dayNum: d.getDate(),
+                        monthStr: d.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', ''),
+                        label: i === 0 ? "Hoje" : i === 1 ? "Amanhã" : d.toLocaleDateString('pt-BR', { weekday: 'long' }),
+                        flows: [],
+                        overdueFlows: []
+                    });
+                }
+
+                let totalOverdueCount = 0;
+                let totalTodayCount = 0;
+                let totalActiveScores = [];
+
+                (db.fluxogramas || []).forEach(flow => {
+                    (flow.reviewHistory || []).forEach(r => {
+                        if (typeof r.score === 'number') totalActiveScores.push(r.score);
+                    });
+
+                    if (schedulerCategory !== 'ALL' && flow.category !== schedulerCategory) return;
+                    
+                    if (schedulerSearchTerm.trim() && !flow.title.toLowerCase().includes(schedulerSearchTerm.toLowerCase()) && !flow.category.toLowerCase().includes(schedulerSearchTerm.toLowerCase())) return;
+
+                    if (!flow.nextReviewDate) return;
+
+                    const nextDate = parseDateAsLocalMidnightLocal(flow.nextReviewDate);
+                    const diffTime = nextDate.getTime() - todayMidnight.getTime();
+                    const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
+
+                    if (diffDays < 0) {
+                        scheduleDays[0].overdueFlows.push(flow);
+                        totalOverdueCount++;
+                    } else if (diffDays === 0) {
+                        scheduleDays[0].flows.push(flow);
+                        totalTodayCount++;
+                    } else if (diffDays > 0 && diffDays < 7) {
+                        scheduleDays[diffDays].flows.push(flow);
+                    }
+                });
+
+                const totalScheduledInWeek = scheduleDays.reduce((acc, d) => acc + d.flows.length + d.overdueFlows.length, 0);
+                const avgReviewsPerDay = (totalScheduledInWeek / 7).toFixed(1);
+
+                const retentionIndexStr = totalActiveScores.length > 0
+                    ? (totalActiveScores.reduce((a, b) => a + b, 0) / totalActiveScores.length * 10).toFixed(0) + '%'
+                    : '100%';
+
+                let advanceableFlows = [];
+                for (let i = 1; i <= schedulerDaysSimulated; i++) {
+                    if (i < 7) {
+                        advanceableFlows = [...advanceableFlows, ...scheduleDays[i].flows];
+                    }
+                }
+
                 const top5Subjects = [...db.subjects]
                     .map(s => ({ id: s.id, name: s.name, count: db.errors.filter(e => e.subject === s.id).length }))
                     .sort((a, b) => b.count - a.count)
@@ -13663,6 +14916,297 @@ Estrutura esperada:
                                     </div>
                                 </div>
                                 <button onClick={() => setActiveTab('planner')} className="w-11 h-11 sm:w-14 sm:h-14 rounded-xl sm:rounded-2xl bg-zinc-100 dark:bg-zinc-800 text-zinc-400 hover:text-white hover:bg-emerald-500 dark:hover:bg-emerald-500 transition-all flex items-center justify-center shadow-sm shrink-0"><i className="fa-solid fa-arrow-right text-base sm:text-lg"></i></button>
+                            </div>
+                        </div>
+
+                        {/* PAINEL DE AGENDAMENTO DE REVISÕES DE FLUXOGRAMAS (NOVO) */}
+                        <div className="bg-white/80 dark:bg-zinc-900/80 backdrop-blur-2xl p-6 sm:p-8 rounded-[32px] sm:rounded-[40px] border border-zinc-200 dark:border-zinc-800 shadow-2xl relative overflow-hidden space-y-6 sm:space-y-8 font-sans">
+                            {/* Decorative background lights */}
+                            <div className="absolute top-0 right-0 w-80 h-80 bg-indigo-500/5 dark:bg-indigo-500/10 blur-3xl rounded-full -mr-20 -mt-20 pointer-events-none"></div>
+                            <div className="absolute bottom-0 left-0 w-80 h-80 bg-emerald-500/5 dark:bg-emerald-500/10 blur-3xl rounded-full -ml-20 -mb-20 pointer-events-none"></div>
+
+                            {/* Header */}
+                            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 relative z-10">
+                                <div className="space-y-1">
+                                    <h3 className="text-xl sm:text-2xl font-black text-zinc-900 dark:text-white flex items-center gap-2">
+                                        <i className="fa-solid fa-calendar-days text-indigo-500 p-2 bg-indigo-50 dark:bg-indigo-900/20 rounded-xl"></i>
+                                        Agenda de Revisão de Fluxogramas
+                                    </h3>
+                                    <p className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">
+                                        Monitore e gerencie o cronograma de repetição espaçada das suas diretrizes clínicas.
+                                    </p>
+                                </div>
+
+                                {/* Controls Row */}
+                                <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+                                    <div className="relative flex-1 md:w-64">
+                                        <i className="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400 text-xs"></i>
+                                        <input
+                                            type="text"
+                                            value={schedulerSearchTerm}
+                                            onChange={e => setSchedulerSearchTerm(e.target.value)}
+                                            placeholder="Buscar fluxograma..."
+                                            className="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl py-2 pl-9 pr-4 text-xs font-bold text-zinc-800 dark:text-zinc-100 outline-none focus:ring-2 focus:ring-indigo-500 transition-all placeholder-zinc-400"
+                                        />
+                                    </div>
+                                    <select
+                                        value={schedulerCategory}
+                                        onChange={e => setSchedulerCategory(e.target.value)}
+                                        className="bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl py-2 px-3 text-xs font-bold text-zinc-850 dark:text-zinc-100 outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer transition-all"
+                                    >
+                                        <option value="ALL">Todas as Especialidades</option>
+                                        {availableCats.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+                                    </select>
+                                </div>
+                            </div>
+
+                            {/* Metricas Rapidas */}
+                            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 relative z-10">
+                                <div className="p-4 rounded-2xl bg-rose-500/5 dark:bg-rose-500/10 border border-rose-500/20 flex flex-col justify-between">
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-rose-500">Atrasados</span>
+                                    <div className="flex items-baseline gap-1 mt-2">
+                                        <span className="text-2xl font-black text-rose-650 dark:text-rose-400">{totalOverdueCount}</span>
+                                        <span className="text-[10px] font-bold text-rose-400">fluxogramas</span>
+                                    </div>
+                                </div>
+                                <div className="p-4 rounded-2xl bg-amber-500/5 dark:bg-amber-500/10 border border-amber-500/20 flex flex-col justify-between">
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-amber-600 dark:text-amber-400">Prazos de Hoje</span>
+                                    <div className="flex items-baseline gap-1 mt-2">
+                                        <span className="text-2xl font-black text-amber-600 dark:text-amber-400">{totalTodayCount}</span>
+                                        <span className="text-[10px] font-bold text-amber-400">fluxogramas</span>
+                                    </div>
+                                </div>
+                                <div className="p-4 rounded-2xl bg-emerald-500/5 dark:bg-emerald-500/10 border border-emerald-500/20 flex flex-col justify-between">
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-emerald-600 dark:text-emerald-400">Índice de Retenção</span>
+                                    <div className="flex items-baseline gap-1 mt-2">
+                                        <span className="text-2xl font-black text-emerald-600 dark:text-emerald-400">{retentionIndexStr}</span>
+                                        <span className="text-[10px] font-bold text-emerald-400">histórico</span>
+                                    </div>
+                                </div>
+                                <div className="p-4 rounded-2xl bg-indigo-500/5 dark:bg-indigo-500/10 border border-indigo-500/20 flex flex-col justify-between">
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-indigo-500">Carga Média Semanal</span>
+                                    <div className="flex items-baseline gap-1 mt-2">
+                                        <span className="text-2xl font-black text-indigo-650 dark:text-indigo-400">{avgReviewsPerDay}</span>
+                                        <span className="text-[10px] font-bold text-indigo-400">revisões/dia</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* ADVANCEMENT SLIDER TOOL */}
+                            <div className="bg-zinc-50 dark:bg-zinc-950/20 border border-zinc-200 dark:border-zinc-800 p-4 sm:p-5 rounded-2xl relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                                <div className="space-y-1">
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-xs font-black text-zinc-850 dark:text-zinc-100 flex items-center gap-1.5">
+                                            <i className="fa-solid fa-clock-rotate-left text-emerald-500"></i>
+                                            Simulador de Adiantamento Clínico
+                                        </span>
+                                        {schedulerDaysSimulated > 0 && (
+                                            <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 animate-pulse">
+                                                +{advanceableFlows.length} fluxogramas adiantáveis
+                                            </span>
+                                        )}
+                                    </div>
+                                    <p className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 max-w-xl">
+                                        Ajuste o controle abaixo para simular puxar revisões que venceriam nos próximos dias. Útil para antecipar estudos antes de plantões ou viagens.
+                                    </p>
+                                </div>
+
+                                <div className="flex items-center gap-3 shrink-0">
+                                    <span className="text-[10px] font-black text-zinc-550 dark:text-zinc-400 uppercase tracking-widest bg-zinc-200/50 dark:bg-zinc-800/80 px-2 py-1 rounded">Hoje</span>
+                                    <input
+                                        type="range"
+                                        min="0"
+                                        max="6"
+                                        value={schedulerDaysSimulated}
+                                        onChange={e => setSchedulerDaysSimulated(parseInt(e.target.value, 10))}
+                                        className="w-32 sm:w-40 h-2 bg-zinc-200 dark:bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-emerald-500 focus:outline-none"
+                                    />
+                                    <span className="text-[10px] font-black text-white bg-emerald-600 px-2.5 py-1 rounded-md shadow shadow-emerald-500/35 uppercase tracking-widest">
+                                        {schedulerDaysSimulated === 0 ? "Normal" : `+${schedulerDaysSimulated} ${schedulerDaysSimulated === 1 ? 'dia' : 'dias'}`}
+                                    </span>
+                                </div>
+                            </div>
+
+                            {/* Schedule Calendar Grid */}
+                            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-4 relative z-10">
+                                {scheduleDays.map((day, idx) => {
+                                    const totalFlows = day.flows.length + (idx === 0 ? day.overdueFlows.length : 0);
+                                    const isSelected = schedulerSelectedDayIdx === idx;
+                                    const isSimulatedRange = idx > 0 && idx <= schedulerDaysSimulated;
+                                    
+                                    let colBorderClass = isSelected
+                                        ? 'border-indigo-500 ring-2 ring-indigo-500/20'
+                                        : isSimulatedRange
+                                            ? 'border-emerald-500/60 border-dashed dark:bg-emerald-950/5'
+                                            : 'border-zinc-200 dark:border-zinc-800';
+                                            
+                                    let colBgClass = idx === 0
+                                        ? 'bg-gradient-to-b from-indigo-50/50 to-transparent dark:from-indigo-950/10 dark:to-transparent'
+                                        : isSimulatedRange
+                                            ? 'bg-gradient-to-b from-emerald-500/5 to-transparent dark:from-emerald-500/5 dark:to-transparent'
+                                            : 'bg-white/40 dark:bg-zinc-900/40';
+
+                                    return (
+                                        <div
+                                            key={idx}
+                                            onClick={() => setSchedulerSelectedDayIdx(idx)}
+                                            className={`p-4 rounded-2xl border ${colBorderClass} ${colBgClass} flex flex-col justify-between gap-3 cursor-pointer transition-all duration-300 hover:scale-[1.03] shadow-sm`}
+                                        >
+                                            <div className="space-y-0.5 text-center">
+                                                <span className="text-[9px] font-black uppercase text-zinc-400 dark:text-zinc-500 tracking-wider block">{day.weekday}</span>
+                                                <span className="text-lg font-black text-zinc-800 dark:text-zinc-200 block">{day.dayNum}</span>
+                                                <span className="text-[9px] font-bold text-zinc-500 dark:text-zinc-400 block uppercase">{day.monthStr}</span>
+                                            </div>
+
+                                            <div className="flex flex-col gap-1 items-center">
+                                                {idx === 0 && day.overdueFlows.length > 0 && (
+                                                    <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20 animate-pulse">
+                                                        {day.overdueFlows.length} Atrasado(s)
+                                                    </span>
+                                                )}
+                                                
+                                                <span className={`px-2.5 py-1 rounded-xl text-[10px] font-black ${
+                                                    totalFlows > 0
+                                                        ? idx === 0
+                                                            ? 'bg-amber-500/20 text-amber-700 dark:text-amber-400 border border-amber-500/30'
+                                                            : isSimulatedRange
+                                                                ? 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 border border-emerald-500/30 animate-pulse'
+                                                                : 'bg-zinc-150 dark:bg-zinc-850 text-zinc-650 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-750/30'
+                                                        : 'bg-zinc-100 dark:bg-zinc-950 text-zinc-400 border border-transparent'
+                                                }`}>
+                                                    {totalFlows} {totalFlows === 1 ? 'revisão' : 'revisões'}
+                                                </span>
+                                            </div>
+                                            
+                                            {idx === 0 ? (
+                                                <span className="text-[8px] font-black uppercase tracking-widest text-indigo-500 text-center block">Hoje</span>
+                                            ) : isSimulatedRange ? (
+                                                <span className="text-[8px] font-black uppercase tracking-widest text-emerald-500 text-center block">Adiantar!</span>
+                                            ) : (
+                                                <span className="text-[8px] font-bold uppercase tracking-widest text-zinc-400 text-center block">Agendado</span>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+
+                            {/* Detailed Inspector List */}
+                            <div className="p-5 bg-zinc-50/30 dark:bg-zinc-950/20 border border-zinc-200 dark:border-zinc-800 rounded-3xl relative z-10 space-y-4">
+                                <div className="flex justify-between items-center border-b border-zinc-200 dark:border-zinc-850 pb-3">
+                                    <h4 className="font-black text-sm text-zinc-850 dark:text-zinc-200 flex items-center gap-2">
+                                        <i className="fa-solid fa-list-ul text-indigo-500"></i>
+                                        Revisões de {scheduleDays[schedulerSelectedDayIdx]?.label}
+                                        <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-zinc-200 dark:bg-zinc-850 text-zinc-600 dark:text-zinc-400 border border-zinc-300 dark:border-zinc-800">
+                                            {scheduleDays[schedulerSelectedDayIdx] ? (scheduleDays[schedulerSelectedDayIdx].flows.length + (schedulerSelectedDayIdx === 0 ? scheduleDays[0].overdueFlows.length : 0)) : 0} itens
+                                        </span>
+                                    </h4>
+                                    
+                                    {schedulerSelectedDayIdx === 0 && scheduleDays[0]?.overdueFlows.length > 0 && (
+                                        <span className="text-[9px] font-black text-rose-500 bg-rose-500/10 px-2.5 py-1 rounded-lg border border-rose-500/20 animate-pulse uppercase tracking-wider">
+                                            Foco Crítico: Priorize os Atrasados
+                                        </span>
+                                    )}
+                                </div>
+
+                                <div className="space-y-3">
+                                    {/* Overdue items displayed first on day 0 */}
+                                    {schedulerSelectedDayIdx === 0 && scheduleDays[0]?.overdueFlows.map(flow => {
+                                        const lastReviewScore = flow.reviewHistory && flow.reviewHistory.length > 0
+                                            ? flow.reviewHistory[flow.reviewHistory.length - 1].score
+                                            : null;
+                                        return (
+                                            <div key={`overdue-${flow.id}`} className="p-4 rounded-2xl bg-rose-500/5 dark:bg-rose-500/10 border border-rose-500/20 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-all hover:bg-rose-500/10">
+                                                <div className="flex items-center gap-3">
+                                                    <div className="w-10 h-10 rounded-xl bg-rose-500/10 text-rose-500 flex items-center justify-center shrink-0"><i className="fa-solid fa-triangle-exclamation text-lg"></i></div>
+                                                    <div>
+                                                        <h5 className="font-black text-xs md:text-sm text-zinc-900 dark:text-white flex items-center gap-2 flex-wrap">
+                                                            {flow.title}
+                                                            <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-rose-50 text-white uppercase tracking-widest">ATRASADO</span>
+                                                        </h5>
+                                                        <p className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 mt-0.5">
+                                                            {flow.category} • Próxima revisão era em: {new Date(flow.nextReviewDate).toLocaleDateString('pt-BR')}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-center gap-4 justify-between sm:justify-end">
+                                                    <div className="text-right">
+                                                        <span className="text-[9px] font-bold text-zinc-400 block">Última nota</span>
+                                                        <span className="text-xs font-black text-rose-500">{lastReviewScore !== null ? lastReviewScore.toFixed(1) : 'Sem notas'}</span>
+                                                    </div>
+                                                    <button 
+                                                        onClick={() => {
+                                                            setFocusFlowchartId(flow.id);
+                                                            setActiveTab('fluxogramas');
+                                                        }} 
+                                                        className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white font-black rounded-xl text-[10px] uppercase tracking-wider shadow transition-all active:scale-95 flex items-center gap-1.5"
+                                                    >
+                                                        <i className="fa-solid fa-play"></i> Estudar Agora
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+
+                                    {/* Regular scheduled items for the day */}
+                                    {scheduleDays[schedulerSelectedDayIdx]?.flows.map(flow => {
+                                        const lastReviewScore = flow.reviewHistory && flow.reviewHistory.length > 0
+                                            ? flow.reviewHistory[flow.reviewHistory.length - 1].score
+                                            : null;
+                                        const isAdvanced = schedulerSelectedDayIdx > 0 && schedulerSelectedDayIdx <= schedulerDaysSimulated;
+                                        return (
+                                            <div key={flow.id} className={`p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-all hover:bg-zinc-50 dark:hover:bg-zinc-850 ${isAdvanced ? 'border-emerald-500/50 shadow shadow-emerald-500/10' : ''}`}>
+                                                <div className="flex items-center gap-3">
+                                                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${isAdvanced ? 'bg-emerald-500/10 text-emerald-500' : 'bg-indigo-500/10 text-indigo-500'}`}>
+                                                        <i className="fa-solid fa-sitemap text-lg"></i>
+                                                    </div>
+                                                    <div>
+                                                        <h5 className="font-black text-xs md:text-sm text-zinc-900 dark:text-white flex items-center gap-2 flex-wrap">
+                                                            {flow.title}
+                                                            {isAdvanced && (
+                                                                <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/25 uppercase tracking-widest animate-pulse">Adiantável</span>
+                                                            )}
+                                                        </h5>
+                                                        <p className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 mt-0.5">
+                                                            {flow.category} • Vencimento: {new Date(flow.nextReviewDate).toLocaleDateString('pt-BR')}
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-center gap-4 justify-between sm:justify-end">
+                                                    <div className="text-right">
+                                                        <span className="text-[9px] font-bold text-zinc-400 block">Última nota</span>
+                                                        <span className={`text-xs font-black ${isAdvanced ? 'text-emerald-500' : 'text-zinc-700 dark:text-zinc-300'}`}>
+                                                            {lastReviewScore !== null ? lastReviewScore.toFixed(1) : 'Sem notas'}
+                                                        </span>
+                                                    </div>
+                                                    <button 
+                                                        onClick={() => {
+                                                            setFocusFlowchartId(flow.id);
+                                                            setActiveTab('fluxogramas');
+                                                        }} 
+                                                        className={`px-4 py-2 text-white font-black rounded-xl text-[10px] uppercase tracking-wider shadow transition-all active:scale-95 flex items-center gap-1.5 ${
+                                                            isAdvanced 
+                                                                ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-500/20' 
+                                                                : 'bg-indigo-650 hover:bg-indigo-600 shadow-indigo-500/20'
+                                                        }`}
+                                                    >
+                                                        <i className="fa-solid fa-play"></i> Estudar Agora
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+
+                                    {/* Day Empty State */}
+                                    {scheduleDays[schedulerSelectedDayIdx] && scheduleDays[schedulerSelectedDayIdx].flows.length === 0 && (schedulerSelectedDayIdx !== 0 || scheduleDays[0].overdueFlows.length === 0) && (
+                                        <div className="py-12 text-center text-zinc-400 dark:text-zinc-500 border border-dashed border-zinc-200 dark:border-zinc-800 rounded-2xl bg-zinc-50/50 dark:bg-zinc-950/20">
+                                            <i className="fa-regular fa-calendar-check text-4xl mb-3 text-emerald-500/60 dark:text-emerald-400/40"></i>
+                                            <h5 className="font-black text-sm text-zinc-700 dark:text-zinc-350">Nenhuma revisão agendada</h5>
+                                            <p className="text-[10px] font-bold text-zinc-500 mt-1 max-w-sm mx-auto">
+                                                Excelente! Este dia está livre de pendências. Use o simulador acima para adiantar revisões futuras e manter-se à frente no aprendizado!
+                                            </p>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                         </div>
 
@@ -19009,8 +20553,9 @@ ${(obj.questoesAnalisadas || []).map(q => `### ${q.identificacao}
                     );
                     case 'resumos_html': return renderResumosHtmlTab();
                     case 'analise_reversa': return renderReverseAnalysisTab();
-                    case 'fluxogramas': return <FluxogramasTab db={db} fluxogramas={db.fluxogramas} setDb={setDb} callIA={callIA} extractTextFromPDF={window.extractTextFromPDF || extractTextFromPDF} aiConfig={aiConfig} setAiConfig={setAiConfig} availableModels={availableModels} pendingFlowchartImport={pendingFlowchartImport} setPendingFlowchartImport={setPendingFlowchartImport} />;
+                    case 'fluxogramas': return <FluxogramasTab db={db} fluxogramas={db.fluxogramas} setDb={setDb} callIA={callIA} extractTextFromPDF={window.extractTextFromPDF || extractTextFromPDF} aiConfig={aiConfig} setAiConfig={setAiConfig} availableModels={availableModels} pendingFlowchartImport={pendingFlowchartImport} setPendingFlowchartImport={setPendingFlowchartImport} focusFlowchartId={focusFlowchartId} setFocusFlowchartId={setFocusFlowchartId} />;
                     case 'desafio_diario': return <DesafioDiarioTab db={db} setDb={setDb} callIA={callIA} aiConfig={aiConfig} availableModels={availableModels} setActiveTab={setActiveTab} onActiveChallengeChange={setActiveChallengeInfo} notionConfig={notionConfig} generateAndSendToNotion={generateAndSendToNotion} setPendingFlowchartImport={setPendingFlowchartImport} />;
+                    case 'exames': return <ExamesTab db={db} setDb={setDb} callIA={callIA} aiConfig={aiConfig} availableModels={availableModels} setActiveTab={setActiveTab} />;
                     default: return renderErrorList();
                 }
             };
@@ -19057,6 +20602,7 @@ ${(obj.questoesAnalisadas || []).map(q => `### ${q.identificacao}
                                 { id: 'analise_reversa', icon: 'fa-magnifying-glass-chart', label: 'Análise Reversa' },
                                 { id: 'fluxogramas', icon: 'fa-diagram-project', label: 'Fluxogramas' },
                                 { id: 'desafio_diario', icon: 'fa-calendar-check', label: 'Desafio Clínico' },
+                                { id: 'exames', icon: 'fa-user-doctor', label: 'Laudo de Exames' },
                                 { id: 'chat', icon: 'fa-robot', label: 'Mentor IA' }
                             ].map(t => (
                                 <button key={t.id} onClick={() => { setActiveTab(t.id); clearDeck(); setShowForm(false); setActiveDeck(null); setSearchTerm(''); setSummarySearch(''); setGameState({ view: 'list', data: null, play: null }); setActiveWeekId(null); setIsCreatingWeek(false); setChecklistState({ view: 'list', data: null }); setHtmlSummaryState(p => ({ ...p, view: 'list', search: '' })); window.scrollTo(0, 0); if (window.innerWidth < 1024) setSidebarOpen(false); }}
