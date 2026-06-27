@@ -19,7 +19,6 @@ export default async function handler(req, res) {
                 return res.status(200).json({ data: data.result || '' });
             }
             
-            // Get meta
             const response = await fetch(`${url}/get/${dbKey}_meta`, {
                 headers: { Authorization: `Bearer ${token}` }
             });
@@ -29,7 +28,6 @@ export default async function handler(req, res) {
                 return res.status(200).json(data.result);
             }
             
-            // Fallback to legacy single key
             const oldRes = await fetch(`${url}/get/${dbKey}`, {
                 headers: { Authorization: `Bearer ${token}` }
             });
@@ -56,6 +54,15 @@ export default async function handler(req, res) {
             }
             
             if (body.action === 'commit') {
+                // Delete orphaned chunks (e.g., if new save has 5 chunks and old had 10, delete 5 to 9)
+                // We don't know exactly how many old chunks there were, so we just attempt to delete up to 20 chunks ahead
+                for (let i = body.count; i < body.count + 20; i++) {
+                    await fetch(`${url}/del/${dbKey}_chunk_${i}`, {
+                        method: 'GET',
+                        headers: { Authorization: `Bearer ${token}` }
+                    });
+                }
+
                 const response = await fetch(`${url}/set/${dbKey}_meta`, {
                     method: 'POST',
                     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -66,7 +73,6 @@ export default async function handler(req, res) {
                 return res.status(200).json({ success: true });
             }
             
-            // Fallback for non-chunked saves (if used)
             const response = await fetch(`${url}/set/${dbKey}`, {
                 method: 'POST',
                 headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -78,7 +84,7 @@ export default async function handler(req, res) {
         }
         
         if (req.method === 'DELETE') {
-            const response = await fetch(`${url}/del/${dbKey}_meta`, {
+            await fetch(`${url}/del/${dbKey}_meta`, {
                 method: 'GET',
                 headers: { Authorization: `Bearer ${token}` }
             });
@@ -86,6 +92,13 @@ export default async function handler(req, res) {
                 method: 'GET',
                 headers: { Authorization: `Bearer ${token}` }
             });
+            // Delete all possible chunks up to 100 (which would be 200MB, a safe upper limit)
+            for (let i = 0; i < 100; i++) {
+                await fetch(`${url}/del/${dbKey}_chunk_${i}`, {
+                    method: 'GET',
+                    headers: { Authorization: `Bearer ${token}` }
+                });
+            }
             return res.status(200).json({ success: true });
         }
 
