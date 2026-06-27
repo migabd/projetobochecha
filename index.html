@@ -11085,349 +11085,133 @@ Retorne apenas o texto da resposta, sem JSON ou tags explicativas.`;
                 chatSessionsRef.current = chatSessions;
             }, [chatSessions]);
 
-            // ----- GIST SYNC CONFIG -----
-            const [gistConfig, setGistConfig] = useState(() => {
+            // ----- VERCEL KV SYNC CONFIG -----
+            const [cloudConfig, setCloudConfig] = useState(() => {
                 try {
-                    const saved = localStorage.getItem('caderno_gist_config');
-                    if (saved) {
-                        const parsed = JSON.parse(saved);
-                        return { ...parsed, token: '' }; // Force token to be empty on load
-                    }
+                    const saved = localStorage.getItem('caderno_cloud_config');
+                    return saved ? JSON.parse(saved) : { token: '', autoSync: true, version: 7 };
                 } catch (e) {
-                    console.warn("Erro ao fazer parse de gistConfig:", e);
+                    return { token: '', autoSync: true, version: 7 };
                 }
-                return { token: '', id: '', autoSync: true, version: 7 };
             });
 
             useEffect(() => {
-                const toSave = { ...gistConfig, token: '' }; // Never save token to localStorage
-                localStorage.setItem('caderno_gist_config', JSON.stringify(toSave));
-            }, [gistConfig]);
+                localStorage.setItem('caderno_cloud_config', JSON.stringify(cloudConfig));
+            }, [cloudConfig]);
 
-            // Migração/Update de credenciais forçado (limpeza total na v6)
-            useEffect(() => {
-                const CURRENT_VERSION = 7;
-                if (gistConfig.version !== CURRENT_VERSION) {
-                    setGistConfig({
-                        token: '',
-                        id: '',
-                        autoSync: true,
-                        version: CURRENT_VERSION
-                    });
-                }
-            }, []);
-
-            // ----- Sincronização via GitHub Gist -----
-            const mergeObjects = (loc, rem) => {
-                if (!loc) return rem;
-                if (!rem) return loc;
-                const merged = { ...loc };
-                for (const key in rem) {
-                    const remVal = rem[key];
-                    const locVal = loc[key];
-                    
-                    if (remVal === null || remVal === undefined || remVal === '') {
-                        continue;
-                    }
-                    
-                    if (typeof remVal === 'object' && typeof locVal === 'object' && !Array.isArray(remVal) && !Array.isArray(locVal)) {
-                        merged[key] = mergeObjects(locVal, remVal);
-                    } else if (Array.isArray(remVal) && Array.isArray(locVal)) {
-                        const uniqueMap = new Map();
-                        locVal.forEach((item, idx) => {
-                            const uniqueKey = (item && typeof item === 'object') ? (item.id || item.date || item.key || idx) : idx;
-                            uniqueMap.set(uniqueKey, item);
-                        });
-                        remVal.forEach((item, idx) => {
-                            const uniqueKey = (item && typeof item === 'object') ? (item.id || item.date || item.key || idx) : idx;
-                            const existing = uniqueMap.get(uniqueKey);
-                            uniqueMap.set(uniqueKey, (existing && typeof existing === 'object' && item && typeof item === 'object') ? mergeObjects(existing, item) : item);
-                        });
-                        merged[key] = Array.from(uniqueMap.values());
-                    } else {
-                        if (key === 'answer' && locVal && !remVal) {
-                            merged[key] = locVal;
-                        } else if (key === 'evaluation' && remVal && !locVal) {
-                            merged[key] = remVal;
-                        } else if (key === 'completedReviewsCount') {
-                            merged[key] = Math.max(locVal || 0, remVal || 0);
-                        } else if (key === 'nextReviewDate') {
-                            const locCount = loc.completedReviewsCount || 0;
-                            const remCount = rem.completedReviewsCount || 0;
-                            if (locCount > remCount) {
-                                merged[key] = locVal;
-                            } else if (remCount > locCount) {
-                                merged[key] = remVal;
-                            } else {
-                                if (locVal && remVal) {
-                                    merged[key] = new Date(locVal) > new Date(remVal) ? locVal : remVal;
-                                } else {
-                                    merged[key] = remVal || locVal;
-                                }
-                            }
-                        } else {
-                            merged[key] = remVal;
-                        }
-                    }
-                }
-                return merged;
-            };
-
-            const mergeAdditive = (localArr, remoteArr) => {
-                const map = new Map();
-                (localArr || []).forEach(x => { if (x && x.id) map.set(x.id, x); });
-                (remoteArr || []).forEach(x => {
-                    if (!x || !x.id) return;
-                    const loc = map.get(x.id);
-                    map.set(x.id, mergeObjects(loc, x));
-                });
-                return Array.from(map.values());
-            };
-
-            const performFullMerge = (remote) => {
-                if (!remote) return;
-                isIncomingSyncRef.current = true;
-                setTimeout(() => {
-                    isIncomingSyncRef.current = false;
-                }, 3000);
-                setDb(prev => ({
-                    ...prev,
-                    ...remote,
-                    errors: mergeAdditive(prev.errors, remote.errors),
-                    flashcards: mergeAdditive(prev.flashcards, remote.flashcards),
-                    checklists: mergeAdditive(prev.checklists, remote.checklists),
-                    summariesHtml: mergeAdditive(prev.summariesHtml, remote.summariesHtml),
-                    weeks: mergeAdditive(prev.weeks, remote.weeks),
-                    games: mergeAdditive(prev.games, remote.games),
-                    perceptions: mergeAdditive(prev.perceptions, remote.perceptions),
-                    processedQuestionLists: mergeAdditive(prev.processedQuestionLists, remote.processedQuestionLists),
-                    fluxogramas: mergeAdditive(prev.fluxogramas, remote.fluxogramas),
-                    desafiosDiarios: mergeAdditive(prev.desafiosDiarios || [], remote.desafiosDiarios || []),
-                    examesDiarios: mergeAdditive(prev.examesDiarios || [], remote.examesDiarios || []),
-                    dailyStats: { ...(prev.dailyStats || {}), ...(remote.dailyStats || {}) }
-                }));
-                if (remote.chatSessions && Array.isArray(remote.chatSessions) && remote.chatSessions.length > 0) {
-                    setChatSessions(prev => {
-                        const merged = [...prev];
-                        remote.chatSessions.forEach(remS => {
-                            const localIdx = merged.findIndex(locS => locS.id === remS.id);
-                            if (localIdx === -1) {
-                                merged.push(remS);
-                            } else {
-                                const locS = merged[localIdx];
-                                const locMsgs = locS.messages || [];
-                                const remMsgs = remS.messages || [];
-                                if (remMsgs.length >= locMsgs.length) {
-                                    merged[localIdx] = { ...locS, ...remS };
-                                }
-                            }
-                        });
-
-                        const activeId = activeSessionIdRef.current;
-                        const activeMatch = merged.find(s => s.id === activeId) || merged[0];
-                        if (activeMatch) {
-                            setTimeout(() => {
-                                if (activeMatch.id !== activeId) {
-                                    setActiveSessionId(activeMatch.id);
-                                }
-                                setChatMessages(activeMatch.messages || []);
-                            }, 0);
-                        }
-                        return merged;
-                    });
-                } else if (remote.chatMessages) {
-                    setChatMessages(prev => {
-                        if (remote.chatMessages.length >= prev.length) {
-                            return remote.chatMessages;
-                        }
-                        return prev;
-                    });
-                }
-                setSyncStatus('synced');
-                setLastSyncTime(new Date());
-                isDirty.current = false;
-                localStorage.setItem('caderno_db_is_dirty', 'false');
-            };
-
-            // ==========================================
-            // SINCRONIZAÇÃO GIST (GITHUB)
-            // ==========================================
-            const syncToGist = async (dataToSave) => {
-                const token = gistConfig.token?.trim();
-                const id = gistConfig.id?.trim();
-                if (!token || !id) return;
-
+            // ----- Sincronização via Vercel KV -----
+            const syncToCloud = async (dataToSave) => {
+                const secret = cloudConfig.token?.trim();
+                console.log("Sync KV: Iniciando upload...");
                 setSyncStatus('syncing');
+                
                 try {
-                    const response = await fetch(`https://api.github.com/gists/${id}`, {
-                        method: 'PATCH',
-                        headers: {
-                            'Authorization': `Bearer ${token}`,
-                            'Accept': 'application/vnd.github+json',
-                            'X-GitHub-Api-Version': '2022-11-28',
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({
-                            files: {
-                                "caderno_med_data.json": {
-                                    content: JSON.stringify({ ...dataToSave, chatMessages: chatMessagesRef.current, chatSessions: chatSessionsRef.current })
-                                }
-                            }
-                        })
-                    });
-                    if (!response.ok) {
-                        const errData = await response.json().catch(() => ({}));
-                        throw new Error(`GitHub API ${response.status}: ${errData.message || 'Erro desconhecido'}`);
-                    }
-                    setSyncStatus('synced');
-                    setLastSyncTime(new Date());
-                    isDirty.current = false;
-                    localStorage.setItem('caderno_db_is_dirty', 'false');
-                    console.log("Gist: Sincronizado com sucesso.");
-                } catch (err) {
-                    console.error("Erro ao sincronizar Gist:", err);
-                    setSyncErrorMsg(err.message);
-                    setSyncStatus('error');
-                }
-            };
-
-            const syncFromGist = async (isManual = false) => {
-                const token = gistConfig.token?.trim();
-                const id = gistConfig.id?.trim();
-                console.log("DEBUG: syncFromGist called", { isManual, tokenLength: token?.length, id, autoSync: gistConfig.autoSync });
-                if (!token || !id) {
-                    console.log("DEBUG: syncFromGist returned early due to missing token or id");
-                    return;
-                }
-
-                console.log("Sync Gist: Iniciando download ultra-seguro...");
-                setSyncStatus('connecting');
-                setSyncErrorMsg('');
-                try {
-                    // Passo 1: Pegar metadados do Gist
-                    const response = await fetch(`https://api.github.com/gists/${id}`, {
-                        headers: {
-                            'Authorization': `Bearer ${token}`,
-                            'Accept': 'application/vnd.github+json',
-                            'X-GitHub-Api-Version': '2022-11-28'
-                        }
-                    });
-
-                    if (!response.ok) {
-                        const errData = await response.json().catch(() => ({}));
-                        throw new Error(`Erro GitHub ${response.status}: ${errData.message || 'Token ou ID inválido'}`);
-                    }
-
-                    const gist = await response.json();
-                    const file = gist.files["caderno_med_data.json"];
-
-                    if (!file) throw new Error("Arquivo de dados não encontrado no Gist.");
-
-                    // Passo 2: DOWNLOAD ROBUSTO (Usa raw_url para evitar truncamento do GitHub)
-                    let content = file.content;
-                    if (file.truncated || !content) {
-                        console.log("Sync Gist: Arquivo truncado ou grande. Buscando via RAW URL...");
-                        const rawRes = await fetch(file.raw_url);
-                        if (!rawRes.ok) throw new Error("Falha ao baixar conteúdo bruto do arquivo.");
-                        content = await rawRes.text();
-                    }
-
-                    if (content) {
-                        try {
-                            const remote = JSON.parse(content);
-                            lastGistReceiveTime.current = Date.now();
-                            performFullMerge(remote);
-                            if (isManual) showAlert("✅ Sincronização concluída! Dados restaurados com 100% de integridade.");
-                        } catch (parseErr) {
-                            console.error("Erro no Parse JSON:", parseErr);
-                            throw new Error("O arquivo na nuvem está incompleto. Tente 'Forçar Subir Dados' para resetar a nuvem.");
-                        }
-                    }
-                } catch (err) {
-                    console.error("Erro Crítico no Sync:", err);
-                    setSyncErrorMsg(err.message);
-                    setSyncStatus('error');
-                    if (isManual) showAlert(`❌ Erro Crítico: ${err.message}`);
-                }
-            };
-
-            const createGist = async () => {
-                const token = gistConfig.token?.trim();
-                if (!token) return showAlert("Insira o Token do GitHub primeiro.");
-                setSyncStatus('connecting');
-                try {
-                    const response = await fetch(`https://api.github.com/gists`, {
+                    const response = await fetch('/api/sync', {
                         method: 'POST',
                         headers: {
-                            'Authorization': `Bearer ${token}`,
-                            'Accept': 'application/vnd.github+json',
-                            'X-GitHub-Api-Version': '2022-11-28',
-                            'Content-Type': 'application/json'
+                            'Content-Type': 'application/json',
+                            ...(secret ? { 'Authorization': `Bearer ${secret}` } : {})
                         },
-                        body: JSON.stringify({
-                            description: "Backup Caderno de Erros Médicos IA PRO",
-                            public: false,
-                            files: {
-                                "caderno_med_data.json": {
-                                    content: JSON.stringify({ ...db, chatMessages: chatMessagesRef.current, chatSessions: chatSessionsRef.current })
-                                }
-                            }
-                        })
+                        body: JSON.stringify(dataToSave)
                     });
-                    if (!response.ok) {
-                        const errData = await response.json().catch(() => ({}));
-                        let msg = errData.message || 'Erro desconhecido';
-                        if (response.status === 404) msg = "Não encontrado. Verifique se o Token tem a permissão 'gist' marcada.";
-                        if (response.status === 401) msg = "Token inválido ou expirado.";
-                        throw new Error(`GitHub API ${response.status}: ${msg}`);
-                    }
-                    const gist = await response.json();
-                    setGistConfig(p => ({ ...p, id: gist.id }));
-                    showAlert(`✅ Gist Privado criado com sucesso!\nID: ${gist.id}\nOs seus dados já foram salvos.`);
+                    
+                    const result = await response.json();
+                    if (!response.ok) throw new Error(result.error || "Erro no servidor.");
+                    
+                    console.log("Sync KV: Sincronizado com sucesso.");
                     setSyncStatus('synced');
+                    isDirty.current = false;
                 } catch (err) {
-                    showAlert(`❌ Erro ao criar Gist: ${err.message}`);
+                    console.error("Erro ao sincronizar KV:", err);
+                    setSyncStatus('error');
                 }
             };
 
-            // Auto-Sync Gist
+            const syncFromCloud = async (isManual = false) => {
+                const secret = cloudConfig.token?.trim();
+                if (!isManual && !cloudConfig.autoSync) return;
+                
+                console.log("Sync KV: Iniciando download...");
+                setSyncStatus('syncing');
+                
+                try {
+                    const response = await fetch('/api/sync', {
+                        method: 'GET',
+                        headers: secret ? { 'Authorization': `Bearer ${secret}` } : {}
+                    });
+                    
+                    const data = await response.json();
+                    if (!response.ok) {
+                        if (response.status === 401) throw new Error("Senha de acesso (API Secret) inválida.");
+                        throw new Error(data?.error || "Erro ao baixar do servidor.");
+                    }
+                    
+                    if (!data) {
+                        if (isManual) showAlert("O Banco de Dados na nuvem está vazio.");
+                        setSyncStatus('synced');
+                        return;
+                    }
+
+                    if (data.version && data.version > CURRENT_VERSION) {
+                        console.warn("Versão mais recente detectada.");
+                    }
+                    
+                    if (!data.flowcharts) data.flowcharts = [];
+                    if (!data.perceptions) data.perceptions = [];
+                    if (!data.flashcards) data.flashcards = [];
+                    
+                    isIncomingSyncRef.current = true;
+                    setDb(data);
+                    setTimeout(() => isIncomingSyncRef.current = false, 1000);
+                    
+                    if (isManual) {
+                        showAlert("✅ Dados sincronizados com sucesso a partir da Nuvem!");
+                    }
+                    
+                    console.log("Sync KV: Download concluído.");
+                    setSyncStatus('synced');
+                    isDirty.current = false;
+                    
+                } catch (err) {
+                    console.error("Erro ao baixar KV:", err);
+                    if (isManual) showAlert(`❌ Erro ao sincronizar: ${err.message}`);
+                    setSyncStatus('error');
+                }
+            };
+
+            // Auto-Sync KV
             useEffect(() => {
-                if (isFirstRenderDb.current || !gistConfig.id || !gistConfig.token || !gistConfig.autoSync) {
+                if (isFirstRenderDb.current || !cloudConfig.autoSync) {
                     if (isFirstRenderDb.current) isFirstRenderDb.current = false;
                     return;
                 }
                 const timer = setTimeout(() => {
                     if (!isDirty.current) return;
-                    syncToGist(db);
+                    syncToCloud(db);
                 }, 3000);
                 return () => clearTimeout(timer);
             }, [db, chatMessages, chatSessions]);
 
-            // Initial Gist Load & Auto-Pull Interval
+            // Initial KV Load & Auto-Pull
             useEffect(() => {
-                if (gistConfig.id && gistConfig.token) {
-                    // Pequeno delay para garantir que o resto do sistema inicializou
-                    const initialTimer = setTimeout(() => {
-                        syncFromGist();
-                    }, 500);
+                const initialTimer = setTimeout(() => {
+                    syncFromCloud();
+                }, 500);
 
-                    // Pull automático a cada 60 segundos para manter PC e Celular sincronizados
-                    if (gistConfig.autoSync) {
-                        const interval = setInterval(() => {
-                            // Só baixa se não estivermos enviando algo no momento
-                            // Usamos ref para evitar closure stale
-                            if (syncStatusRef.current !== 'syncing' && syncStatusRef.current !== 'connecting' && !isDirty.current) {
-                                syncFromGist();
-                            }
-                        }, 60000);
-                        return () => {
-                            clearTimeout(initialTimer);
-                            clearInterval(interval);
-                        };
-                    }
-                    return () => clearTimeout(initialTimer);
+                let interval;
+                if (cloudConfig.autoSync) {
+                    interval = setInterval(() => {
+                        if (syncStatusRef.current !== 'syncing' && !isDirty.current) {
+                            syncFromCloud();
+                        }
+                    }, 60000);
                 }
-            }, [gistConfig.id, gistConfig.token, gistConfig.autoSync]);
+                
+                return () => {
+                    clearTimeout(initialTimer);
+                    if(interval) clearInterval(interval);
+                };
+            }, [cloudConfig.token, cloudConfig.autoSync]);
 
             // Garantir que os filtros padrão existam e sejam únicos
             useEffect(() => {
@@ -21520,70 +21304,44 @@ ${(obj.questoesAnalisadas || []).map(q => `### ${q.identificacao}
                                         </div>
                                     </section>
 
+                                    {/* Sincronização Vercel KV */}
                                     <section className="bg-emerald-50 dark:bg-emerald-900/10 p-6 rounded-3xl border border-emerald-100 dark:border-emerald-900/30 shadow-inner">
-                                        <h3 className="text-xs font-black uppercase text-emerald-500 mb-4 tracking-widest"><i className="fa-brands fa-github mr-2"></i> Sincronização Gist (GitHub)</h3>
+                                        <h3 className="text-xs font-black uppercase text-emerald-500 mb-4 tracking-widest"><i className="fa-solid fa-cloud mr-2"></i> Sincronização em Nuvem (Vercel KV)</h3>
+                                        
                                         <div className="space-y-4">
                                             <div className="bg-white/50 dark:bg-black/20 p-3 rounded-xl border border-emerald-100/50 dark:border-emerald-900/30 text-[10px] font-bold text-emerald-600 dark:text-emerald-400 leading-relaxed italic">
-                                                <i className="fa-solid fa-circle-info mr-1"></i> O Gist agora é o único método de sincronização na nuvem, garantindo maior limite de dados (10MB) e privacidade.
+                                                <i className="fa-solid fa-circle-info mr-1"></i> A sincronização agora é nativa e instantânea usando o banco de dados da Vercel. Nenhum dado é salvo no Gist.
                                             </div>
+                                            
                                             <div>
-                                                <label className="block text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase mb-1">GitHub Access Token (Não será salvo)</label>
-                                                <input type="password" autoComplete="new-password" value={gistConfig.token} onChange={e => setGistConfig(p => ({ ...p, token: e.target.value }))} placeholder="ghp_xxxxxxxxxxxx" className="w-full p-3 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl outline-none text-xs font-mono" />
+                                                <label className="block text-xs font-bold text-zinc-500 mb-1">Senha de Acesso (API Secret)</label>
+                                                <input 
+                                                    type="password"
+                                                    value={cloudConfig.token}
+                                                    onChange={e => setCloudConfig(p => ({ ...p, token: e.target.value }))}
+                                                    placeholder="Digite a senha configurada na Vercel (API_SECRET)..."
+                                                    className="w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl px-4 py-3 outline-none focus:border-emerald-500 transition-colors font-mono text-sm"
+                                                />
+                                                <p className="text-[10px] text-zinc-400 mt-1">Protege seu banco de dados contra acessos não autorizados. Deixe em branco se a sua API não tiver senha.</p>
                                             </div>
-                                            <div>
-                                                <label className="block text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase mb-1">Gist ID (Opcional se criar novo)</label>
-                                                <input type="text" value={gistConfig.id} onChange={e => setGistConfig(p => ({ ...p, id: e.target.value }))} placeholder="ID do Gist existente" className="w-full p-3 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl outline-none text-xs font-mono" />
+                                            
+                                            <label className="flex items-center gap-3 cursor-pointer group mt-4">
+                                                <div className={`w-10 h-5 rounded-full p-1 transition-colors ${cloudConfig.autoSync ? 'bg-emerald-500' : 'bg-zinc-300 dark:bg-zinc-700'}`}>
+                                                    <div className={`bg-white w-3 h-3 rounded-full transition-transform ${cloudConfig.autoSync ? 'translate-x-5' : ''}`}></div>
+                                                </div>
+                                                <span className="text-sm font-bold text-zinc-700 dark:text-zinc-300 group-hover:text-emerald-500 transition-colors">Sincronização Automática (Auto-Sync)</span>
+                                            </label>
+                                            
+                                            <div className="flex gap-2 pt-2">
+                                                <button onClick={() => syncFromCloud(true)} className="flex-1 py-3 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-emerald-200 transition-all"><i className="fa-solid fa-cloud-arrow-down mr-1"></i> Baixar da Nuvem</button>
+                                                <button onClick={() => { syncToCloud(db); showAlert("✅ Enviando dados locais para a nuvem de forma forçada!"); }} className="flex-1 py-3 bg-emerald-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg hover:bg-emerald-700 transition-all"><i className="fa-solid fa-cloud-arrow-up mr-1"></i> Enviar p/ Nuvem</button>
                                             </div>
-
-                                            <div className="flex flex-col gap-2">
-                                                {!gistConfig.id ? (
-                                                    <button onClick={createGist} className="w-full py-3 bg-emerald-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg hover:bg-emerald-700 transition-all"><i className="fa-solid fa-plus mr-1"></i> Criar Novo Gist</button>
-                                                ) : (
-                                                    <>
-                                                        <div className="flex gap-2">
-                                                            <button onClick={() => syncFromGist(true)} className="flex-1 py-3 bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 rounded-xl font-black text-[10px] uppercase tracking-widest hover:bg-emerald-200 transition-all"><i className="fa-solid fa-download mr-1"></i> Baixar Dados</button>
-                                                            <button onClick={() => syncToGist(db)} className="flex-1 py-3 bg-emerald-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest shadow-lg hover:bg-emerald-700 transition-all"><i className="fa-solid fa-upload mr-1"></i> Subir Dados</button>
-                                                        </div>
-                                                        <button
-                                                            onClick={() => {
-                                                                if (confirm("⚠️ ATENÇÃO: Isso vai ignorar o erro na nuvem e substituir o arquivo do GitHub pelos seus dados locais atuais. Deseja continuar?")) {
-                                                                    syncToGist(db);
-                                                                }
-                                                            }}
-                                                            className="w-full py-2 bg-red-100 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-xl font-black text-[9px] uppercase tracking-widest border border-red-200 dark:border-red-800/50 hover:bg-red-200 transition-all mb-2"
-                                                        >
-                                                            <i className="fa-solid fa-triangle-exclamation mr-1"></i> Forçar Sobrescrita da Nuvem
-                                                        </button>
-                                                        <button
-                                                            onClick={() => {
-                                                                if (confirm("Deseja resetar as credenciais e limpar todos os campos?")) {
-                                                                    const hard = { token: '', id: '', autoSync: true, version: 7 };
-                                                                    setGistConfig(hard);
-                                                                    localStorage.setItem('caderno_gist_config', JSON.stringify(hard));
-                                                                    localStorage.setItem('gemini_api_key', "");
-                                                                    location.reload();
-                                                                }
-                                                            }}
-                                                            className="w-full py-2 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded-xl font-black text-[9px] uppercase tracking-widest border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 transition-all"
-                                                        >
-                                                            <i className="fa-solid fa-arrows-rotate mr-1"></i> Resetar Credenciais (Cache)
-                                                        </button>
-                                                    </>
-                                                )}
-                                            </div>
-
-                                            <div className="flex items-center gap-2 pt-2">
-                                                <input type="checkbox" id="autoSyncGist" checked={gistConfig.autoSync} onChange={e => setGistConfig(p => ({ ...p, autoSync: e.target.checked }))} className="w-4 h-4 accent-emerald-500" />
-                                                <label htmlFor="autoSyncGist" className="text-[10px] font-black text-emerald-500/60 uppercase tracking-widest">Sincronização Automática</label>
-                                            </div>
-
+                                            
                                             <div className="text-[10px] font-black text-emerald-400/80 uppercase text-center border-t border-emerald-100 dark:border-emerald-900/30 pt-4 mt-4 flex flex-col gap-1">
-                                                <span><i className="fa-regular fa-clock"></i> Última Sincronização: {lastSyncTime ? lastSyncTime.toLocaleString() : 'Nenhuma'}</span>
-                                                <span className="text-emerald-600 dark:text-emerald-500"><i className="fa-solid fa-database"></i> Espaço Ocupado: {(new Blob([JSON.stringify({ ...db, chatMessages })]).size / 1024).toFixed(2)} KB de 100.000 KB (100MB Limite)</span>
+                                                <span><i className="fa-solid fa-server"></i> Conectado à Vercel KV ({cloudConfig.autoSync ? 'Sincronizando' : 'Em Pausa'})</span>
                                             </div>
                                         </div>
                                     </section>
-
                                     {/* SEÇÃO DE RESGATE HISTÓRICO */}
                                     <section className="bg-emerald-50 dark:bg-emerald-900/10 p-6 rounded-3xl border border-emerald-100 dark:border-emerald-900/30 shadow-inner">
                                         <h3 className="text-xs font-black uppercase text-emerald-600 dark:text-emerald-400 mb-4 tracking-widest"><i className="fa-solid fa-clock-rotate-left mr-2"></i> Resgate Histórico (Backup)</h3>
