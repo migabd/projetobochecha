@@ -22,6 +22,7 @@ export default async function handler(req, res) {
         } 
         
         if (req.method === 'POST') {
+            // Increase Vercel payload limit in config below just in case, though JSZip keeps it small.
             const response = await fetch(`${url}/set/${dbKey}`, {
                 method: 'POST',
                 headers: { 
@@ -40,8 +41,9 @@ export default async function handler(req, res) {
         }
         
         if (req.method === 'DELETE') {
+            // Upstash REST API /del/:key accepts GET
             const response = await fetch(`${url}/del/${dbKey}`, {
-                method: 'POST', // Upstash REST API uses POST for /del
+                method: 'GET',
                 headers: { Authorization: `Bearer ${token}` }
             });
             
@@ -57,4 +59,12 @@ export default async function handler(req, res) {
         console.error('Erro na API Sync KV:', error);
         return res.status(500).json({ error: 'Erro interno no servidor de banco de dados: ' + error.message });
     }
+}
+
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: '4mb',
+    },
+  },
 }
