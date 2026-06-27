@@ -9519,9 +9519,17 @@ Retorne apenas o texto da resposta, sem JSON ou tags explicativas.`;
                             
                             <div className="flex justify-between items-center bg-zinc-50 dark:bg-zinc-850 px-4 py-2 border-t border-zinc-100 dark:border-zinc-700 text-[10px] text-zinc-400 font-bold">
                                 <span>{newCommentText.length} / 1000 caracteres</span>
-                                <button 
-                                    type="submit" 
+                                <button
+                                    type="submit"
                                     disabled={!newCommentText.trim()}
+                                    className="px-6 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-black text-[10px] uppercase tracking-wider transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                                >
+                                    Publicar Comentário
+                                </button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
             );
         };
 
