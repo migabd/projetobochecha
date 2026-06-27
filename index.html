@@ -20509,14 +20509,14 @@ ${(obj.questoesAnalisadas || []).map(q => `### ${q.identificacao}
                         <div className="p-3 sm:p-6 space-y-6 sm:space-y-8 animate-in fade-in text-zinc-900 dark:text-zinc-100">
                             <div className="bg-white dark:bg-zinc-900 p-6 sm:p-8 rounded-[32px] sm:rounded-[40px] shadow-xl border border-zinc-200 dark:border-zinc-800 flex flex-col md:flex-row gap-4 sm:gap-6 mb-6">
                                 <div className="flex-1 relative">
-                                    <div className="absolute top-4 left-4 text-amber-500"><i className="fa-solid fa-bolt text-lg"></i></div>
-                                    <textarea value={newPerc} onChange={e => setNewPerc(e.target.value)} placeholder="Novo insight clínico..." className="w-full h-28 sm:h-32 p-4 pl-12 rounded-2xl sm:rounded-3xl bg-zinc-50 dark:bg-zinc-950 outline-none focus:ring-2 focus:ring-amber-400 border border-zinc-200 dark:border-zinc-800 resize-none font-bold text-base sm:text-lg" />
+                                    <div className="absolute top-4 left-4 text-emerald-500"><i className="fa-solid fa-bolt text-lg"></i></div>
+                                    <textarea value={newPerc} onChange={e => setNewPerc(e.target.value)} placeholder="Novo insight clínico..." className="w-full h-28 sm:h-32 p-4 pl-12 rounded-2xl sm:rounded-3xl bg-zinc-50 dark:bg-zinc-950 outline-none focus:ring-2 focus:ring-emerald-400 border border-zinc-200 dark:border-zinc-800 resize-none font-bold text-base sm:text-lg" />
                                 </div>
-                                <button onClick={() => { if (newPerc.trim()) { setDb(p => ({ ...p, perceptions: [{ id: Date.now(), text: newPerc, date: new Date().toLocaleDateString('pt-PT') }, ...p.perceptions] })); setNewPerc(''); } }} className="bg-amber-500 hover:bg-amber-600 px-8 py-3.5 sm:py-4 rounded-2xl sm:rounded-3xl font-black text-zinc-900 shadow-xl shadow-amber-500/20 transition-all active:scale-95 text-base sm:text-lg whitespace-nowrap">Gravar Insight</button>
+                                <button onClick={() => { if (newPerc.trim()) { setDb(p => ({ ...p, perceptions: [{ id: Date.now(), text: newPerc, date: new Date().toLocaleDateString('pt-PT') }, ...p.perceptions] })); setNewPerc(''); } }} className="bg-emerald-500 hover:bg-emerald-600 px-8 py-3.5 sm:py-4 rounded-2xl sm:rounded-3xl font-black text-white shadow-xl shadow-emerald-500/20 transition-all active:scale-95 text-base sm:text-lg whitespace-nowrap">Gravar Insight</button>
                             </div>
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                                 {db.perceptions.map(p => (
-                                    <div key={p.id} className="bg-white dark:bg-zinc-900 p-8 rounded-[32px] border-t-8 border-amber-400 shadow-lg relative group animate-in slide-in-from-bottom-2 border-x border-b border-zinc-200 dark:border-zinc-800">
+                                    <div key={p.id} className="bg-white dark:bg-zinc-900 p-8 rounded-[32px] border-t-8 border-emerald-400 shadow-lg relative group animate-in slide-in-from-bottom-2 border-x border-b border-zinc-200 dark:border-zinc-800">
                                         <p className="text-base font-bold leading-relaxed mb-6 text-justify dark:text-zinc-100">"{p.text}"</p>
                                         <div className="flex justify-between items-center text-xs text-zinc-400 font-black uppercase tracking-widest border-t border-zinc-100 dark:border-zinc-800 pt-5">
                                             <span><i className="fa-regular fa-calendar mr-1"></i> {p.date}</span>
