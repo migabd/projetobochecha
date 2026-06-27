@@ -10,7 +10,17 @@ export default async function handler(req, res) {
 
     try {
         if (req.method === 'GET') {
-            const response = await fetch(`${url}/get/${dbKey}`, {
+            const chunkIndex = req.query.chunk;
+            if (chunkIndex !== undefined) {
+                const response = await fetch(`${url}/get/${dbKey}_chunk_${chunkIndex}`, {
+                    headers: { Authorization: `Bearer ${token}` }
+                });
+                const data = await response.json();
+                return res.status(200).json({ data: data.result || '' });
+            }
+            
+            // Get meta
+            const response = await fetch(`${url}/get/${dbKey}_meta`, {
                 headers: { Authorization: `Bearer ${token}` }
             });
             const data = await response.json();
@@ -18,40 +28,65 @@ export default async function handler(req, res) {
             if (data.result !== null && data.result !== undefined) {
                 return res.status(200).json(data.result);
             }
+            
+            // Fallback to legacy single key
+            const oldRes = await fetch(`${url}/get/${dbKey}`, {
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            const oldData = await oldRes.json();
+            if (oldData.result !== null && oldData.result !== undefined) {
+                return res.status(200).json({ legacy: true, data: oldData.result });
+            }
+            
             return res.status(200).json(null);
         } 
         
         if (req.method === 'POST') {
-            // Increase Vercel payload limit in config below just in case, though JSZip keeps it small.
+            const body = req.body;
+            
+            if (body.action === 'chunk') {
+                const response = await fetch(`${url}/set/${dbKey}_chunk_${body.index}`, {
+                    method: 'POST',
+                    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body.data)
+                });
+                const data = await response.json();
+                if (data.error) return res.status(500).json({ error: data.error });
+                return res.status(200).json({ success: true });
+            }
+            
+            if (body.action === 'commit') {
+                const response = await fetch(`${url}/set/${dbKey}_meta`, {
+                    method: 'POST',
+                    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ chunks: body.count })
+                });
+                const data = await response.json();
+                if (data.error) return res.status(500).json({ error: data.error });
+                return res.status(200).json({ success: true });
+            }
+            
+            // Fallback for non-chunked saves (if used)
             const response = await fetch(`${url}/set/${dbKey}`, {
                 method: 'POST',
-                headers: { 
-                    Authorization: `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                },
+                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
                 body: JSON.stringify(req.body)
             });
-            
             const data = await response.json();
-            if (data.error) {
-                console.error("Upstash Error:", data.error);
-                return res.status(500).json({ error: data.error });
-            }
-            return res.status(200).json({ success: true, response: data });
+            if (data.error) return res.status(500).json({ error: data.error });
+            return res.status(200).json({ success: true });
         }
         
         if (req.method === 'DELETE') {
-            // Upstash REST API /del/:key accepts GET
-            const response = await fetch(`${url}/del/${dbKey}`, {
+            const response = await fetch(`${url}/del/${dbKey}_meta`, {
                 method: 'GET',
                 headers: { Authorization: `Bearer ${token}` }
             });
-            
-            const data = await response.json();
-            if (data.error) {
-                return res.status(500).json({ error: data.error });
-            }
-            return res.status(200).json({ success: true, response: data });
+            await fetch(`${url}/del/${dbKey}`, {
+                method: 'GET',
+                headers: { Authorization: `Bearer ${token}` }
+            });
+            return res.status(200).json({ success: true });
         }
 
         return res.status(405).json({ error: 'Método não permitido.' });
@@ -64,7 +99,7 @@ export default async function handler(req, res) {
 export const config = {
   api: {
     bodyParser: {
-      sizeLimit: '4mb',
+      sizeLimit: '10mb',
     },
   },
 }
