@@ -19,12 +19,10 @@
     <!-- Fontes: link direto em vez de @import dentro de style (mais rápido e confiável) -->
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;800;900&display=swap">
 
-    <!-- Tailwind CDN com defer para não bloquear o parser HTML -->
-    <script src="https://cdn.tailwindcss.com" defer></script>
+    <!-- Tailwind CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
     <script>
-        // Configuração do Tailwind — precisa rodar antes do defer acima carregar,
-        // então colocamos via window.__tailwind_config__ e aplicamos no onload
-        window.__tailwindConfig = {
+        tailwind.config = {
             darkMode: 'class',
             theme: {
                 extend: {
@@ -59,9 +57,6 @@
                 }
             }
         };
-        document.addEventListener('DOMContentLoaded', function() {
-            if (window.tailwind) tailwind.config = window.__tailwindConfig;
-        });
     </script>
     <style id="custom-styles">
 
